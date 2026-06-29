@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef, useState } from 'react'
+import { memo, useEffect, useReducer, useRef, useState } from 'react'
 import {
   KNOWN_MODELS,
   type EffortLevel,
@@ -393,7 +393,20 @@ interface MessageViewProps {
   onCancel: () => void
 }
 
-function MessageView({
+// Memoized so a streaming token only re-renders the ONE growing message, not the whole
+// visible transcript (markdown + Shiki are expensive). Compare the data props only; the
+// handler closures change identity every render but are behaviorally stable (they act via
+// setters + the stable message ref), so ignoring them here is safe and is the whole point.
+const MessageView = memo(MessageViewImpl, (a, b) => {
+  return (
+    a.message === b.message &&
+    a.live === b.live &&
+    a.editing === b.editing &&
+    a.forkPoint === b.forkPoint
+  )
+})
+
+function MessageViewImpl({
   message,
   live,
   editing,

@@ -39,6 +39,7 @@ export interface TranscriptState {
   permissionMode: PermissionMode
   forkPoints: ForkPoints
   lastResult?: { costUsd?: number; durationMs?: number; isError: boolean }
+  liveTokens?: { output: number; input?: number } // running usage for the in-flight turn
   errors: AgentError[]
 }
 
@@ -113,7 +114,7 @@ export function reduce(state: TranscriptState, action: Action): TranscriptState 
       role: 'user',
       blocks: [{ kind: 'text', index: 0, text: action.newText }]
     }
-    return { ...state, messages: [...head, userMsg], status: 'working' }
+    return { ...state, messages: [...head, userMsg], status: 'working', liveTokens: { output: 0 } }
   }
   if (action.type === 'user') {
     const msg: Message = {
@@ -121,7 +122,7 @@ export function reduce(state: TranscriptState, action: Action): TranscriptState 
       role: 'user',
       blocks: [{ kind: 'text', index: 0, text: action.text }]
     }
-    return { ...state, messages: [...state.messages, msg] }
+    return { ...state, messages: [...state.messages, msg], liveTokens: { output: 0 } }
   }
   if (action.type === 'resolve-permission') {
     return { ...state, pending: state.pending.filter((p) => p.requestId !== action.requestId) }
@@ -144,6 +145,8 @@ function applyEvent(state: TranscriptState, e: AgentEvent): TranscriptState {
       }
     case 'status':
       return { ...state, status: e.status }
+    case 'tokens':
+      return { ...state, liveTokens: { output: e.output, input: e.input } }
     case 'permission_request':
       if (state.pending.some((p) => p.requestId === e.requestId)) return state
       return {

@@ -1239,6 +1239,10 @@ body {
   border-top-color: var(--accent);
   animation: spin 0.7s linear infinite;
 }
+.activity-meta {
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
 @keyframes spin {
   to {
     transform: rotate(360deg);

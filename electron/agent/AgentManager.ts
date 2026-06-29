@@ -114,8 +114,9 @@ class InputQueue implements AsyncIterable<SDKUserMessage> {
 interface StreamEvent {
   type: string
   index?: number
-  message?: { id?: string }
+  message?: { id?: string; usage?: { input_tokens?: number; output_tokens?: number } }
   delta?: { type?: string; text?: string; thinking?: string }
+  usage?: { input_tokens?: number; output_tokens?: number } // on message_delta (cumulative output)
 }
 interface ContentBlock {
   type: string
@@ -170,6 +171,11 @@ class Session {
   private appliedInstruction = ''
   private q!: Query
   private currentMessageId = ''
+  // Live token usage for the in-flight turn (reset each send). Output is summed across the turn's
+  // assistant messages (cumulative within a message via message_delta, rolled over on message_start).
+  private turnInputTokens = 0
+  private turnOutputTokens = 0
+  private curMsgOutTokens = 0
   private restarts = 0
   private closed = false
   // Set when the user presses Stop; lets the next `result` render as a clean
@@ -612,6 +618,11 @@ class Session {
 
   send(text: string): void {
     this.interrupted = false
+    // Fresh token count for this query (the live "N tokens" readout).
+    this.turnInputTokens = 0
+    this.turnOutputTokens = 0
+    this.curMsgOutTokens = 0
+    this.emitTokens()
     // If the standing instruction changed since the live query started, rebind first so the new
     // systemPrompt takes effect this turn. Resume preserves history; only this turn re-reads the
     // (now-changed) prefix uncached. No change → no rebind → the prefix stays cached.
@@ -822,10 +833,33 @@ class Session {
     }
   }
 
+  private emitTokens(): void {
+    this.emit({
+      instanceId: this.id,
+      kind: 'tokens',
+      output: this.turnOutputTokens + this.curMsgOutTokens,
+      input: this.turnInputTokens
+    })
+  }
+
   private handleStreamEvent(ev: StreamEvent): void {
     switch (ev.type) {
       case 'message_start':
         this.currentMessageId = ev.message?.id ?? this.currentMessageId
+        // Roll the previous message's output into the turn total, then start the new message.
+        this.turnOutputTokens += this.curMsgOutTokens
+        this.curMsgOutTokens = 0
+        if (typeof ev.message?.usage?.input_tokens === 'number') {
+          this.turnInputTokens += ev.message.usage.input_tokens
+        }
+        this.emitTokens()
+        break
+      case 'message_delta':
+        // Cumulative output tokens for the current message (includes thinking) — the live counter.
+        if (typeof ev.usage?.output_tokens === 'number') {
+          this.curMsgOutTokens = ev.usage.output_tokens
+          this.emitTokens()
+        }
         break
       case 'content_block_delta': {
         const index = ev.index ?? 0

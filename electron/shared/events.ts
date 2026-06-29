@@ -190,6 +190,7 @@ export type AgentEvent =
       isError: boolean
     }
   | { instanceId: string; kind: 'status'; status: AgentStatus }
+  | { instanceId: string; kind: 'tokens'; output: number; input?: number }
   | {
       instanceId: string
       kind: 'permission_request'

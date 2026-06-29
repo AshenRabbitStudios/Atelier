@@ -41,6 +41,9 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
   // Generation guard: ignore a transcript load that resolves after a newer one (e.g. a
   // mount-time load landing after Clear chat) so stale messages can't repopulate.
   const loadGenRef = useRef(0)
+  // Elapsed-time clock for the in-flight turn (ticks once a second while working).
+  const turnStartRef = useRef<number | null>(null)
+  const [, setNowTick] = useState(0)
 
   // Load the authoritative transcript (with on-disk uuids) + branch list.
   const loadCanonical = async () => {
@@ -145,6 +148,20 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
   }
 
   const busy = state.status === 'working'
+
+  // Run a 1s clock while working so the elapsed time updates; stop (and reset) when idle.
+  useEffect(() => {
+    if (!busy) {
+      turnStartRef.current = null
+      return
+    }
+    if (turnStartRef.current === null) turnStartRef.current = Date.now()
+    const t = setInterval(() => setNowTick((n) => n + 1), 1000)
+    return () => clearInterval(t)
+  }, [busy])
+  const elapsedSec = turnStartRef.current
+    ? Math.floor((Date.now() - turnStartRef.current) / 1000)
+    : 0
 
   const send = (raw: string) => {
     const text = raw.trim()
@@ -305,6 +322,12 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
           <div className="activity">
             <span className="spinner" />
             <span>{activityLabel(state.messages)}</span>
+            <span className="activity-meta">
+              {state.liveTokens && state.liveTokens.output > 0
+                ? `${fmtTokens(state.liveTokens.output)} tokens · `
+                : ''}
+              {fmtElapsed(elapsedSec)}
+            </span>
           </div>
         )}
         <div ref={bottomRef} />
@@ -651,6 +674,13 @@ function ThinkingBlock({ text, live }: { text: string; live: boolean }) {
       {open && <div className="thinking-body">{text}</div>}
     </div>
   )
+}
+
+function fmtTokens(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n)
+}
+function fmtElapsed(s: number): string {
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`
 }
 
 // A short description of what the agent is doing right now (for the working spinner row).

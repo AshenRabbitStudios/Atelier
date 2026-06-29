@@ -11,6 +11,10 @@ import {
 import { initialState, reduce, type Block, type Message } from '../transcriptModel'
 import { Markdown } from './Markdown'
 
+// Render only the last N messages by default; older ones load on demand. Keeps a huge
+// transcript from blocking the main thread (markdown + Shiki tokenize synchronously per block).
+const VISIBLE_DEFAULT = 60
+
 type DecideFn = (requestId: string, behavior: 'allow' | 'deny', allowAlways?: boolean) => void
 type AnswerFn = (requestId: string, answers: Record<string, string>, response?: string) => void
 
@@ -31,20 +35,26 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
   // Whether the user is at (or near) the tail. Updated on scroll; not state, so
   // it never triggers a re-render. Starts true so the first messages stick.
   const atBottomRef = useRef(true)
+  // Only render the last N messages so a huge transcript doesn't block the main thread
+  // (markdown + Shiki are synchronous per block). "Show earlier" raises this on demand.
+  const [visibleCount, setVisibleCount] = useState(VISIBLE_DEFAULT)
+  // Generation guard: ignore a transcript load that resolves after a newer one (e.g. a
+  // mount-time load landing after Clear chat) so stale messages can't repopulate.
+  const loadGenRef = useRef(0)
 
   // Load the authoritative transcript (with on-disk uuids) + branch list.
   const loadCanonical = async () => {
+    const gen = ++loadGenRef.current
     // Independent so a transcript failure can't also drop the branch update.
     try {
-      dispatch({ type: 'transcript', messages: await window.atelier.agent.transcript(instanceId) })
+      const messages = await window.atelier.agent.transcript(instanceId)
+      if (gen === loadGenRef.current) dispatch({ type: 'transcript', messages })
     } catch {
       /* transcript not available yet */
     }
     try {
-      dispatch({
-        type: 'fork-points',
-        forkPoints: await window.atelier.agent.forkPoints(instanceId)
-      })
+      const forkPoints = await window.atelier.agent.forkPoints(instanceId)
+      if (gen === loadGenRef.current) dispatch({ type: 'fork-points', forkPoints })
     } catch {
       /* fork points not available yet */
     }
@@ -258,11 +268,23 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
       </header>
 
       <div className="transcript" ref={transcriptRef} onScroll={onTranscriptScroll}>
-        {state.messages.map((m, i) => (
+        {state.messages.length > visibleCount && (
+          <button
+            className="load-earlier"
+            onClick={() => setVisibleCount((v) => v + 200)}
+            title="Older messages are hidden to keep the UI responsive"
+          >
+            Show earlier messages ({state.messages.length - visibleCount} hidden)
+          </button>
+        )}
+        {(state.messages.length > visibleCount
+          ? state.messages.slice(-visibleCount)
+          : state.messages
+        ).map((m, i, shown) => (
           <MessageView
             key={m.id}
             message={m}
-            live={busy && m.role === 'assistant' && i === state.messages.length - 1}
+            live={busy && m.role === 'assistant' && i === shown.length - 1}
             editing={editing?.id === m.id ? editing.draft : null}
             forkPoint={state.forkPoints[m.id]}
             onSwitch={switchBranch}

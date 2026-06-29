@@ -17,7 +17,7 @@
 - 2026-06-27 Auth: inherit Claude Code session; main process must never set `ANTHROPIC_API_KEY` and must warn if one is present, to avoid pay-as-you-go API billing. (user requirement)
 - 2026-06-27 Loading project CLAUDE.md needs BOTH `settingSources: ['project']` AND `systemPrompt: { type:'preset', preset:'claude_code' }` — refinement of CLAUDE.md, per current SDK docs.
 - 2026-06-27 Token streaming via `includePartialMessages: true` + `partial_assistant` deltas, not by diffing full assistant messages.
-- 2026-06-27 "Also rewind files" (P1) is implemented via `Query.rewindFiles()`, gated behind explicit UI; default conversation-only fork.
+- 2026-06-28 "Also rewind files" / file checkpointing **descoped — will not build** (supersedes the 2026-06-27 plan to implement it via `Query.rewindFiles()`). Reverting the working tree on a fork can silently undo changes the user intended to keep; the user manages file history with git versioning instead. Forks are conversation-only and never modify files. (user decision)
 - 2026-06-27 Build tooling: `electron-vite` (purpose-built Vite wrapper for Electron) over hand-rolled multi-config Vite — handles main/preload/renderer bundling + HMR. Custom config keeps CLAUDE.md's `/electron` + `/src` layout.
 - 2026-06-27 Pinned versions to resolve a peer conflict: `vite@7.3.6` + `@vitejs/plugin-react@5.0.4` (plugin-react@6 requires vite@8, which electron-vite@5 doesn't allow yet).
 - 2026-06-27 Dockview React bindings come from the separate `dockview-react` package in v7 (`dockview` itself is now just the vanilla core re-export).

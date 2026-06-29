@@ -4,6 +4,10 @@ Operating manual for building Atelier. You (Claude Code) are building this app
 autonomously, in the phases defined in ROADMAP.md. This file governs *how* you work.
 SPEC.md governs *what* you build. Read both before starting.
 
+**docs/ENGINEERING.md** is the normative engineering standard — code hygiene, repo/commit
+conventions, exception handling, documentation, testing, CI, and review. Follow it; its
+"definition of done" and architecture invariants are binding on every change.
+
 ## Before you write any session/agent code (do this first, every fresh start)
 
 The Claude Agent SDK's TypeScript surface is in active flux (a V2 preview exists; some

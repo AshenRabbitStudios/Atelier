@@ -22,12 +22,10 @@
   regen) and `fork` (resume at parentUuid + `forkSession`, regenerate) + `switchBranch`; inline
   ‹n/m› branch switcher. Transcript reconciled to canonical (real uuids) after each turn.
   *Needs human spot-check:* the fork flow (automated probe was inconclusive on trivial prompts).
-- [ ] **"Also rewind files."** NOT implemented. DECISIONS.md picked `Query.rewindFiles()` gated
-  behind an explicit UI control (default = conversation-only fork, files untouched), but no
-  `rewindFiles`/checkpoint code exists in `electron/` yet. **This is the remaining P1 work:**
-  verify the SDK checkpoint/rewind surface (update docs/SDK_NOTES.md first per CLAUDE.md), enable
-  checkpointing in `buildOptions`, add the main→IPC→renderer path + the opt-in control on fork,
-  and verify on a throwaway file.
+- [x] **"Also rewind files" — DESCOPED (will not build).** Reverting the working tree on a fork
+  is a foot-gun that can silently undo intended work; file history is handled by git versioning
+  instead. Forks are conversation-only and never touch files. (DECISIONS.md / ROADMAP.md updated.)
+  **With this descope, P1 is functionally complete** — only the two human spot-checks above remain.
 
 ## P2 — Docking polish + persistence (early partial progress)
 - [x] **Layout persistence.** Per-conversation Dockview layout is serialized (`api.toJSON`,
@@ -105,6 +103,17 @@
 - xterm.js stream pane: built-in panel kind vs. first example plugin — leaning example plugin (P4).
 - Plugin tool scoping: global vs per-instance — default global (P4).
 - Sandbox tech: Electron `<webview>` vs sandboxed iframe — pick early in P3.
+
+## Engineering hardening (tracked — see docs/ENGINEERING.md)
+The repo now has an engineering-standards doc (docs/ENGINEERING.md). Three practices it
+prescribes are **not yet mechanically wired** and are the top hardening backlog item, to land
+as a dedicated chore before the codebase grows further:
+- **No test suite.** No runner, no `*.test.ts`. Plan: Vitest + a seed suite over the highest-risk
+  pure logic first — `sessionStore.ts`/`transcriptModel.ts` (uuid/parent threading, tool-result
+  pairing, edit-in-place, fork-point grouping), `conversationStore.ts`, and Zod boundary schemas.
+- **No ESLint/Prettier config** despite `eslint-disable` comments in source. Plan: typescript-eslint
+  + react-hooks rules + Prettier, `npm run lint`.
+- **No CI.** Plan: a workflow running install → typecheck → lint → test → build on push/PR.
 
 ## Tech debt / deferrals noted during P0
 - Shiki is bundled full (every grammar lazy-loads → many chunks + a >1MB warning). Consider a

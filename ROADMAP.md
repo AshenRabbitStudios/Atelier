@@ -28,16 +28,19 @@ rendering: text (markdown + Shiki code), thinking (collapsible), tool_use/tool_r
 ## P1 — Multiple instances + editable history
 
 `AgentManager` supports N instances, each with its own `cwd` and session. An instance
-switcher / multiple chat panels. Editable user messages via session fork; optional
-"also rewind files" behind an explicit control.
+switcher / multiple chat panels. Editable user messages via session fork.
+
+> **Descoped (2026-06-28):** "also rewind files" / file checkpointing is intentionally
+> NOT built. Reverting the working tree on a fork is a foot-gun that can silently undo
+> work the user meant to keep; file history is handled by git versioning instead. The
+> fork is conversation-only and never touches files. (DECISIONS.md.)
 
 **Acceptance**
 - Create two instances pointing at two different folders; both run concurrently and
   independently; each loads its own project `CLAUDE.md` (`settingSources: ['project']`).
 - Editing a past user message forks the session there and streams a new continuation; the
   transcript truncates correctly after the edited message.
-- "Also rewind files" reverts the working tree to that point when checkpointing is on
-  (verify on a throwaway file). Default (off) leaves files untouched.
+- Forking is conversation-only; the working tree is never modified by Atelier.
 
 ## P2 — Docking polish + persistence
 

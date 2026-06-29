@@ -27,7 +27,11 @@ body,
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-family:
+    'Segoe UI',
+    system-ui,
+    -apple-system,
+    sans-serif;
   font-size: 14px;
 }
 
@@ -635,7 +639,7 @@ body {
   background: var(--bg-input);
   padding: 1px 5px;
   border-radius: 3px;
-  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
   font-size: 0.92em;
 }
 
@@ -645,7 +649,7 @@ body {
   border-radius: 6px;
   overflow-x: auto;
   border: 1px solid var(--border);
-  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
   font-size: 0.9em;
   line-height: 1.45;
 }
@@ -796,7 +800,9 @@ body {
   height: 12px;
   background: #cfcfcf;
   border-radius: 50%;
-  transition: transform 0.15s ease, background 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    background 0.15s ease;
 }
 .switch.on .switch-track {
   background: var(--err);

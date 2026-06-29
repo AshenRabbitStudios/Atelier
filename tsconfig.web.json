@@ -22,5 +22,6 @@
       "@shared/*": ["./electron/shared/*"]
     }
   },
-  "include": ["src", "electron/shared"]
+  "include": ["src", "electron/shared"],
+  "exclude": ["**/*.test.ts", "**/*.test.tsx"]
 }

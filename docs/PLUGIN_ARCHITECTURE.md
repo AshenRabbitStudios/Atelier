@@ -14,14 +14,14 @@ channels for push/poll tails (§3 `data`), and a strict restore contract (§8). 
 
 **Three gaps** the vision needs that the contract does not yet model:
 
-1. **Per-conversation enablement.** The registry is app-wide, but *which plugins are enabled
-   (and thus mounted/displayed)* must be conversation-specific. The contract has per-conversation
+1. **Per-conversation enablement.** The registry is app-wide, but _which plugins are enabled
+   (and thus mounted/displayed)_ must be conversation-specific. The contract has per-conversation
    storage + layout but no explicit enable/disable set.
 2. **Context pinning.** Nothing today injects a plugin's live state into the agent's context.
    This is the architecturally novel requirement ("data optionally pinnable so Claude is always
    up to date on changes I make inside a plugin").
 3. **Universal agent→plugin control.** `tools` + `data` let the agent gain capabilities and
-   observe; there is no first-class, generic lever for the agent to *drive any* plugin without
+   observe; there is no first-class, generic lever for the agent to _drive any_ plugin without
    each plugin pre-declaring bespoke tools.
 
 ## Component map
@@ -40,7 +40,7 @@ renderer (sandboxed)
 ```
 
 The **rail is app chrome, not a Dockview pane** — that is what makes it perma-docked left and
-always present. The plugin *panes* it spawns are normal dockable/floatable Dockview panels.
+always present. The plugin _panes_ it spawns are normal dockable/floatable Dockview panels.
 
 ## 1. Registry vs. enablement (gap 1)
 
@@ -59,7 +59,7 @@ always present. The plugin *panes* it spawns are normal dockable/floatable Dockv
 
 ## 2. Context pinning (gap 2 — the core new primitive)
 
-Goal: a slice of a plugin's state can be *pinned* to a conversation, and the agent sees the
+Goal: a slice of a plugin's state can be _pinned_ to a conversation, and the agent sees the
 **latest** value on every turn, so user edits inside a plugin stay reflected without re-pasting.
 
 - **Plugins declare exports.** Declarative in the manifest plus a runtime push:
@@ -77,10 +77,10 @@ Goal: a slice of a plugin's state can be *pinned* to a conversation, and the age
   A living-doc plugin calls `context.update('todo', md)` whenever the user edits — that is the
   "always up to date" mechanism.
 - **Host holds the snapshot.** `ContextManager` keeps the latest value per `(conversation,
-  pluginId, key)`. Pinning is just adding `key` to the conversation's `pinnedExports`.
+pluginId, key)`. Pinning is just adding `key` to the conversation's `pinnedExports`.
 - **Injection at send time.** On each agent turn, `AgentManager` reads the live snapshots for the
   active conversation's pins and injects them as a **host-managed, clearly-framed context block**
-  (e.g. `<atelier-pinned-context>` … `</atelier-pinned-context>`), refreshed every turn — *not*
+  (e.g. `<atelier-pinned-context>` … `</atelier-pinned-context>`), refreshed every turn — _not_
   stored as user transcript content, so it never pollutes editable history. (Exact SDK injection
   mechanism — appended context frame vs. session system-prompt update — to be confirmed against
   the live SDK reference and recorded in docs/SDK_NOTES.md before building, per CLAUDE.md.)
@@ -92,13 +92,13 @@ display, and (if pinned) mirrors a digest into context via `context.update`.
 
 ## 3. Universal agent control (gap 3)
 
-Keep capability-bounded/content-unbounded: fix the *boundary*, leave plugin internals open.
+Keep capability-bounded/content-unbounded: fix the _boundary_, leave plugin internals open.
 
 - **Built-in host tool** (always available to the agent, not per-plugin):
   `plugin_control(pluginId, command, payload)`. The host validates the target is enabled, then
   delivers `{command, payload}` to that plugin over a reserved `control:<pluginId>` channel the
   plugin subscribes to. The plugin interprets commands however it wants — the host does not
-  constrain the vocabulary. This gives Claude a generic lever over *every* plugin with zero
+  constrain the vocabulary. This gives Claude a generic lever over _every_ plugin with zero
   per-plugin tool boilerplate, while plugins that want richer typed tools still declare them
   via `manifest.tools` (§5).
 - **Discovery for the agent:** the host can surface the enabled plugins + their declared
@@ -111,7 +111,7 @@ mounting, and host RPC. Recommended sequence:
 
 1. **P3 (plugin host + rail):** PluginRegistry + watcher + Zod manifest validation; per-conversation
    enablement model in the manifest; sandbox mount + host API subset (`layout`, `storage`,
-   lifecycle); the perma-docked left rail. Ship `hello-panel`. — *This is the prerequisite.*
+   lifecycle); the perma-docked left rail. Ship `hello-panel`. — _This is the prerequisite._
 2. **P4 (channels + control + pinning):** DataBus + `data` API; the `plugin_control` tool +
    `control:` channel; `ContextManager` + `context.update` + send-time injection + pin toggles;
    ambient Bash tap. Ship `bash-stream` and a `living-doc` example (edit-in-pane → pinned context).
@@ -124,7 +124,7 @@ persistence/restore is correct from day one (PLUGIN_API §8), even though inject
 - Registry: derived from `/plugins/*/manifest.json` (app-wide, not persisted separately).
 - Per conversation: `plugins{enabled, pinnedExports}` + Dockview layout (dock positions) in the
   conversation manifest; plugin content in `conversations/<id>/plugins/<pluginId>/storage.json`.
-- Pinned context: snapshots are runtime (re-pushed by the plugin on `load`); the *set of pins*
+- Pinned context: snapshots are runtime (re-pushed by the plugin on `load`); the _set of pins_
   is persisted in the manifest. A plugin rebuilds its export in `load` from `storage`.
 
 ## Dos & Don'ts (invariants — violating these breaks the intent)
@@ -133,9 +133,10 @@ These are the load-bearing rules. A change that breaks one requires a recorded d
 quiet diff. Reviewers enforce them.
 
 **DO**
+
 - **Treat every mount as a potential restore.** A plugin's `load` MUST fully rebuild its pane
   from `storage` alone. (This is what makes close/quit/reopen-days-later work.)
-- **Keep the rail as app chrome** (perma-docked left, always present); spawn plugin *content* as
+- **Keep the rail as app chrome** (perma-docked left, always present); spawn plugin _content_ as
   normal Dockview panes that dock/float/tab like anything else.
 - **Define the manifest fields now** — `plugins{enabled,pinnedExports}` on the conversation,
   `contextExports` on the plugin — so persistence is correct from day one, even though pinning
@@ -150,6 +151,7 @@ quiet diff. Reviewers enforce them.
   the token cost of its pinned exports.
 
 **DON'T**
+
 - **Don't give plugins direct fs / SDK / process / raw IPC access.** Everything goes through the
   host RPC. This single line is what keeps a malformed or agent-authored plugin contained.
 - **Don't hot-reload backend modules in-process.** Backends are child processes/workers, killed
@@ -160,13 +162,13 @@ quiet diff. Reviewers enforce them.
   refreshed each turn — putting it in user/assistant content breaks editable history AND freshness.
 - **Don't let pinned context be unbounded.** Always enforce per-export `maxTokens`, mark truncation,
   and show the cost. Silent context bloat is a regression.
-- **Don't conflate registry scope with enablement scope.** The registry is **app-wide**; *enabled*
+- **Don't conflate registry scope with enablement scope.** The registry is **app-wide**; _enabled_
   (and thus mounted/displayed) is **per-conversation**. Making either global-or-local the wrong way
   breaks the whole model.
 - **Don't hardcode plugins or layout.** A plugin is a folder; enablement/layout/pins are JSON. This
   is precisely what enables the self-hosting loop and hot-reload — don't trade it for convenience.
-- **Don't constrain the control channel's vocabulary.** `plugin_control` fixes the *boundary*, not
-  the *content*; the plugin interprets commands freely. Locking the vocabulary kills "control
+- **Don't constrain the control channel's vocabulary.** `plugin_control` fixes the _boundary_, not
+  the _content_; the plugin interprets commands freely. Locking the vocabulary kills "control
   universally without limiting what's written inside."
 - **Don't let a bad plugin throw into the host.** Validate at the edge, isolate the failure, and
   surface it in the rail — never let it crash the app or another plugin.

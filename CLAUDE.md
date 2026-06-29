@@ -1,8 +1,8 @@
 # CLAUDE.md — Atelier
 
 Operating manual for building Atelier. You (Claude Code) are building this app
-autonomously, in the phases defined in ROADMAP.md. This file governs *how* you work.
-SPEC.md governs *what* you build. Read both before starting.
+autonomously, in the phases defined in ROADMAP.md. This file governs _how_ you work.
+SPEC.md governs _what_ you build. Read both before starting.
 
 **docs/ENGINEERING.md** is the normative engineering standard — code hygiene, repo/commit
 conventions, exception handling, documentation, testing, CI, and review. Follow it; its
@@ -46,7 +46,7 @@ If a confirmed API contradicts SPEC.md, follow the API and note the deviation in
    rendered is xterm.js stream panes.
 2. **Renderer is sandboxed.** `contextIsolation: true`, `nodeIntegration: false`. All
    privileged work (SDK, fs, process spawn) lives in main, behind a preload `contextBridge`.
-3. **Plugins are capability-bounded.** A plugin reaches the app *only* through the host API
+3. **Plugins are capability-bounded.** A plugin reaches the app _only_ through the host API
    (PLUGIN_API.md). No direct fs, no direct SDK, no direct IPC. A crashing or malformed
    plugin must never take down the app.
 4. **Every boundary payload is Zod-validated** at the receiving side.

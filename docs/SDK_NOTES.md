@@ -24,13 +24,17 @@ docs.claude.com / platform.claude.com) on 2026-06-27.
 ## query() — the core (V1 API; this is what we build on)
 
 ```ts
-function query({ prompt, options }: {
-  prompt: string | AsyncIterable<SDKUserMessage>;
-  options?: Options;
-}): Query;   // Query extends AsyncGenerator<SDKMessage, void>
+function query({
+  prompt,
+  options
+}: {
+  prompt: string | AsyncIterable<SDKUserMessage>
+  options?: Options
+}): Query // Query extends AsyncGenerator<SDKMessage, void>
 ```
 
 `Query` methods we use:
+
 - `interrupt(): Promise<void>` — P0 interrupt control.
 - `rewindFiles(userMessageId, { dryRun? }): Promise<RewindFilesResult>` — P1 "also rewind
   files" (file checkpointing lives behind this; default OFF).
@@ -43,7 +47,7 @@ Stream by iterating the returned object: `for await (const msg of q) { ... }`.
 - `assistant`: `{ type:'assistant'; session_id; message: BetaMessage; parent_tool_use_id }`
   — `message.content` is the block array (text / thinking / tool_use); `message.usage`.
 - `result`: `{ type:'result'; subtype:'success'|'error'|'interrupted'; session_id;
-  duration_ms; total_cost_usd; is_error; ... }` — terminal per turn; carries cost/usage.
+duration_ms; total_cost_usd; is_error; ... }` — terminal per turn; carries cost/usage.
 - `partial_assistant` (with `includePartialMessages: true`):
   `{ type:'partial_assistant'; session_id; partial_content: ContentBlockDelta[] }` —
   arrives BEFORE the full `assistant` message; this is our **token-by-token streaming**.
@@ -57,11 +61,14 @@ Mapping to SPEC §3.1 `AgentEvent`: partial_assistant text deltas → `kind:'tex
 ## Editable history (P1) — fork + resume-at
 
 ```ts
-query({ prompt, options: {
-  resume: sessionId,
-  resumeSessionAt: messageUuid,   // backtrack to a specific message
-  forkSession: true,              // branch to a NEW session id (don't mutate original)
-} })
+query({
+  prompt,
+  options: {
+    resume: sessionId,
+    resumeSessionAt: messageUuid, // backtrack to a specific message
+    forkSession: true // branch to a NEW session id (don't mutate original)
+  }
+})
 ```
 
 This is exactly SPEC §3.3: fork at edited message M, stream the new continuation.
@@ -128,7 +135,7 @@ Deviation logged in DECISIONS.md. To NOT inherit ambient user/local settings, pa
 
 ## AskUserQuestion — answered via `canUseTool` (probe-verified 2026-06-28)
 
-The built-in `AskUserQuestion` tool (the agent asking the *user* a multiple-choice
+The built-in `AskUserQuestion` tool (the agent asking the _user_ a multiple-choice
 question) is part of the `claude_code` preset toolset, so the model calls it on its own.
 **How a custom SDK host answers it:** it arrives at `canUseTool` like any tool; allow it
 with the user's choices injected as an `answers` map on `updatedInput`:
@@ -158,6 +165,7 @@ provides `canUseTool`. `toolConfig.askUserQuestion.previewFormat: 'html'` exists
 rendering option `preview` fields as HTML if we later want rich previews.
 
 ## Still to confirm before the phase that needs them
+
 - [ ] Hook event identifier casing in `Options.hooks` (P4 Bash tap).
 - [ ] What enables file checkpointing so `rewindFiles` has snapshots to revert to (P1).
 - [ ] `mcpServers` config discriminant for in-process tools (`type:'sdk'`) (P4).

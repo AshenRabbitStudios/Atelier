@@ -23,7 +23,9 @@ export function App() {
   const [all, setAll] = useState<ConversationSummary[]>([]) // every conversation (dropdown)
   const [activeId, setActiveId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [importing, setImporting] = useState<{ cwd: string; sessions: SessionSummary[] } | null>(null)
+  const [importing, setImporting] = useState<{ cwd: string; sessions: SessionSummary[] } | null>(
+    null
+  )
   const [usage, setUsage] = useState<UsageInfo | null>(null)
   const layout = useRef<LayoutService | null>(null)
   const activeIdRef = useRef<string | null>(null)
@@ -117,7 +119,6 @@ export function App() {
     if (!activeId) return
     void applyLayout(activeId)
     void window.atelier.agent.setActive(activeId)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId])
 
   const onReady = (event: DockviewReadyEvent) => {
@@ -164,7 +165,9 @@ export function App() {
   }
 
   const clearChat = async (id: string) => {
-    if (!window.confirm('Clear the chat context for this conversation? This starts a fresh session.'))
+    if (
+      !window.confirm('Clear the chat context for this conversation? This starts a fresh session.')
+    )
       return
     await window.atelier.agent.clearChat(id)
     layout.current?.setClaudeInstance(id) // remount the pane → shows the empty transcript
@@ -196,7 +199,9 @@ export function App() {
 
   const deleteConversation = async (id: string) => {
     if (
-      !window.confirm('Delete this conversation and its session data permanently? This cannot be undone.')
+      !window.confirm(
+        'Delete this conversation and its session data permanently? This cannot be undone.'
+      )
     )
       return
     await window.atelier.agent.delete(id)
@@ -269,7 +274,9 @@ function ImportModal({
               className="modal-item"
               onClick={() => onPick(s.sessionId, s.summary || s.firstPrompt || 'Imported')}
             >
-              <span className="modal-item-title">{s.summary || s.firstPrompt || s.sessionId.slice(0, 8)}</span>
+              <span className="modal-item-title">
+                {s.summary || s.firstPrompt || s.sessionId.slice(0, 8)}
+              </span>
               <span className="modal-item-date">{new Date(s.lastModified).toLocaleString()}</span>
             </button>
           ))}
@@ -306,7 +313,9 @@ function UsageMini({ windows }: { windows: UsageWindow[] }) {
               <span className={`usage-bar-fill ${tone}`} style={{ width: `${pct}%` }} />
             </span>
             <span className="usage-mini-pct">{pct.toFixed(0)}%</span>
-            {w.resetsAt && <span className="usage-mini-reset">resets {resetShort(w.resetsAt)}</span>}
+            {w.resetsAt && (
+              <span className="usage-mini-reset">resets {resetShort(w.resetsAt)}</span>
+            )}
           </div>
         )
       })}
@@ -377,7 +386,11 @@ function ConversationBar({
   return (
     <div className="conversation-bar">
       <div className="conv-dropdown">
-        <button className="conv-menu-btn" onClick={() => setMenu((m) => !m)} title="All conversations">
+        <button
+          className="conv-menu-btn"
+          onClick={() => setMenu((m) => !m)}
+          title="All conversations"
+        >
           ☰ Conversations
         </button>
         {menu && (
@@ -440,7 +453,11 @@ function ConversationBar({
               >
                 {c.title}
               </button>
-              <button className="conv-close" title="Close conversation" onClick={() => onClose(c.id)}>
+              <button
+                className="conv-close"
+                title="Close conversation"
+                onClick={() => onClose(c.id)}
+              >
                 ×
               </button>
             </span>
@@ -449,7 +466,11 @@ function ConversationBar({
         <button className="conv-new" onClick={onNew} title="New conversation in another folder">
           ＋
         </button>
-        <button className="conv-prev" onClick={onImport} title="Resume an existing Claude session from a folder">
+        <button
+          className="conv-prev"
+          onClick={onImport}
+          title="Resume an existing Claude session from a folder"
+        >
           ⤓
         </button>
       </div>
@@ -466,10 +487,18 @@ function ConversationBar({
           >
             📂
           </button>
-          <button className="icon-btn" title="Clear chat context (fresh session)" onClick={() => onClearChat(active.id)}>
+          <button
+            className="icon-btn"
+            title="Clear chat context (fresh session)"
+            onClick={() => onClearChat(active.id)}
+          >
             Clear chat
           </button>
-          <button className="icon-btn" title="Clear plugin data/state" onClick={() => onClearPlugins(active.id)}>
+          <button
+            className="icon-btn"
+            title="Clear plugin data/state"
+            onClick={() => onClearPlugins(active.id)}
+          >
             Clear plugins
           </button>
         </div>

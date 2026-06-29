@@ -125,7 +125,12 @@ export function readTranscript(sessionId: string): TranscriptMessage[] {
           blocks.push({ kind: 'thinking', text: b.thinking })
         else if (b.type === 'tool_use') {
           toolUseLocation.set(b.id ?? '', { msg: messages.length, block: blocks.length })
-          blocks.push({ kind: 'tool_use', toolUseId: b.id ?? '', name: b.name ?? 'tool', input: b.input })
+          blocks.push({
+            kind: 'tool_use',
+            toolUseId: b.id ?? '',
+            name: b.name ?? 'tool',
+            input: b.input
+          })
         }
       }
       if (blocks.length) messages.push({ uuid, role: 'assistant', blocks })

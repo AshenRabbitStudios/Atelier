@@ -2,7 +2,7 @@
 
 The extensibility surface. Design goal: **capability-bounded, content-unbounded.** A
 plugin's pane can render anything (Canvas, WebGL/three.js, forms, docs, charts, an
-xterm.js stream). It reaches the rest of the app *only* through the host API below. That
+xterm.js stream). It reaches the rest of the app _only_ through the host API below. That
 boundary is what keeps plugins hot-reloadable, crash-isolated, and safe to let the agent
 author.
 
@@ -20,19 +20,20 @@ author.
 
 ```jsonc
 {
-  "id": "metrics-stream",            // unique, == folder name, [a-z0-9-]
-  "name": "Metrics Stream",          // display name in the sidebar
+  "id": "metrics-stream", // unique, == folder name, [a-z0-9-]
+  "name": "Metrics Stream", // display name in the sidebar
   "version": "0.1.0",
-  "kind": "panel",                   // "panel" | "tool" | "both"
-  "entry": "index.html",             // required if kind includes "panel"
-  "backend": "plugin.js",            // optional; required if it registers privileged tools
-  "permissions": ["data:subscribe", "storage"],   // see §4; least-privilege, declared up front
-  "defaultDock": "right",            // "left"|"right"|"bottom"|"center"|"float"
-  "tools": [                          // optional; agent tools this plugin contributes
+  "kind": "panel", // "panel" | "tool" | "both"
+  "entry": "index.html", // required if kind includes "panel"
+  "backend": "plugin.js", // optional; required if it registers privileged tools
+  "permissions": ["data:subscribe", "storage"], // see §4; least-privilege, declared up front
+  "defaultDock": "right", // "left"|"right"|"bottom"|"center"|"float"
+  "tools": [
+    // optional; agent tools this plugin contributes
     {
       "name": "show_metrics",
       "description": "Render the latest metrics for a run on the Metrics Stream pane.",
-      "inputSchema": { "run": "string" }   // serialized; host compiles to Zod
+      "inputSchema": { "run": "string" } // serialized; host compiles to Zod
     }
   ]
 }
@@ -61,48 +62,48 @@ rejected.
 ```ts
 interface AtelierHost {
   // identity
-  readonly pluginId: string;
+  readonly pluginId: string
 
   // layout — request docking changes for THIS plugin's pane
   layout: {
-    dock(position: 'left'|'right'|'bottom'|'center'|'float'): Promise<void>;
-    float(): Promise<void>;
-    setTitle(title: string): Promise<void>;
-    onResize(cb: (size: { w: number; h: number }) => void): () => void;
-  };
+    dock(position: 'left' | 'right' | 'bottom' | 'center' | 'float'): Promise<void>
+    float(): Promise<void>
+    setTitle(title: string): Promise<void>
+    onResize(cb: (size: { w: number; h: number }) => void): () => void
+  }
 
   // data channels — the legibility plumbing (SPEC §6)
   data: {
-    subscribe(channel: string, cb: (payload: unknown) => void): () => void;
-    publish(channel: string, payload: unknown): Promise<void>;   // needs "data:publish"
-    history(channel: string, limit?: number): Promise<unknown[]>;
-  };
+    subscribe(channel: string, cb: (payload: unknown) => void): () => void
+    publish(channel: string, payload: unknown): Promise<void> // needs "data:publish"
+    history(channel: string, limit?: number): Promise<unknown[]>
+  }
 
   // agent — observe and drive agent instances (needs "agent:read" / "agent:send")
   agent: {
-    list(): Promise<{ id: string; title: string; cwd: string; status: string }[]>;
-    onEvent(instanceId: string, cb: (e: unknown) => void): () => void;  // AgentEvent stream
-    send(instanceId: string, text: string): Promise<void>;
-  };
+    list(): Promise<{ id: string; title: string; cwd: string; status: string }[]>
+    onEvent(instanceId: string, cb: (e: unknown) => void): () => void // AgentEvent stream
+    send(instanceId: string, text: string): Promise<void>
+  }
 
   // tools — register an agent-callable tool implemented by this plugin
   // (declared in manifest.tools; handler lives in the backend module)
   tools: {
-    onInvoke(name: string, handler: (input: unknown) => Promise<{ output: unknown }>): void;
-  };
+    onInvoke(name: string, handler: (input: unknown) => Promise<{ output: unknown }>): void
+  }
 
   // storage — per-plugin key/value, persisted and scoped to the active CONVERSATION
   // (needs "storage"). This is the ONLY channel through which plugin state survives a
   // reload or conversation-switch — see §8. Writes are durable; the host re-hydrates
   // them when the conversation is restored.
   storage: {
-    get(key: string): Promise<unknown>;
-    set(key: string, value: unknown): Promise<void>;
-    keys(): Promise<string[]>;
-  };
+    get(key: string): Promise<unknown>
+    set(key: string, value: unknown): Promise<void>
+    keys(): Promise<string[]>
+  }
 
   // lifecycle hooks the plugin can implement
-  on(event: 'load' | 'unload' | 'reload', cb: () => void): void;
+  on(event: 'load' | 'unload' | 'reload', cb: () => void): void
 }
 ```
 
@@ -128,7 +129,7 @@ When a plugin with `kind` `tool`/`both` loads, the host registers each `manifest
 entry as an in-process MCP tool on the SDK side (`tool(name, desc, zodSchema, handler)`),
 available to all agent instances (or scoped — see open question). Invocation flows:
 agent calls the tool → SDK → host → plugin backend's `onInvoke` handler → result back to
-the agent. This is how a plugin gives the agent *new capabilities*, not just a new view.
+the agent. This is how a plugin gives the agent _new capabilities_, not just a new view.
 Unloading the plugin unregisters the tools.
 
 ## 6. The self-hosting loop (why the folder format matters)
@@ -139,6 +140,7 @@ entry. The `/plugins` watcher surfaces it in the sidebar; the user loads it; no 
 This is the bridge from "I iterate via Claude Code CLI" to "I iterate from inside Atelier."
 
 Provide two worked examples under `/plugins/examples/` so the agent has a pattern to copy:
+
 1. **`hello-panel`** — a minimal `kind: "panel"` plugin (renders a styled pane, calls
    `layout.dock`, persists a value via `storage`).
 2. **`bash-stream`** — a `kind: "panel"` plugin that `data.subscribe`s to a
@@ -152,7 +154,7 @@ days later; each loaded plugin must come back at its exact dock position with it
 
 The contract:
 
-- **State lives in `storage`.** A plugin's *only* guaranteed-restorable state is what it writes
+- **State lives in `storage`.** A plugin's _only_ guaranteed-restorable state is what it writes
   via the host `storage` API. That store is scoped to **(conversation, plugin)** and persisted to
   `<userData>/atelier/conversations/<id>/plugins/<pluginId>/storage.json`. A plugin that wants to
   survive reload/switch must write its restorable state there (and may do so on its `unload`
@@ -167,7 +169,7 @@ The contract:
   ephemeral (e.g. a tailed bash stream). A plugin must tolerate an empty channel on restore and
   rebuild from its own `storage` where it needs durable state.
 - **Layout is the host's job.** The plugin does not persist its own dock position; the host
-  records it in the conversation's layout and restores it. The plugin only persists *content/state*.
+  records it in the conversation's layout and restores it. The plugin only persists _content/state_.
 
 Design implication: write plugins so that `load` can fully reconstruct the pane from `storage`
 alone. Treat every mount as a potential restore.

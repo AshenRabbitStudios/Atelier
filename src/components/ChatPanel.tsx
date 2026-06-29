@@ -12,11 +12,7 @@ import { initialState, reduce, type Block, type Message } from '../transcriptMod
 import { Markdown } from './Markdown'
 
 type DecideFn = (requestId: string, behavior: 'allow' | 'deny', allowAlways?: boolean) => void
-type AnswerFn = (
-  requestId: string,
-  answers: Record<string, string>,
-  response?: string
-) => void
+type AnswerFn = (requestId: string, answers: Record<string, string>, response?: string) => void
 
 /** The editable text of a message = its text blocks joined. */
 function messageText(m: Message): string {
@@ -45,7 +41,10 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
       /* transcript not available yet */
     }
     try {
-      dispatch({ type: 'fork-points', forkPoints: await window.atelier.agent.forkPoints(instanceId) })
+      dispatch({
+        type: 'fork-points',
+        forkPoints: await window.atelier.agent.forkPoints(instanceId)
+      })
     } catch {
       /* fork points not available yet */
     }
@@ -170,7 +169,12 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
     if (!editing) return
     atBottomRef.current = true
     // Clear the stale tail immediately, then the new branch streams in.
-    dispatch({ type: 'fork-local', uuid: editing.id, tempId: crypto.randomUUID(), newText: editing.draft })
+    dispatch({
+      type: 'fork-local',
+      uuid: editing.id,
+      tempId: crypto.randomUUID(),
+      newText: editing.draft
+    })
     void window.atelier.agent.fork(instanceId, editing.id, editing.draft) // streams; result reloads
     setEditing(null)
   }
@@ -401,7 +405,11 @@ function MessageView({
               Save
             </button>
             {message.role === 'user' && (
-              <button className="btn btn-allow-always" onClick={onFork} title="Branch a new version from here">
+              <button
+                className="btn btn-allow-always"
+                onClick={onFork}
+                title="Branch a new version from here"
+              >
                 Fork
               </button>
             )}
@@ -564,7 +572,6 @@ function QuestionCard({ req, onAnswer }: { req: QuestionRequest; onAnswer: Answe
     </div>
   )
 }
-
 
 // 'oauth' = subscription login, 'none' = no API key (ambient session). Both are safe.
 function isSubscription(source: string): boolean {

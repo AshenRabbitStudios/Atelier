@@ -73,7 +73,13 @@ function toBlocks(blocks: TranscriptBlock[]): Block[] {
   return blocks.map((b, i) => {
     if (b.kind === 'text') return { kind: 'text', index: i, text: b.text }
     if (b.kind === 'thinking') return { kind: 'thinking', index: i, text: b.text }
-    return { kind: 'tool_use', toolUseId: b.toolUseId, name: b.name, input: b.input, result: b.result }
+    return {
+      kind: 'tool_use',
+      toolUseId: b.toolUseId,
+      name: b.name,
+      input: b.input,
+      result: b.result
+    }
   })
 }
 

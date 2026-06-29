@@ -86,7 +86,11 @@ export function ClaudePanel({ initialInstanceId }: { initialInstanceId: string }
         <button className="icon-btn" title="Reveal folder in file manager" onClick={openFolder}>
           📂
         </button>
-        <button className="icon-btn new-instance" title="New Claude on another folder" onClick={newInstance}>
+        <button
+          className="icon-btn new-instance"
+          title="New Claude on another folder"
+          onClick={newInstance}
+        >
           ＋ New
         </button>
       </div>

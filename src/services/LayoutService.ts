@@ -23,7 +23,12 @@ export class LayoutService {
   setClaudeInstance(instanceId: string): void {
     const existing = this.api.getPanel('claude')
     if (existing) this.api.removePanel(existing)
-    this.api.addPanel({ id: 'claude', component: 'claude', title: 'Claude', params: { instanceId } })
+    this.api.addPanel({
+      id: 'claude',
+      component: 'claude',
+      title: 'Claude',
+      params: { instanceId }
+    })
   }
 
   // ---- Per-conversation layout serialization (SPEC §4.5) ----

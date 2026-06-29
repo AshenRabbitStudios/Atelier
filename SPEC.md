@@ -36,6 +36,7 @@ webviews. The renderer cannot touch fs/process/SDK directly — only through the
 ## 3. The chat interface (core)
 
 ### 3.1 Rendering contract — never garbled
+
 Drive Claude through the SDK's **structured message stream**, not the CLI's rendered TUI.
 The main process normalizes each `SDKMessage` into a typed UI event and sends it to the
 renderer:
@@ -43,18 +44,30 @@ renderer:
 ```ts
 type AgentEvent =
   | { instanceId: string; kind: 'system_init'; sessionId: string; tools: string[] }
-  | { instanceId: string; kind: 'text'; messageId: string; delta: string }      // streamed
-  | { instanceId: string; kind: 'thinking'; messageId: string; delta: string }  // streamed
-  | { instanceId: string; kind: 'tool_use'; messageId: string; toolUseId: string;
-      name: string; input: unknown }
-  | { instanceId: string; kind: 'tool_result'; toolUseId: string; ok: boolean;
-      output: unknown }
-  | { instanceId: string; kind: 'result'; messageId: string; costUsd?: number;
-      durationMs?: number; isError: boolean };
+  | { instanceId: string; kind: 'text'; messageId: string; delta: string } // streamed
+  | { instanceId: string; kind: 'thinking'; messageId: string; delta: string } // streamed
+  | {
+      instanceId: string
+      kind: 'tool_use'
+      messageId: string
+      toolUseId: string
+      name: string
+      input: unknown
+    }
+  | { instanceId: string; kind: 'tool_result'; toolUseId: string; ok: boolean; output: unknown }
+  | {
+      instanceId: string
+      kind: 'result'
+      messageId: string
+      costUsd?: number
+      durationMs?: number
+      isError: boolean
+    }
 ```
 
 Renderer transcript model: an ordered list of messages, each with typed blocks
 (`text` | `thinking` | `tool_use` | `tool_result`). Rendering rules:
+
 - **text** → markdown via a safe renderer; fenced code → Shiki/CodeMirror with language
   detection. Code is never run through the markdown inline parser.
 - **thinking** → its own collapsible block, collapsed by default, visually distinct.
@@ -64,11 +77,14 @@ Renderer transcript model: an ordered list of messages, each with typed blocks
   the chat transcript — it is a stream surface rendered by xterm.js (see §6, PLUGIN_API).
 
 ### 3.2 Streaming
+
 Token/block deltas stream into the active message. The panel shows a live "working"
 state with the current tool, and an interrupt control (`Query.interrupt()`).
 
 ### 3.3 Editable history → context reframe
-Each user message is editable. Editing message *M*:
+
+Each user message is editable. Editing message _M_:
+
 1. `AgentManager.fork(instanceId, atMessageId=M, newText)` forks the session at M (V1
    `forkSession` + resume) seeded with history up to M, replacing M's content.
 2. If file checkpointing is enabled, optionally rewind the working tree to M's checkpoint
@@ -78,6 +94,7 @@ Each user message is editable. Editing message *M*:
 3. Renderer truncates the transcript after M and streams the new continuation.
 
 ### 3.4 Docking + scaling
+
 The chat panel is an ordinary Dockview panel: dock bottom/side, tab, float, or fullscreen,
 and a font-scale control (affects the transcript's rem base). Nothing special required.
 
@@ -87,20 +104,24 @@ and a font-scale control (affects the transcript's rem base). Nothing special re
 
 ```ts
 interface AgentInstance {
-  id: string;
-  cwd: string;                 // the project folder this instance operates in
-  sessionId?: string;          // from system_init
-  status: 'idle' | 'working' | 'error' | 'closed';
-  title: string;               // user-facing, defaults to basename(cwd)
+  id: string
+  cwd: string // the project folder this instance operates in
+  sessionId?: string // from system_init
+  status: 'idle' | 'working' | 'error' | 'closed'
+  title: string // user-facing, defaults to basename(cwd)
 }
 interface AgentManager {
-  create(opts: { cwd: string; model?: string }): Promise<string>;   // returns instanceId
-  send(instanceId: string, text: string): Promise<void>;
-  interrupt(instanceId: string): Promise<void>;
-  fork(instanceId: string, atMessageId: string, newText: string,
-       opts?: { rewindFiles?: boolean }): Promise<void>;
-  close(instanceId: string): Promise<void>;
-  list(): AgentInstance[];
+  create(opts: { cwd: string; model?: string }): Promise<string> // returns instanceId
+  send(instanceId: string, text: string): Promise<void>
+  interrupt(instanceId: string): Promise<void>
+  fork(
+    instanceId: string,
+    atMessageId: string,
+    newText: string,
+    opts?: { rewindFiles?: boolean }
+  ): Promise<void>
+  close(instanceId: string): Promise<void>
+  list(): AgentInstance[]
   // emits an AgentEvent stream per instance over IPC
 }
 ```
@@ -113,13 +134,14 @@ Atelier repo folder for building plugins.
 ## 4.5 Conversations & persistence (architectural bedrock)
 
 The **conversation is the unit of persistence** — a self-contained, restorable document.
-Atelier keeps a list of conversations; each one captures *everything* needed to resume it
+Atelier keeps a list of conversations; each one captures _everything_ needed to resume it
 exactly. You can have several conversations open, close the app for the day, reopen, and
 every conversation resumes with full context — chat **and** plugins. This is bedrock:
 every feature that holds state (chat, layout, plugins, data channels) must be persistable
 per conversation, and every plugin must be built to be persisted from day one (PLUGIN_API §8).
 
 ### 4.5.1 Runtime shape
+
 - A **conversation bar** spans the very top of the app: select / create / close conversations.
 - Below it is **the workspace** — the Dockview area for the **active** conversation. Exactly
   one conversation is rendered at a time; selecting another in the top bar swaps the whole
@@ -131,11 +153,12 @@ per conversation, and every plugin must be built to be persisted from day one (P
   is active. Closing the app and reopening restores the set and the last-active one.
 
 ### 4.5.2 What a conversation persists
+
 1. **Identity:** id, user-given title (nameable), createdAt, updatedAt.
 2. **Project root:** `cwd` (the folder the agent operates in) and `model`.
 3. **Full context:** the branch tree — every SDK session (`sessionId`) with its lineage
    (`parentSessionId`, `forkAnchorUuid`, `forkPointUuid`, `label`, `createdAt`) and the active
-   branch. This captures all forks. Message *content* is not copied — it lives in the Claude
+   branch. This captures all forks. Message _content_ is not copied — it lives in the Claude
    Agent SDK's per-session JSONL (the single source of truth that already powers edit/fork);
    the conversation references those sessions. (Export-to-self-contained-bundle is a future,
    opt-in operation, not the storage model.)
@@ -147,6 +170,7 @@ per conversation, and every plugin must be built to be persisted from day one (P
    KV, PLUGIN_API §3/§8), plus any DataBus channel history the conversation owns.
 
 ### 4.5.3 On-disk layout
+
 ```
 <userData>/atelier/
   conversations.json                       # index: [{ id, title, cwd, updatedAt }], lastActiveId
@@ -157,6 +181,7 @@ per conversation, and every plugin must be built to be persisted from day one (P
 ```
 
 ### 4.5.4 Lifecycle
+
 - **Create:** new conversation folder + manifest; user picks the project folder; default
   layout is just the Claude pane.
 - **Autosave (debounced):** the manifest is rewritten on every state change — a completed
@@ -191,9 +216,9 @@ A lightweight pub/sub in the main process, bridged to renderer and plugins via t
 
 ```ts
 interface DataBus {
-  publish(channel: string, payload: unknown): void;            // append or replace
-  subscribe(channel: string, cb: (payload: unknown) => void): () => void;
-  history(channel: string, limit?: number): unknown[];
+  publish(channel: string, payload: unknown): void // append or replace
+  subscribe(channel: string, cb: (payload: unknown) => void): () => void
+  history(channel: string, limit?: number): unknown[]
 }
 ```
 

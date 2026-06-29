@@ -17,6 +17,7 @@ rendering: text (markdown + Shiki code), thinking (collapsible), tool_use/tool_r
 **Do first:** the SDK verification step in CLAUDE.md; write `docs/SDK_NOTES.md`.
 
 **Acceptance**
+
 - `npm run dev` opens a window with one docked chat panel.
 - Typing a prompt streams a response token-by-token.
 - A response containing a fenced code block renders highlighted, not garbled, with original
@@ -36,6 +37,7 @@ switcher / multiple chat panels. Editable user messages via session fork.
 > fork is conversation-only and never touches files. (DECISIONS.md.)
 
 **Acceptance**
+
 - Create two instances pointing at two different folders; both run concurrently and
   independently; each loads its own project `CLAUDE.md` (`settingSources: ['project']`).
 - Editing a past user message forks the session there and streams a new continuation; the
@@ -48,6 +50,7 @@ Dock bottom/side/center/fullscreen; tabify; in-app floating groups. Font-scale c
 the chat panel. Serialize layout to disk and restore on launch.
 
 **Acceptance**
+
 - A panel can be docked to each region, tabbed, and floated in-app.
 - Chat text scales up/down via the control.
 - Closing and reopening the app restores the previous layout.
@@ -61,6 +64,7 @@ needed for panels (`layout`, `storage`, lifecycle); Zod-validated manifests. Shi
 `/plugins/examples/hello-panel`.
 
 **Acceptance**
+
 - `hello-panel` appears in the sidebar on discovery and loads into a dockable pane.
 - Editing the plugin's file and hitting reload updates the pane **without app restart**.
 - The pane can dock/float via `layout`, and a value persists across reload via `storage`.
@@ -74,6 +78,7 @@ The `DataBus` and the `data` host API. A PreToolUse/PostToolUse hook that opens 
 subscribed to the bash channel).
 
 **Acceptance**
+
 - Running a bash command via an agent instance streams its real stdout/stderr into the
   `bash-stream` pane live, rendered faithfully (ANSI intact) by xterm.js.
 - The bash-stream surface is visibly marked as ambient/reality (not agent-authored).
@@ -86,6 +91,7 @@ Demonstrate the loop end to end: an agent instance pointed at the Atelier repo a
 new plugin folder; the watcher surfaces it; the user loads it without restart.
 
 **Acceptance**
+
 - From inside Atelier, ask an instance to "make a plugin that renders X." It writes a valid
   `/plugins/<id>/` folder.
 - The new plugin appears in the sidebar and loads and works without restarting the app.

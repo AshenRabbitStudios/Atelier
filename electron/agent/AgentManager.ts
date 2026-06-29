@@ -154,7 +154,11 @@ class Session {
     label: string
     createdAt: number
   }[] = []
-  private pendingFork?: { parentSessionId: string; forkPointUuid: string; forkAnchorUuid: string | null }
+  private pendingFork?: {
+    parentSessionId: string
+    forkPointUuid: string
+    forkAnchorUuid: string | null
+  }
   // Tool-approval requests awaiting a user decision from the renderer.
   private pending = new Map<
     string,
@@ -166,7 +170,11 @@ class Session {
     }
   >()
 
-  constructor(opts: CreateOpts, private emit: (e: AgentEvent) => void, restore?: RestoreData) {
+  constructor(
+    opts: CreateOpts,
+    private emit: (e: AgentEvent) => void,
+    restore?: RestoreData
+  ) {
     this.id = restore?.id ?? randomUUID()
     this.cwd = opts.cwd
     this.title = opts.title ?? (basename(opts.cwd) || opts.cwd)
@@ -294,7 +302,11 @@ class Session {
     // Resume just BEFORE the edited message so the new text replaces it (rather
     // than appending after it), then regenerate on the new branch.
     const parent = parentUuidOf(this.sessionId, uuid)
-    this.pendingFork = { parentSessionId: this.sessionId, forkPointUuid: uuid, forkAnchorUuid: parent }
+    this.pendingFork = {
+      parentSessionId: this.sessionId,
+      forkPointUuid: uuid,
+      forkAnchorUuid: parent
+    }
     this.rebind({ resumeAt: parent ?? uuid, fork: true })
     this.setStatus('working')
     this.input.push(newText)
@@ -343,7 +355,12 @@ class Session {
   private requestPermission(
     toolName: string,
     input: Record<string, unknown>,
-    ctx: { signal: AbortSignal; toolUseID: string; title?: string; suggestions?: PermissionUpdate[] }
+    ctx: {
+      signal: AbortSignal
+      toolUseID: string
+      title?: string
+      suggestions?: PermissionUpdate[]
+    }
   ): Promise<PermissionResult> {
     const requestId = randomUUID()
     // AskUserQuestion is the agent asking the USER — surface it as an answerable
@@ -354,7 +371,12 @@ class Session {
       const settle = (r: PermissionResult) => {
         if (this.pending.delete(requestId)) resolve(r)
       }
-      this.pending.set(requestId, { resolve: settle, input, suggestions: ctx.suggestions, isQuestion })
+      this.pending.set(requestId, {
+        resolve: settle,
+        input,
+        suggestions: ctx.suggestions,
+        isQuestion
+      })
 
       ctx.signal.addEventListener('abort', () => {
         if (!this.pending.has(requestId)) return
@@ -452,8 +474,8 @@ class Session {
    */
   async usage(): Promise<UsageInfo> {
     const label = (k: string): string =>
-      ((
-        {
+      (
+        ({
           session: '5h',
           five_hour: '5h',
           weekly_all: '7d',
@@ -464,8 +486,8 @@ class Session {
           seven_day_sonnet: '7d Sonnet',
           weekly_oauth_apps: '7d Apps',
           seven_day_oauth_apps: '7d Apps'
-        } as Record<string, string>
-      )[k] ?? k)
+        }) as Record<string, string>
+      )[k] ?? k
     try {
       const r = await Promise.race([
         this.q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(),
@@ -492,7 +514,8 @@ class Session {
       // Fallback: the typed window objects.
       if (windows.length === 0) {
         for (const key of ['five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet']) {
-          const w = rl[key] as { utilization?: number; resets_at?: string | null } | null | undefined
+          const w = rl[key] as
+            { utilization?: number; resets_at?: string | null } | null | undefined
           if (w && typeof w.utilization === 'number') {
             windows.push({
               key,
@@ -657,7 +680,9 @@ class Session {
         // internal `[ede_diagnostic]` notes — not a real failure. Render it as a
         // clean "stopped" turn, not a red error pane.
         const reason =
-          'terminal_reason' in msg ? (msg as { terminal_reason?: string }).terminal_reason : undefined
+          'terminal_reason' in msg
+            ? (msg as { terminal_reason?: string }).terminal_reason
+            : undefined
         const aborted = this.interrupted || reason === 'aborted_streaming'
         this.interrupted = false
         const isError = !aborted && (msg.is_error || msg.subtype !== 'success')
@@ -937,7 +962,12 @@ export class AgentManager {
     this.persist(s)
   }
 
-  decide(instanceId: string, requestId: string, behavior: 'allow' | 'deny', allowAlways?: boolean): void {
+  decide(
+    instanceId: string,
+    requestId: string,
+    behavior: 'allow' | 'deny',
+    allowAlways?: boolean
+  ): void {
     this.require(instanceId).decide(requestId, behavior, allowAlways)
   }
 

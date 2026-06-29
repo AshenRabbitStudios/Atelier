@@ -6,6 +6,7 @@ wired to be enforced — see **Status of enforcement** at the end); "SHOULD" ite
 defaults you deviate from only with a recorded reason.
 
 This complements, and does not replace:
+
 - **CLAUDE.md** — how work is sequenced (phases, definition of done).
 - **SPEC.md / ROADMAP.md** — what we build and in what order.
 - **docs/DECISIONS.md** — the running log of non-obvious choices.
@@ -63,7 +64,7 @@ This complements, and does not replace:
   renderer imports them, never re-declares them.
 - **Module size:** when a file does more than one job, split it. Services behind interfaces
   (`LayoutService`, `AgentClient`) so implementations are swappable.
-- **Comments explain *why*, not *what*.** Match the surrounding density. Good comments capture
+- **Comments explain _why_, not _what_.** Match the surrounding density. Good comments capture
   a non-obvious constraint, a probe-verified SDK quirk, or an invariant — not a paraphrase of
   the code. (The existing codebase does this well; keep that bar.)
 - **No dead code, no commented-out blocks, no stray `console.log`.** Delete it; git remembers.
@@ -110,7 +111,7 @@ A change that weakens any of these requires an explicit, recorded decision — n
 
 ## 6. Documentation
 
-- **DECISIONS.md** — one line per non-obvious choice, dated, with the *why*. Append on every
+- **DECISIONS.md** — one line per non-obvious choice, dated, with the _why_. Append on every
   such choice. This is the project's memory; keep it current.
 - **PROGRESS.md** — running build log: what's done, what's next, open questions, and any
   acceptance criterion that needs a human spot-check. Update it as part of finishing work, not
@@ -181,6 +182,7 @@ Target a pragmatic, value-first test pyramid — not coverage theater:
 ## 11. Review & definition of done
 
 A change is done when **all** hold:
+
 - Typechecks clean; lint clean; tests pass; `npm run build` succeeds; `npm run dev` launches.
 - The phase's ROADMAP acceptance criteria are met, or the un-automatable parts are listed in
   PROGRESS.md as spot-checks.
@@ -192,19 +194,21 @@ A change is done when **all** hold:
 
 ## Status of enforcement (honest current state — 2026-06-28)
 
-This doc sets the bar; not all of it is mechanically enforced yet. What's true today:
+This doc sets the bar. As of the 2026-06-28 hardening run, the full gate
+(typecheck → lint → format → test → build) is wired and green. What's true today:
 
-| Practice | Status |
-|---|---|
-| Git repo, `.gitignore`, conventional commits | **In place** (repo initialized; this is the baseline going forward) |
-| TypeScript strict + `npm run typecheck` gate | **Enforced** (both bundles, clean) |
-| Structured/bounded exception handling | **Practiced** in main (agent pump, usage guard) |
-| DECISIONS / PROGRESS / SDK_NOTES discipline | **Practiced** |
-| Zod boundary validation | **Partial** — used; audit that *every* boundary is covered |
-| Unit/integration tests + `npm test` | **NOT yet wired** — no runner, no tests. Top tech-debt item. |
-| ESLint + Prettier + `npm run lint` | **NOT yet wired** — `eslint-disable` comments exist but no config. |
-| CI pipeline | **NOT yet set up.** |
+| Practice                                      | Status                                                                |
+| --------------------------------------------- | --------------------------------------------------------------------- |
+| Git repo, `.gitignore`, conventional commits  | **In place** (repo initialized; this is the baseline going forward)   |
+| TypeScript strict + `npm run typecheck` gate  | **Enforced** (both bundles, clean)                                    |
+| Structured/bounded exception handling         | **Practiced** in main (agent pump, usage guard)                       |
+| DECISIONS / PROGRESS / SDK_NOTES discipline   | **Practiced**                                                         |
+| Unit tests + `npm test` (Vitest)              | **Enforced** — 25 tests over schemas + session/conversation stores    |
+| ESLint + Prettier (`npm run lint` / `format`) | **Enforced** — flat config, repo-wide Prettier, clean pass            |
+| CI pipeline (`.github/workflows/ci.yml`)      | **Enforced** — install→typecheck→lint→format→test→build on push/PR    |
+| Zod boundary validation                       | **Partial** — used + unit-tested; audit that _every_ boundary covered |
 
-Closing the three "NOT yet" rows (Vitest + a seed suite over the session/transcript model,
-ESLint/Prettier, and a CI workflow) is tracked in PROGRESS.md and should land as a dedicated
-"engineering hardening" chore before the codebase grows much further.
+Remaining (tracked in PROGRESS.md, not blocking): broaden test coverage to `transcriptModel.ts`
+and the AgentManager lifecycle (SDK faked at the boundary); audit full IPC boundary coverage;
+adopt `--max-warnings 0` after burning down `no-explicit-any` warnings; add a dev-compatible
+strict CSP.

@@ -2,7 +2,7 @@
 
 **Atelier** (working codename — rename freely) is a desktop app for working with Claude:
 a dockable chat interface to the Claude Agent SDK, plus a hot-reloadable, Photoshop-style
-plugin system so the surfaces you use to *see what the agent is doing* can grow over time —
+plugin system so the surfaces you use to _see what the agent is doing_ can grow over time —
 authored by hand now, and eventually by the agent itself.
 
 ## This is a doc set for an autonomous Claude Code build
@@ -10,8 +10,8 @@ authored by hand now, and eventually by the agent itself.
 Hand these to Claude Code CLI and let it build in phases. Read them in this order:
 
 1. **CLAUDE.md** — operating manual. Loaded every session. Invariants, stack, working
-   method, definition of done. *Start here, and do what its "Before you write any session
-   code" step says.*
+   method, definition of done. _Start here, and do what its "Before you write any session
+   code" step says._
 2. **SPEC.md** — architecture and the contracts that make components interlock.
 3. **PLUGIN_API.md** — the extensibility contract (plugin manifest + host API). The heart
    of the "make it do anything" requirement and the self-hosting loop.

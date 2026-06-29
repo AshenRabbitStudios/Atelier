@@ -16,5 +16,6 @@
     "isolatedModules": true,
     "noEmit": true
   },
-  "include": ["electron", "electron.vite.config.ts"]
+  "include": ["electron", "electron.vite.config.ts"],
+  "exclude": ["**/*.test.ts"]
 }

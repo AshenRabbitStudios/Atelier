@@ -18,7 +18,8 @@ const api: AtelierAPI = {
     delete: (conversationId) => ipcRenderer.invoke(IPC.agentDelete, { instanceId: conversationId }),
     setActive: (instanceId) => ipcRenderer.invoke(IPC.agentSetActive, { instanceId }),
     activeId: () => ipcRenderer.invoke(IPC.agentActiveId),
-    saveLayout: (instanceId, layout) => ipcRenderer.invoke(IPC.agentSaveLayout, { instanceId, layout }),
+    saveLayout: (instanceId, layout) =>
+      ipcRenderer.invoke(IPC.agentSaveLayout, { instanceId, layout }),
     getLayout: (instanceId) => ipcRenderer.invoke(IPC.agentGetLayout, { instanceId }),
     close: (instanceId) => ipcRenderer.invoke(IPC.agentClose, { instanceId }),
     rename: (instanceId, title) => ipcRenderer.invoke(IPC.agentRename, { instanceId, title }),
@@ -30,7 +31,8 @@ const api: AtelierAPI = {
       ipcRenderer.invoke(IPC.agentSetMode, { instanceId, mode }),
     models: (instanceId) => ipcRenderer.invoke(IPC.agentModels, { instanceId }),
     setModel: (instanceId, model) => ipcRenderer.invoke(IPC.agentSetModel, { instanceId, model }),
-    setEffort: (instanceId, effort) => ipcRenderer.invoke(IPC.agentSetEffort, { instanceId, effort }),
+    setEffort: (instanceId, effort) =>
+      ipcRenderer.invoke(IPC.agentSetEffort, { instanceId, effort }),
     usage: (instanceId) => ipcRenderer.invoke(IPC.agentUsage, { instanceId }),
     transcript: (instanceId) => ipcRenderer.invoke(IPC.agentTranscript, { instanceId }),
     editSave: (instanceId, uuid, newText) =>

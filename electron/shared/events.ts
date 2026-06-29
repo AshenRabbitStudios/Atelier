@@ -6,12 +6,7 @@ export type AgentStatus = 'idle' | 'working' | 'error' | 'closed'
 
 // Mirrors the SDK's PermissionMode union (kept Node-free here so the renderer can use it).
 export type PermissionMode =
-  | 'default'
-  | 'acceptEdits'
-  | 'plan'
-  | 'bypassPermissions'
-  | 'dontAsk'
-  | 'auto'
+  'default' | 'acceptEdits' | 'plan' | 'bypassPermissions' | 'dontAsk' | 'auto'
 
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
@@ -34,11 +29,20 @@ const FULL_EFFORT: EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max']
 const NO_XHIGH: EffortLevel[] = ['low', 'medium', 'high', 'max']
 export const KNOWN_MODELS: ModelOption[] = [
   { value: 'default', displayName: 'Default (recommended)', supportedEffortLevels: FULL_EFFORT },
-  { value: 'claude-fable-5', displayName: 'Fable 5 (unavailable)', disabled: true, supportedEffortLevels: FULL_EFFORT },
+  {
+    value: 'claude-fable-5',
+    displayName: 'Fable 5 (unavailable)',
+    disabled: true,
+    supportedEffortLevels: FULL_EFFORT
+  },
   { value: 'claude-opus-4-8', displayName: 'Opus 4.8', supportedEffortLevels: FULL_EFFORT },
   { value: 'claude-opus-4-7', displayName: 'Opus 4.7', supportedEffortLevels: FULL_EFFORT },
   { value: 'claude-opus-4-6', displayName: 'Opus 4.6', supportedEffortLevels: NO_XHIGH },
-  { value: 'claude-opus-4-5', displayName: 'Opus 4.5', supportedEffortLevels: ['low', 'medium', 'high'] },
+  {
+    value: 'claude-opus-4-5',
+    displayName: 'Opus 4.5',
+    supportedEffortLevels: ['low', 'medium', 'high']
+  },
   { value: 'claude-opus-4-1', displayName: 'Opus 4.1' },
   { value: 'claude-sonnet-4-6', displayName: 'Sonnet 4.6', supportedEffortLevels: NO_XHIGH },
   { value: 'claude-sonnet-4-5', displayName: 'Sonnet 4.5' },

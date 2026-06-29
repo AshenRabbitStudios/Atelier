@@ -158,6 +158,21 @@ Deferred to P4 (per architecture): context pinning (`contextExports` + injection
 - Plugin tool scoping: global vs per-instance — default global (P4).
 - Sandbox tech: Electron `<webview>` vs sandboxed iframe — pick early in P3.
 
+## Agent context-document plugins (docs/CONTEXT_SYSTEM.md) — built 2026-06-29
+
+The "clear context often, carry your working state" system. Shared P4 infrastructure (per-turn
+injection + auto-generated update tools + host `context` API + auto-pin) is in `electron/plugin/
+contextTools.ts` and wired through AgentManager; 6 unit tests (suite 45). Five panes shipped under
+`plugins/examples/` (built by parallel sub-agents to the host contract): **mental-model**,
+**working-memory** (10 slots), **plan**, plus extras **diagram** (text DSL → SVG) and **data-table**
+(CSV/TSV → sortable table). Each declares `contextExports` → the host injects it every turn, gives
+the agent a `set_*` tool, and the pane reads/writes via `atelier.context.get/set`. Values persist
+in per-conversation plugin storage (survive Clear chat, restart, open/close).
+
+**Autonomous decisions + the GUI spot-check list are in docs/MORNING_REVIEW.md** — read that first.
+Gate green; runtime behavior (agent updates a doc → pane reflects it → next turn the agent recalls
+it) is the human spot-check.
+
 ## Visual-refresh migration (docs/DESIGN_SYSTEM.md) — M1–M6 done
 
 Tokenized, themeable design system (Slate/Carbon/Daylight × comfortable/compact). All six

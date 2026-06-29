@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Data Table</title>
+    <!--
+      Host runtime — injects window.atelier; all methods are async.
+      Must be FIRST in <head>. No external network access; no CDN.
+
+      CSV / TSV format rules (enforced by the parser below):
+        - First row = headers. Comma-separated by default.
+        - Auto-detect delimiter per file: if any non-empty line contains a TAB
+          the whole file is treated as TSV (tab-delimited).
+        - Quoted fields: a field wrapped in "..." may contain commas.
+          "" inside a quoted field = escaped double-quote (RFC 4180 subset).
+        - Malformed input: parser never throws — renders what can be parsed.
+    -->
+    <script src="atelier-plugin://__runtime__/atelier.js"></script>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        overflow: hidden;
+        font-family: var(--font, system-ui, sans-serif);
+        background: var(--bg, #0f1117);
+        color: var(--text, #e7eaf0);
+        font-size: 13px;
+      }
+
+      /* Root flex column fills the entire pane */
+      #root {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        overflow: hidden;
+      }
+
+      /* ── Header bar ── */
+      #header {
+        flex: 0 0 auto;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border, #252b37);
+        background: var(--surface-2, #181d27);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      #header-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text, #e7eaf0);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      #toggle-raw {
+        flex: 0 0 auto;
+        padding: 3px 9px;
+        font-size: 11px;
+        font-family: var(--font, system-ui, sans-serif);
+        background: var(--surface-3, #202634);
+        color: var(--dim, #8b93a5);
+        border: 1px solid var(--border, #252b37);
+        border-radius: 4px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      #toggle-raw:hover {
+        border-color: var(--border-2, #333b4b);
+        color: var(--text, #e7eaf0);
+      }
+
+      /* ── Table scroll area ── */
+      #table-section {
+        flex: 1 1 0;
+        overflow: auto;
+        min-height: 0;
+      }
+      #table-hint {
+        padding: 24px 16px;
+        color: var(--faint, #5e6677);
+        font-size: 11px;
+        font-family: var(--mono, monospace);
+        white-space: pre;
+        line-height: 1.7;
+      }
+
+      /* ── Table ── */
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+      thead tr th {
+        background: var(--surface-2, #181d27);
+        color: var(--text, #e7eaf0);
+        font-weight: 700;
+        padding: 7px 10px;
+        border: 1px solid var(--border, #252b37);
+        text-align: left;
+        white-space: nowrap;
+        cursor: pointer;
+        user-select: none;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+      }
+      thead tr th:hover {
+        background: var(--surface-3, #202634);
+      }
+      thead tr th.num {
+        text-align: right;
+      }
+
+      .sort-ind {
+        display: inline-block;
+        margin-left: 4px;
+        font-size: 9px;
+        color: var(--accent, #5b9cff);
+      }
+
+      tbody tr:nth-child(odd) td {
+        background: var(--surface, #14171e);
+      }
+      tbody tr:nth-child(even) td {
+        background: var(--surface-2, #181d27);
+      }
+      tbody tr:hover td {
+        background: var(--surface-3, #202634);
+      }
+      tbody tr td {
+        padding: 5px 10px;
+        border: 1px solid var(--border, #252b37);
+        color: var(--text, #e7eaf0);
+        word-break: break-word;
+      }
+      tbody tr td.num {
+        font-family: var(--mono, monospace);
+        text-align: right;
+      }
+
+      /* ── Raw CSV editor (collapsible) ── */
+      #raw-section {
+        flex: 0 0 auto;
+        display: flex;
+        flex-direction: column;
+        border-top: 1px solid var(--border, #252b37);
+        max-height: 220px;
+      }
+      #raw-section.hidden {
+        display: none;
+      }
+      #raw-label {
+        flex: 0 0 auto;
+        padding: 4px 10px;
+        font-size: 10px;
+        color: var(--dim, #8b93a5);
+        background: var(--surface-2, #181d27);
+        border-bottom: 1px solid var(--border, #252b37);
+      }
+      #raw-label span {
+        color: var(--faint, #5e6677);
+        margin-left: 6px;
+      }
+      #raw-csv {
+        flex: 1 1 0;
+        min-height: 80px;
+        resize: none;
+        width: 100%;
+        background: var(--input, #1b2029);
+        color: var(--text, #e7eaf0);
+        border: none;
+        outline: none;
+        font-family: var(--mono, monospace);
+        font-size: 11px;
+        padding: 8px 10px;
+        line-height: 1.5;
+      }
+
+      /* ── Status bar ── */
+      #status-bar {
+        flex: 0 0 auto;
+        padding: 3px 10px;
+        font-size: 10px;
+        color: var(--faint, #5e6677);
+        background: var(--surface-2, #181d27);
+        border-top: 1px solid var(--border, #252b37);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div id="header">
+        <span id="header-title"
+          >Data table — the agent&apos;s data (sortable; edit raw CSV below)</span
+        >
+        <button id="toggle-raw">Edit CSV ▾</button>
+      </div>
+
+      <div id="table-section">
+        <div id="table-hint" style="display: none"></div>
+        <div id="table-wrap"></div>
+      </div>
+
+      <div id="raw-section" class="hidden">
+        <div id="raw-label">
+          Raw CSV / TSV
+          <span>auto-detects TAB delimiter; quoted fields: "…" with "" as escaped quote</span>
+        </div>
+        <textarea
+          id="raw-csv"
+          spellcheck="false"
+          placeholder="name,role,note&#10;Ada,lead,…"
+        ></textarea>
+      </div>
+
+      <div id="status-bar">
+        <span id="status-left">connecting…</span>
+        <span id="status-right"></span>
+      </div>
+    </div>
+    <script>
+      /* ── DOM ─────────────────────────────────────────────────────────────── */
+      const tableWrap = document.getElementById('table-wrap')
+      const tableHint = document.getElementById('table-hint')
+      const rawSection = document.getElementById('raw-section')
+      const rawCSV = document.getElementById('raw-csv')
+      const toggleBtn = document.getElementById('toggle-raw')
+      const statusL = document.getElementById('status-left')
+      const statusR = document.getElementById('status-right')
+
+      /* ── State ───────────────────────────────────────────────────────────── */
+      let rawOpen = false // is the raw textarea panel open?
+      let lastValue = null // last context string seen (null = not yet loaded)
+      let sortCol = -1 // active sort column index; -1 = unsorted
+      let sortAsc = true // sort direction
+      let parsedRows = [] // current parse result: array of string[]
+      let rawFocused = false // is user typing in the textarea?
+
+      /* ── Toggle raw editor ───────────────────────────────────────────────── */
+      toggleBtn.addEventListener('click', () => {
+        rawOpen = !rawOpen
+        rawSection.classList.toggle('hidden', !rawOpen)
+        toggleBtn.textContent = rawOpen ? 'Hide CSV ▴' : 'Edit CSV ▾'
+      })
+      rawCSV.addEventListener('focus', () => {
+        rawFocused = true
+      })
+      rawCSV.addEventListener('blur', () => {
+        rawFocused = false
+      })
+
+      /* ── CSV / TSV parser ────────────────────────────────────────────────── */
+
+      /** Detect delimiter for the whole file: TAB if any line has one, else comma. */
+      function detectDelim(lines) {
+        for (const l of lines) {
+          if (l.trim() && l.indexOf('\t') !== -1) return '\t'
+        }
+        return ','
+      }
+
+      /**
+       * Parse one line into an array of field strings.
+       * Handles quoted fields with "" as escaped-quote escape sequence.
+       * Never throws; malformed partial quotes are treated as literals.
+       */
+      function parseLine(line, delim) {
+        const fields = []
+        let i = 0
+        const len = line.length
+        while (i <= len) {
+          if (i === len) {
+            fields.push('')
+            break
+          }
+          if (line[i] === '"') {
+            // quoted field
+            i++
+            let field = ''
+            while (i < len) {
+              if (line[i] === '"') {
+                if (i + 1 < len && line[i + 1] === '"') {
+                  field += '"'
+                  i += 2 // "" → literal "
+                } else {
+                  i++
+                  break // closing quote
+                }
+              } else {
+                field += line[i++]
+              }
+            }
+            fields.push(field)
+            if (i < len && line[i] === delim) i++ // skip delimiter after closing quote
+          } else {
+            // unquoted field: read until delimiter
+            const start = i
+            while (i < len && line[i] !== delim) i++
+            fields.push(line.slice(start, i))
+            if (i < len) i++ // skip delimiter
+          }
+        }
+        return fields
+      }
+
+      /**
+       * Parse full CSV/TSV text → array-of-arrays (index 0 = header row).
+       * Returns [] on empty/blank input. Never throws.
+       */
+      function parseCSV(text) {
+        if (!text || !text.trim()) return []
+        const lines = text.split(/\r?\n/)
+        const delim = detectDelim(lines)
+        const rows = []
+        for (const line of lines) {
+          if (!line.trim()) continue
+          try {
+            rows.push(parseLine(line, delim))
+          } catch (_) {
+            rows.push([line]) // fallback: single-cell row with raw text
+          }
+        }
+        return rows
+      }
+
+      /* ── Numeric helpers ─────────────────────────────────────────────────── */
+      function isNum(s) {
+        const t = (s || '').trim()
+        return t !== '' && !isNaN(Number(t))
+      }
+      function isNumericCol(rows, ci) {
+        const body = rows.slice(1)
+        const nonEmpty = body.filter((r) => (r[ci] || '').trim() !== '')
+        return nonEmpty.length > 0 && nonEmpty.every((r) => isNum(r[ci] || ''))
+      }
+
+      /* ── Sort helper ─────────────────────────────────────────────────────── */
+      function sortedBody(body, ci, asc, numeric) {
+        if (ci < 0) return body
+        return body.slice().sort(function (a, b) {
+          const av = (a[ci] || '').trim()
+          const bv = (b[ci] || '').trim()
+          const cmp = numeric
+            ? (parseFloat(av) || 0) - (parseFloat(bv) || 0)
+            : av.localeCompare(bv, undefined, { sensitivity: 'base' })
+          return asc ? cmp : -cmp
+        })
+      }
+
+      /* ── Render table ────────────────────────────────────────────────────── */
+      function renderTable(rows) {
+        tableWrap.innerHTML = ''
+
+        if (!rows || rows.length === 0) {
+          tableHint.style.display = 'block'
+          tableHint.textContent =
+            'No data yet — waiting for the agent to populate this table.\n\n' +
+            'Expected format (CSV):\n' +
+            '  name,role,note\n' +
+            '  Ada,lead,"manages the whole thing"\n' +
+            '  Charlie,eng,builds stuff\n\n' +
+            'Also accepts TSV (replace commas with tabs; auto-detected).\n' +
+            'Quoted fields may contain commas. Use "" for a literal quote inside "…".'
+          statusR.textContent = ''
+          return
+        }
+
+        tableHint.style.display = 'none'
+
+        const headers = rows[0] || []
+        const body = rows.slice(1)
+        const numCols = headers.map(function (_, ci) {
+          return isNumericCol(rows, ci)
+        })
+
+        const sorted = sortedBody(body, sortCol, sortAsc, sortCol >= 0 ? numCols[sortCol] : false)
+
+        const tbl = document.createElement('table')
+        const thead = tbl.createTHead()
+        const hr = thead.insertRow()
+
+        headers.forEach(function (h, ci) {
+          const th = document.createElement('th')
+          if (numCols[ci]) th.classList.add('num')
+
+          th.appendChild(document.createTextNode(h || 'col' + (ci + 1)))
+
+          if (sortCol === ci) {
+            const ind = document.createElement('span')
+            ind.className = 'sort-ind'
+            ind.textContent = sortAsc ? '▲' : '▼'
+            th.appendChild(ind)
+          }
+
+          // Click: same column toggles asc/desc; different column resets to asc.
+          th.addEventListener(
+            'click',
+            (function (colIdx) {
+              return function () {
+                if (sortCol === colIdx) {
+                  sortAsc = !sortAsc
+                } else {
+                  sortCol = colIdx
+                  sortAsc = true
+                }
+                renderTable(parsedRows)
+              }
+            })(ci)
+          )
+
+          hr.appendChild(th)
+        })
+
+        const tbody = tbl.createTBody()
+        sorted.forEach(function (row) {
+          const tr = tbody.insertRow()
+          headers.forEach(function (_, ci) {
+            const td = tr.insertCell()
+            td.textContent = row[ci] !== undefined ? row[ci] : ''
+            if (numCols[ci]) td.classList.add('num')
+          })
+        })
+
+        tableWrap.appendChild(tbl)
+        statusR.textContent =
+          body.length +
+          ' row' +
+          (body.length !== 1 ? 's' : '') +
+          ' \xd7 ' +
+          headers.length +
+          ' col' +
+          (headers.length !== 1 ? 's' : '')
+      }
+
+      /* ── Apply a raw string value ─────────────────────────────────────────
+         Parse it, render the table, and optionally sync the textarea.       */
+      function applyValue(text, fillTextarea) {
+        parsedRows = parseCSV(text || '')
+        renderTable(parsedRows)
+        if (fillTextarea) rawCSV.value = text || ''
+      }
+
+      /* ── Textarea → context (debounced 400 ms) ───────────────────────────── */
+      var debTimer = null
+      rawCSV.addEventListener('input', function () {
+        clearTimeout(debTimer)
+        debTimer = setTimeout(function () {
+          var val = rawCSV.value
+          lastValue = val
+          // re-render table immediately; don't clobber textarea
+          parsedRows = parseCSV(val)
+          renderTable(parsedRows)
+          window.atelier.context
+            .set('table', val)
+            .then(function () {
+              statusL.textContent = 'saved ✓'
+            })
+            .catch(function (e) {
+              statusL.textContent = 'save error: ' + e.message
+            })
+        }, 400)
+      })
+
+      /* ── Poll every 1500 ms — picks up agent tool writes ─────────────────── */
+      setInterval(function () {
+        window.atelier.context
+          .get('table')
+          .then(function (val) {
+            var v = typeof val === 'string' ? val : ''
+            if (v !== lastValue) {
+              lastValue = v
+              // Only clobber the pane if the user isn't actively typing
+              if (!rawFocused) {
+                applyValue(v, true)
+                statusL.textContent = 'updated by agent'
+              }
+            }
+          })
+          .catch(function () {
+            /* ignore transient poll errors */
+          })
+      }, 1500)
+
+      /* ── On load: restore from context storage (treat every mount as restore) */
+      window.atelier.on('load', function () {
+        statusL.textContent = 'loading…'
+        window.atelier.context
+          .get('table')
+          .then(function (val) {
+            var v = typeof val === 'string' ? val : ''
+            lastValue = v
+            applyValue(v, true)
+            statusL.textContent = v.trim() ? 'ready' : 'ready — waiting for agent data'
+          })
+          .catch(function (e) {
+            statusL.textContent = 'error: ' + e.message
+            applyValue('', true)
+          })
+      })
+    </script>
+  </body>
+</html>

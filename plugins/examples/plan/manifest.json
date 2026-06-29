@@ -1,0 +1,12 @@
+{
+  "id": "plan",
+  "name": "Plan",
+  "version": "0.1.0",
+  "kind": "panel",
+  "entry": "index.html",
+  "permissions": ["context"],
+  "defaultDock": "right",
+  "contextExports": [
+    { "key": "plan", "label": "Plan (A→B)", "format": "markdown", "maxTokens": 1500 }
+  ]
+}

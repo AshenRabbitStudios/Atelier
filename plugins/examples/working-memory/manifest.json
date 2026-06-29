@@ -1,0 +1,12 @@
+{
+  "id": "working-memory",
+  "name": "Working Memory",
+  "version": "0.1.0",
+  "kind": "panel",
+  "entry": "index.html",
+  "permissions": ["context"],
+  "defaultDock": "right",
+  "contextExports": [
+    { "key": "slots", "label": "Working memory (10 slots)", "format": "text", "maxTokens": 1200 }
+  ]
+}

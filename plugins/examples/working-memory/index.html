@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Working Memory</title>
+    <!-- Host injects window.atelier; all SDK access goes through it. -->
+    <script src="atelier-plugin://__runtime__/atelier.js"></script>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        font-family: var(--font, system-ui, sans-serif);
+        background: var(--bg, #0f1117);
+        color: var(--text, #e7eaf0);
+        overflow: hidden;
+      }
+
+      .pane {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        padding: 12px;
+        gap: 8px;
+      }
+
+      .header {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--dim, #8890a0);
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--border, #252b37);
+        flex-shrink: 0;
+      }
+
+      .slots {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        flex: 1;
+        overflow-y: auto;
+      }
+
+      .slot-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding-left: 4px;
+        border-left: 2px solid transparent;
+        border-radius: 2px;
+        transition: border-left-color 0.15s;
+      }
+
+      .slot-row.has-content {
+        border-left-color: var(--accent, #5b9cff);
+      }
+
+      .slot-num {
+        font-size: 11px;
+        font-family: var(--mono, monospace);
+        color: var(--faint, #5e6677);
+        width: 18px;
+        text-align: right;
+        flex-shrink: 0;
+        user-select: none;
+      }
+
+      .slot-input {
+        flex: 1;
+        padding: 5px 8px;
+        background: var(--input, #1b2029);
+        color: var(--text, #e7eaf0);
+        border: 1px solid var(--border, #252b37);
+        border-radius: 4px;
+        font-family: var(--font, system-ui, sans-serif);
+        font-size: 13px;
+        outline: none;
+        min-width: 0;
+        transition: border-color 0.12s;
+      }
+
+      .slot-input::placeholder {
+        color: var(--faint, #5e6677);
+      }
+
+      .slot-input:focus {
+        border-color: var(--accent, #5b9cff);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="pane">
+      <div class="header">Working memory — 10 things to keep recursing on</div>
+      <div class="slots" id="slots"></div>
+    </div>
+
+    <script>
+      const NUM_SLOTS = 10
+      const POLL_MS = 1500
+      const DEBOUNCE_MS = 400
+
+      // ── Build 10 rows ─────────────────────────────────────────────────
+
+      const slotsEl = document.getElementById('slots')
+      const rows = []
+
+      for (let i = 0; i < NUM_SLOTS; i++) {
+        const row = document.createElement('div')
+        row.className = 'slot-row'
+
+        const badge = document.createElement('span')
+        badge.className = 'slot-num'
+        badge.textContent = String(i + 1)
+
+        const input = document.createElement('input')
+        input.type = 'text'
+        input.className = 'slot-input'
+        input.placeholder = String(i + 1) + '.'
+
+        row.appendChild(badge)
+        row.appendChild(input)
+        slotsEl.appendChild(row)
+        rows.push({ row, input })
+      }
+
+      // ── Format: "N. <content>", one line per slot ─────────────────────
+      // Parser: split on newlines, match /^\s*(\d+)\.\s?(.*)$/, place at index N-1.
+      // Serializer: always emit exactly 10 lines, including empty ones.
+
+      function parse(raw) {
+        const slots = Array(NUM_SLOTS).fill('')
+        if (typeof raw !== 'string') return slots
+        for (const line of raw.split('\n')) {
+          const m = line.match(/^\s*(\d+)\.\s?(.*)$/)
+          if (!m) continue
+          const idx = parseInt(m[1], 10) - 1
+          if (idx >= 0 && idx < NUM_SLOTS) slots[idx] = m[2].trim()
+        }
+        return slots
+      }
+
+      function serialize(slots) {
+        return slots.map((c, i) => `${i + 1}. ${c}`).join('\n')
+      }
+
+      // ── DOM sync ──────────────────────────────────────────────────────
+
+      function applySlots(slots) {
+        for (let i = 0; i < NUM_SLOTS; i++) {
+          const { row, input } = rows[i]
+          input.value = slots[i]
+          row.classList.toggle('has-content', slots[i].length > 0)
+        }
+      }
+
+      // ── Focus tracking ────────────────────────────────────────────────
+
+      let focusedIdx = -1
+      rows.forEach(({ input }, i) => {
+        input.addEventListener('focus', () => {
+          focusedIdx = i
+        })
+        input.addEventListener('blur', () => {
+          if (focusedIdx === i) focusedIdx = -1
+        })
+      })
+
+      function anyFocused() {
+        return focusedIdx >= 0
+      }
+
+      // ── Debounced write on input ──────────────────────────────────────
+
+      let writeTimer = null
+      let lastKnownRaw = null
+
+      function scheduleWrite() {
+        // Refresh accent border immediately as user types
+        rows.forEach(({ row, input }) => {
+          row.classList.toggle('has-content', input.value.length > 0)
+        })
+        clearTimeout(writeTimer)
+        writeTimer = setTimeout(async () => {
+          const raw = serialize(rows.map(({ input }) => input.value))
+          lastKnownRaw = raw
+          try {
+            await window.atelier.context.set('slots', raw)
+          } catch (_) {
+            /* silent — host not yet wired during dev */
+          }
+        }, DEBOUNCE_MS)
+      }
+
+      rows.forEach(({ input }) => input.addEventListener('input', scheduleWrite))
+
+      // ── Poll for agent updates ────────────────────────────────────────
+
+      async function poll() {
+        try {
+          const raw = await window.atelier.context.get('slots')
+          if (raw !== lastKnownRaw && !anyFocused()) {
+            lastKnownRaw = raw
+            applySlots(parse(raw))
+          }
+        } catch (_) {
+          /* ignore */
+        }
+      }
+
+      // ── Load: restore from context, then start polling ────────────────
+
+      window.atelier.on('load', async () => {
+        try {
+          const raw = await window.atelier.context.get('slots')
+          lastKnownRaw = raw
+          applySlots(parse(raw))
+        } catch (_) {
+          /* start with 10 empty slots */
+        }
+        setInterval(poll, POLL_MS)
+      })
+    </script>
+  </body>
+</html>

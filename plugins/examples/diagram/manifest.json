@@ -1,0 +1,12 @@
+{
+  "id": "diagram",
+  "name": "Diagram",
+  "version": "0.1.0",
+  "kind": "panel",
+  "entry": "index.html",
+  "permissions": ["context"],
+  "defaultDock": "right",
+  "contextExports": [
+    { "key": "graph", "label": "Diagram (nodes & edges)", "format": "text", "maxTokens": 1200 }
+  ]
+}

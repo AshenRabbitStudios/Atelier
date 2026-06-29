@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Mental Model</title>
+    <script src="atelier-plugin://__runtime__/atelier.js"></script>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: var(--surface, #14171e);
+        color: var(--text, #e7eaf0);
+        font-family: var(--font, system-ui, sans-serif);
+      }
+
+      #root {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+
+      #header {
+        flex: 0 0 auto;
+        padding: 8px 12px 6px;
+        border-bottom: 1px solid var(--border, #252b37);
+        font-size: 11px;
+        color: var(--dim, #8b97ae);
+        letter-spacing: 0.02em;
+        user-select: none;
+      }
+
+      #header strong {
+        color: var(--text, #e7eaf0);
+        font-weight: 600;
+      }
+
+      #sync-indicator {
+        float: right;
+        font-size: 10px;
+        color: var(--faint, #5e6677);
+        transition: color 0.3s;
+      }
+
+      #sync-indicator.active {
+        color: var(--ok, #4caf82);
+      }
+
+      #sync-indicator.saving {
+        color: var(--accent, #5b9cff);
+      }
+
+      #textarea-wrap {
+        flex: 1 1 0;
+        min-height: 0;
+        position: relative;
+      }
+
+      #editor {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        padding: 12px;
+        margin: 0;
+        border: none;
+        outline: none;
+        resize: none;
+        background: transparent;
+        color: var(--text, #e7eaf0);
+        font-family: var(--mono, monospace);
+        font-size: 13px;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        caret-color: var(--accent, #5b9cff);
+      }
+
+      #editor::placeholder {
+        color: var(--faint, #5e6677);
+        font-style: italic;
+      }
+
+      #editor:focus {
+        background: var(--bg-2, #0f1117);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div id="header">
+        <strong>Mental model</strong> — the agent's working picture (editable)
+        <span id="sync-indicator"></span>
+      </div>
+      <div id="textarea-wrap">
+        <textarea
+          id="editor"
+          spellcheck="false"
+          placeholder="The agent will build its mental model here. You can edit it too."
+        ></textarea>
+      </div>
+    </div>
+
+    <script>
+      const editor = document.getElementById('editor')
+      const indicator = document.getElementById('sync-indicator')
+
+      let focused = false
+      let lastKnownValue = null
+      let debounceTimer = null
+      let pollTimer = null
+
+      function showIndicator(state) {
+        indicator.className = state
+        if (state === 'active') {
+          indicator.textContent = 'synced'
+        } else if (state === 'saving') {
+          indicator.textContent = 'saving…'
+        } else {
+          indicator.textContent = ''
+        }
+        if (state === 'active') {
+          clearTimeout(indicator._hide)
+          indicator._hide = setTimeout(() => {
+            indicator.textContent = ''
+            indicator.className = ''
+          }, 1200)
+        }
+      }
+
+      async function loadValue() {
+        try {
+          const val = await window.atelier.context.get('model')
+          const v = typeof val === 'string' ? val : ''
+          lastKnownValue = v
+          editor.value = v
+        } catch (e) {
+          editor.placeholder = 'Context unavailable: ' + (e && e.message ? e.message : String(e))
+        }
+      }
+
+      async function saveValue() {
+        const v = editor.value
+        try {
+          showIndicator('saving')
+          await window.atelier.context.set('model', v)
+          lastKnownValue = v
+          showIndicator('active')
+        } catch (e) {
+          showIndicator('')
+        }
+      }
+
+      editor.addEventListener('focus', () => {
+        focused = true
+      })
+      editor.addEventListener('blur', () => {
+        focused = false
+      })
+
+      editor.addEventListener('input', () => {
+        clearTimeout(debounceTimer)
+        debounceTimer = setTimeout(saveValue, 400)
+      })
+
+      function startPolling() {
+        pollTimer = setInterval(async () => {
+          if (focused) return
+          try {
+            const val = await window.atelier.context.get('model')
+            const v = typeof val === 'string' ? val : ''
+            if (v !== lastKnownValue) {
+              lastKnownValue = v
+              editor.value = v
+              showIndicator('active')
+            }
+          } catch (_) {
+            // silent — host may not be ready yet
+          }
+        }, 1500)
+      }
+
+      window.atelier.on('load', async () => {
+        await loadValue()
+        startPolling()
+      })
+    </script>
+  </body>
+</html>

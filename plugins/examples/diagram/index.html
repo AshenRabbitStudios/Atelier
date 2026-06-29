@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Diagram</title>
+    <!-- Host runtime injects window.atelier. Must be the first script. -->
+    <script src="atelier-plugin://__runtime__/atelier.js"></script>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        font-family: var(--font, system-ui, sans-serif);
+        background: var(--bg, #0f1117);
+        color: var(--text, #e7eaf0);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      /* ── Header ──────────────────────────────────────────────────────── */
+      .hdr {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        background: var(--surface, #14171e);
+        border-bottom: 1px solid var(--border, #252b37);
+        flex-shrink: 0;
+        position: relative;
+      }
+      .hdr-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text, #e7eaf0);
+        flex: 1;
+      }
+      .hdr-meta {
+        font-size: 11px;
+        color: var(--faint, #5e6677);
+      }
+      .btn-help {
+        background: none;
+        border: 1px solid var(--border, #252b37);
+        border-radius: 4px;
+        color: var(--dim, #8892a4);
+        cursor: pointer;
+        font-size: 11px;
+        padding: 2px 7px;
+        font-family: inherit;
+        line-height: 1.5;
+      }
+      .btn-help:hover {
+        border-color: var(--border-2, #333b4b);
+        color: var(--text, #e7eaf0);
+      }
+
+      /* ── Help popover ─────────────────────────────────────────────────── */
+      .help-pop {
+        display: none;
+        position: absolute;
+        top: calc(100% + 4px);
+        right: 8px;
+        z-index: 200;
+        background: var(--surface-2, #191d27);
+        border: 1px solid var(--border-2, #333b4b);
+        border-radius: 8px;
+        padding: 12px 14px;
+        font-size: 12px;
+        line-height: 1.7;
+        min-width: 270px;
+        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+      }
+      .help-pop.open {
+        display: block;
+      }
+      .help-pop strong {
+        color: var(--text, #e7eaf0);
+      }
+      .help-pop p {
+        color: var(--dim, #8892a4);
+        margin-top: 6px;
+      }
+      .help-pop pre {
+        margin-top: 8px;
+        padding: 8px 10px;
+        background: var(--bg, #0f1117);
+        border-radius: 5px;
+        font-family: var(--mono, monospace);
+        font-size: 11px;
+        color: var(--accent, #5b9cff);
+        white-space: pre;
+        line-height: 1.65;
+      }
+
+      /* ── Canvas (scrollable) ─────────────────────────────────────────── */
+      .canvas-wrap {
+        flex: 1 1 0;
+        overflow: auto;
+        position: relative;
+        background: var(--bg, #0f1117);
+      }
+      /* Inner canvas: width/height set by JS */
+      .canvas {
+        position: relative;
+      }
+      /* SVG sits behind node boxes */
+      .canvas svg {
+        position: absolute;
+        top: 0;
+        left: 0;
+        pointer-events: none;
+        overflow: visible;
+      }
+
+      /* Node boxes */
+      .nd {
+        position: absolute;
+        width: 180px;
+        height: 56px;
+        /* left set by JS; translateX(-50%) centres it on the column axis */
+        transform: translateX(-50%);
+        background: var(--surface-2, #191d27);
+        border: 1px solid var(--border, #252b37);
+        border-radius: 8px;
+        padding: 7px 10px 7px 10px;
+        overflow: hidden;
+      }
+      .nd-id {
+        font-family: var(--mono, monospace);
+        font-size: 10px;
+        color: var(--accent, #5b9cff);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .nd-lbl {
+        font-size: 12px;
+        color: var(--text, #e7eaf0);
+        margin-top: 2px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      /* Empty-canvas hint */
+      .empty-hint {
+        position: absolute;
+        top: 24px;
+        left: 50%;
+        transform: translateX(-50%);
+        color: var(--faint, #5e6677);
+        font-family: var(--mono, monospace);
+        font-size: 12px;
+        text-align: center;
+        white-space: nowrap;
+        pointer-events: none;
+      }
+
+      /* ── Editor section ───────────────────────────────────────────────── */
+      .edit-sec {
+        flex-shrink: 0;
+        display: flex;
+        flex-direction: column;
+        height: 158px;
+        border-top: 1px solid var(--border, #252b37);
+        background: var(--surface, #14171e);
+      }
+      .edit-lbl {
+        padding: 4px 10px 2px;
+        font-size: 10px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--faint, #5e6677);
+        flex-shrink: 0;
+      }
+      textarea {
+        flex: 1 1 0;
+        resize: none;
+        background: var(--input, #1b2029);
+        color: var(--text, #e7eaf0);
+        border: none;
+        border-top: 1px solid var(--border, #252b37);
+        font-family: var(--mono, monospace);
+        font-size: 12px;
+        line-height: 1.65;
+        padding: 6px 10px;
+        outline: none;
+      }
+      textarea:focus {
+        border-top-color: var(--accent, #5b9cff);
+      }
+      textarea::placeholder {
+        color: var(--faint, #5e6677);
+      }
+      .status-bar {
+        flex-shrink: 0;
+        padding: 3px 10px 4px;
+        font-size: 10px;
+        color: var(--faint, #5e6677);
+        border-top: 1px solid var(--border, #252b37);
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Header -->
+    <div class="hdr">
+      <span class="hdr-title">Diagram — nodes &amp; edges (editable source)</span>
+      <span class="hdr-meta" id="meta"></span>
+      <button class="btn-help" id="btn-help">? DSL</button>
+
+      <!-- Help popover -->
+      <div class="help-pop" id="help-pop">
+        <strong>Diagram DSL</strong> — one declaration per line:
+        <pre>
+# comment line (ignored)
+NodeId: free text label
+A -> B: edge label
+A -> B       (edge, no label)
+NodeId       (node, id only)</pre>
+        <p>
+          NodeId is a short token with no spaces. The agent writes this text; you can edit it
+          directly too. Blank lines are ignored.
+        </p>
+      </div>
+    </div>
+
+    <!-- Canvas -->
+    <div class="canvas-wrap" id="canvas-wrap">
+      <div class="canvas" id="canvas">
+        <!-- SVG edge layer (always first child — behind node boxes) -->
+        <svg id="svg-edges">
+          <defs>
+            <!-- Arrow marker: tip at (7,3), ref at (6,3), 1 px past endpoint -->
+            <marker
+              id="arr"
+              markerWidth="7"
+              markerHeight="7"
+              refX="6"
+              refY="3"
+              orient="auto"
+              markerUnits="userSpaceOnUse"
+            >
+              <path d="M0,0 L0,6 L7,3 z" fill="var(--dim,#8892a4)" />
+            </marker>
+          </defs>
+        </svg>
+      </div>
+    </div>
+
+    <!-- Editor -->
+    <div class="edit-sec">
+      <div class="edit-lbl">DSL source</div>
+      <textarea
+        id="dsl"
+        spellcheck="false"
+        placeholder="# example&#10;A: start&#10;B: process&#10;C: end&#10;A -> B: triggers&#10;B -> C: leads to"
+      ></textarea>
+      <div class="status-bar" id="status">connecting…</div>
+    </div>
+
+    <script>
+      /* =================================================================
+       * Diagram DSL (self-contained, no external libraries):
+       *
+       *   NodeId: free text label    — declares/labels a node
+       *   A -> B: edge label         — directed edge (label optional)
+       *   # comment                  — ignored
+       *   blank line                 — ignored
+       *
+       * NodeId is a short token (no spaces). Nodes appear in first-
+       * appearance order. Edges are drawn as SVG paths: forward edges
+       * (straight line, top-down), backward edges (curved left-gutter),
+       * self-loops (arc on the right). Unknown/malformed lines are silently
+       * skipped — the renderer never throws.
+       * ================================================================= */
+
+      /* ── Layout constants ─────────────────────────────────────────────── */
+      const NODE_W = 180 // px — fixed node box width
+      const NODE_H = 56 // px — fixed node box height
+      const GAP_Y = 44 // px — vertical gap between successive nodes
+      const PAD_T = 24 // px — top padding
+      const PAD_B = 28 // px — bottom padding
+
+      /* ── DSL parser ───────────────────────────────────────────────────── */
+      // Returns { nodeOrder: string[], labels: Map<id,label>, edges: [{from,to,label}] }
+      function parseDSL(text) {
+        const nodeOrder = []
+        const labels = new Map()
+        const edges = []
+
+        // Regex: optional spaces, NodeId, optional "-> Target", optional ": label"
+        const reEdge = /^(\S+)\s*->\s*(\S+)(?:\s*:\s*(.*))?$/
+        const reNode = /^(\S+)(?:\s*:\s*(.*))?$/
+
+        for (const raw of (text || '').split('\n')) {
+          try {
+            const ln = raw.trim()
+            if (!ln || ln.startsWith('#')) continue
+
+            const em = reEdge.exec(ln)
+            if (em) {
+              const [, from, to, lbl = ''] = em
+              if (!labels.has(from)) {
+                labels.set(from, '')
+                nodeOrder.push(from)
+              }
+              if (!labels.has(to)) {
+                labels.set(to, '')
+                nodeOrder.push(to)
+              }
+              edges.push({ from, to, label: lbl.trim() })
+              continue
+            }
+
+            const nm = reNode.exec(ln)
+            if (nm) {
+              const [, id, lbl = ''] = nm
+              if (!labels.has(id)) nodeOrder.push(id)
+              labels.set(id, lbl.trim())
+            }
+          } catch (_) {
+            /* skip malformed lines silently */
+          }
+        }
+
+        return { nodeOrder, labels, edges }
+      }
+
+      /* ── Renderer ─────────────────────────────────────────────────────── */
+      function renderGraph(text) {
+        const wrap = document.getElementById('canvas-wrap')
+        const canvas = document.getElementById('canvas')
+        const svg = document.getElementById('svg-edges')
+        const meta = document.getElementById('meta')
+
+        // Remove old node boxes and empty hints; keep SVG <defs>
+        canvas.querySelectorAll('.nd, .empty-hint').forEach((el) => el.remove())
+        svg.querySelectorAll('.edge').forEach((el) => el.remove())
+
+        let parsed
+        try {
+          parsed = parseDSL(text)
+        } catch (_) {
+          parsed = { nodeOrder: [], labels: new Map(), edges: [] }
+        }
+
+        const { nodeOrder, labels, edges } = parsed
+        const n = nodeOrder.length
+
+        // Canvas dimensions
+        const cw = Math.max(wrap.clientWidth || 380, 320)
+        const ch = n === 0 ? 72 : PAD_T + n * NODE_H + Math.max(0, n - 1) * GAP_Y + PAD_B
+
+        canvas.style.width = cw + 'px'
+        canvas.style.height = ch + 'px'
+        svg.setAttribute('width', cw)
+        svg.setAttribute('height', ch)
+
+        if (n === 0) {
+          const hint = document.createElement('div')
+          hint.className = 'empty-hint'
+          hint.textContent = '# no nodes yet — add DSL source below'
+          canvas.appendChild(hint)
+          meta.textContent = ''
+          return
+        }
+
+        meta.textContent = `${n} node${n !== 1 ? 's' : ''} · ${edges.length} edge${edges.length !== 1 ? 's' : ''}`
+        const cx = Math.floor(cw / 2) // column centre x
+
+        // Build position map: id -> { x, y, idx }
+        const pos = {}
+        nodeOrder.forEach((id, i) => {
+          pos[id] = { x: cx, y: PAD_T + i * (NODE_H + GAP_Y), idx: i }
+        })
+
+        /* ── Draw edges (SVG, appended before node boxes so they sit behind) */
+        edges.forEach((edge, ei) => {
+          const s = pos[edge.from]
+          const d = pos[edge.to]
+          if (!s || !d) return // guard: unknown node id
+
+          const g = document.createElementNS('http://www.w3.org/2000/svg', 'g')
+          g.setAttribute('class', 'edge')
+
+          const isSelf = edge.from === edge.to
+          const isForward = !isSelf && d.idx > s.idx
+
+          let pathD, lx, ly, anchor
+
+          if (isSelf) {
+            /* Self-loop: arc on the right side */
+            const rx = s.x + NODE_W / 2
+            const ry = s.y + NODE_H / 2
+            pathD = `M ${rx} ${ry - 10} C ${rx + 48} ${ry - 24} ${rx + 48} ${ry + 24} ${rx} ${ry + 10}`
+            lx = rx + 52
+            ly = ry
+            anchor = 'start'
+          } else if (isForward) {
+            /* Forward edge: straight vertical line, bottom-center → top-center */
+            const x1 = s.x,
+              y1 = s.y + NODE_H
+            const x2 = d.x,
+              y2 = d.y
+            pathD = `M ${x1} ${y1} L ${x2} ${y2}`
+            // Label sits to the right of the line, at its midpoint
+            lx = x1 + NODE_W / 2 + 5
+            ly = (y1 + y2) / 2
+            anchor = 'start'
+          } else {
+            /* Backward edge: cubic bezier through left gutter
+             Stagger multiple back-edges so they don't overlap */
+            const gx = cx - NODE_W / 2 - 20 - (ei % 4) * 12
+            const x1 = s.x - NODE_W / 2,
+              y1 = s.y + NODE_H / 2
+            const x2 = d.x - NODE_W / 2,
+              y2 = d.y + NODE_H / 2
+            pathD = `M ${x1} ${y1} C ${gx} ${y1} ${gx} ${y2} ${x2} ${y2}`
+            lx = gx - 4
+            ly = (y1 + y2) / 2
+            anchor = 'end'
+          }
+
+          /* Path element */
+          const p = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+          p.setAttribute('d', pathD)
+          p.setAttribute('fill', 'none')
+          p.setAttribute('stroke', 'var(--border-2,#333b4b)')
+          p.setAttribute('stroke-width', '1.5')
+          p.setAttribute('marker-end', 'url(#arr)')
+          g.appendChild(p)
+
+          /* Optional edge label */
+          if (edge.label) {
+            const t = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+            t.setAttribute('x', lx)
+            t.setAttribute('y', ly)
+            t.setAttribute('fill', 'var(--dim,#8892a4)')
+            t.setAttribute('font-size', '11')
+            t.setAttribute('font-family', 'var(--font,system-ui,sans-serif)')
+            t.setAttribute('text-anchor', anchor)
+            t.setAttribute('dominant-baseline', 'middle')
+            t.textContent = edge.label
+            g.appendChild(t)
+          }
+
+          svg.appendChild(g)
+        })
+
+        /* ── Draw node boxes (appended after SVG so they render on top) ── */
+        nodeOrder.forEach((id) => {
+          const { x, y } = pos[id]
+          const lbl = labels.get(id) || ''
+
+          const box = document.createElement('div')
+          box.className = 'nd'
+          box.style.left = x + 'px'
+          box.style.top = y + 'px'
+
+          const idEl = document.createElement('div')
+          idEl.className = 'nd-id'
+          idEl.textContent = id
+          box.appendChild(idEl)
+
+          if (lbl) {
+            const lblEl = document.createElement('div')
+            lblEl.className = 'nd-lbl'
+            lblEl.textContent = lbl
+            box.appendChild(lblEl)
+          }
+
+          canvas.appendChild(box)
+        })
+      }
+
+      /* ── DOM refs ─────────────────────────────────────────────────────── */
+      const dslEl = document.getElementById('dsl')
+      const statusEl = document.getElementById('status')
+      const btnHelp = document.getElementById('btn-help')
+      const popHelp = document.getElementById('help-pop')
+
+      let lastValue = null // last value fetched from / saved to context
+      let isFocused = false // true while user is typing in the textarea
+      let debounce = null // timer handle for save debounce
+
+      /* ── Help popover toggle ─────────────────────────────────────────── */
+      btnHelp.addEventListener('click', (e) => {
+        e.stopPropagation()
+        popHelp.classList.toggle('open')
+      })
+      document.addEventListener('click', () => popHelp.classList.remove('open'))
+
+      /* ── Focus tracking (skip polling while user types) ─────────────── */
+      dslEl.addEventListener('focus', () => {
+        isFocused = true
+      })
+      dslEl.addEventListener('blur', () => {
+        isFocused = false
+      })
+
+      /* ── User edits: re-render immediately, save after 400 ms debounce ─ */
+      dslEl.addEventListener('input', () => {
+        renderGraph(dslEl.value)
+        clearTimeout(debounce)
+        debounce = setTimeout(async () => {
+          try {
+            await window.atelier.context.set('graph', dslEl.value)
+            lastValue = dslEl.value
+            statusEl.textContent = 'saved ✓'
+          } catch (err) {
+            statusEl.textContent = 'save error: ' + ((err && err.message) || err)
+          }
+        }, 400)
+      })
+
+      /* ── Initial load from context (treat every mount as a restore) ──── */
+      async function loadGraph() {
+        try {
+          const raw = await window.atelier.context.get('graph')
+          const val = typeof raw === 'string' ? raw : ''
+          dslEl.value = val
+          lastValue = val
+          renderGraph(val)
+          statusEl.textContent = val.trim() ? 'ready' : 'ready · empty'
+        } catch (err) {
+          statusEl.textContent = 'load error: ' + ((err && err.message) || err)
+        }
+      }
+
+      /* ── Poll for agent-driven updates every 1 500 ms ────────────────── */
+      setInterval(async () => {
+        if (isFocused) return // never clobber user typing
+        try {
+          const raw = await window.atelier.context.get('graph')
+          const val = typeof raw === 'string' ? raw : ''
+          if (val !== lastValue) {
+            lastValue = val
+            dslEl.value = val
+            renderGraph(val)
+            statusEl.textContent = 'updated by agent'
+            setTimeout(() => {
+              if (statusEl.textContent === 'updated by agent') {
+                statusEl.textContent = 'ready'
+              }
+            }, 2500)
+          }
+        } catch (_) {
+          /* silent — host may not be ready yet */
+        }
+      }, 1500)
+
+      /* ── Re-render on pane resize (keeps layout in sync) ─────────────── */
+      if (typeof ResizeObserver !== 'undefined') {
+        new ResizeObserver(() => {
+          if (lastValue !== null) renderGraph(dslEl.value)
+        }).observe(document.getElementById('canvas-wrap'))
+      }
+
+      /* ── Entry point ─────────────────────────────────────────────────── */
+      window.atelier.on('load', loadGraph)
+    </script>
+  </body>
+</html>

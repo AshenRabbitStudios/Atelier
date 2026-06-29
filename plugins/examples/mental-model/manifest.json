@@ -1,0 +1,12 @@
+{
+  "id": "mental-model",
+  "name": "Mental Model",
+  "version": "0.1.0",
+  "kind": "panel",
+  "entry": "index.html",
+  "permissions": ["context"],
+  "defaultDock": "right",
+  "contextExports": [
+    { "key": "model", "label": "Mental model", "format": "markdown", "maxTokens": 1800 }
+  ]
+}

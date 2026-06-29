@@ -1,0 +1,12 @@
+{
+  "id": "data-table",
+  "name": "Data Table",
+  "version": "0.1.0",
+  "kind": "panel",
+  "entry": "index.html",
+  "permissions": ["context"],
+  "defaultDock": "right",
+  "contextExports": [
+    { "key": "table", "label": "Data table (CSV)", "format": "text", "maxTokens": 1500 }
+  ]
+}

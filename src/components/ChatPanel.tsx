@@ -258,10 +258,11 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
       </header>
 
       <div className="transcript" ref={transcriptRef} onScroll={onTranscriptScroll}>
-        {state.messages.map((m) => (
+        {state.messages.map((m, i) => (
           <MessageView
             key={m.id}
             message={m}
+            live={busy && m.role === 'assistant' && i === state.messages.length - 1}
             editing={editing?.id === m.id ? editing.draft : null}
             forkPoint={state.forkPoints[m.id]}
             onSwitch={switchBranch}
@@ -278,6 +279,12 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
             {err.detail !== undefined && <pre className="error-detail">{pretty(err.detail)}</pre>}
           </details>
         ))}
+        {busy && state.pending.length === 0 && state.questions.length === 0 && (
+          <div className="activity">
+            <span className="spinner" />
+            <span>{activityLabel(state.messages)}</span>
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
 
@@ -353,6 +360,7 @@ function Composer({
 
 interface MessageViewProps {
   message: Message
+  live: boolean // this is the in-progress assistant turn (auto-expand its thinking)
   editing: string | null // the draft text if this message is being edited, else null
   forkPoint?: ForkPoint
   onSwitch: (sessionId: string) => void
@@ -365,6 +373,7 @@ interface MessageViewProps {
 
 function MessageView({
   message,
+  live,
   editing,
   forkPoint,
   onSwitch,
@@ -434,7 +443,7 @@ function MessageView({
       ) : (
         <div className="msg-body">
           {message.blocks.map((b, i) => (
-            <BlockView key={i} block={b} />
+            <BlockView key={i} block={b} live={live} />
           ))}
         </div>
       )}
@@ -442,7 +451,7 @@ function MessageView({
   )
 }
 
-function BlockView({ block }: { block: Block }) {
+function BlockView({ block, live }: { block: Block; live: boolean }) {
   switch (block.kind) {
     case 'text':
       return (
@@ -451,12 +460,7 @@ function BlockView({ block }: { block: Block }) {
         </div>
       )
     case 'thinking':
-      return (
-        <details className="block-thinking">
-          <summary>Thinking</summary>
-          <div className="thinking-body">{block.text}</div>
-        </details>
-      )
+      return <ThinkingBlock text={block.text} live={live} />
     case 'tool_use':
       return (
         <details className="block-tool">
@@ -584,6 +588,37 @@ function QuestionCard({ req, onAnswer }: { req: QuestionRequest; onAnswer: Answe
       </div>
     </div>
   )
+}
+
+// A thinking block that auto-expands while the model is actively reasoning, so the chain of
+// thought streams in live. Collapses to a toggle afterward (left where the user puts it).
+function ThinkingBlock({ text, live }: { text: string; live: boolean }) {
+  const [open, setOpen] = useState(live)
+  useEffect(() => {
+    if (live) setOpen(true)
+  }, [live])
+  return (
+    <div className={`block-thinking ${open ? 'open' : ''}`}>
+      <button className="block-summary" onClick={() => setOpen((o) => !o)}>
+        <span className="chevron">{open ? '▾' : '▸'}</span>
+        <span className={`thinking-label ${live ? 'live' : ''}`}>
+          {live ? 'Thinking…' : 'Thought process'}
+        </span>
+      </button>
+      {open && <div className="thinking-body">{text}</div>}
+    </div>
+  )
+}
+
+// A short description of what the agent is doing right now (for the working spinner row).
+function activityLabel(messages: Message[]): string {
+  const last = messages[messages.length - 1]
+  if (!last || last.role !== 'assistant') return 'Thinking…'
+  const lb = last.blocks[last.blocks.length - 1]
+  if (!lb) return 'Thinking…'
+  if (lb.kind === 'tool_use') return lb.result ? 'Working…' : `Running ${lb.name}…`
+  if (lb.kind === 'thinking') return 'Thinking…'
+  return 'Writing…'
 }
 
 // Tint a tool by kind (DESIGN_SYSTEM.md §5): read=accent, edit=warn, bash=ok.

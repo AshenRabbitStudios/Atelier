@@ -126,3 +126,51 @@ persistence/restore is correct from day one (PLUGIN_API §8), even though inject
   conversation manifest; plugin content in `conversations/<id>/plugins/<pluginId>/storage.json`.
 - Pinned context: snapshots are runtime (re-pushed by the plugin on `load`); the *set of pins*
   is persisted in the manifest. A plugin rebuilds its export in `load` from `storage`.
+
+## Dos & Don'ts (invariants — violating these breaks the intent)
+
+These are the load-bearing rules. A change that breaks one requires a recorded decision, not a
+quiet diff. Reviewers enforce them.
+
+**DO**
+- **Treat every mount as a potential restore.** A plugin's `load` MUST fully rebuild its pane
+  from `storage` alone. (This is what makes close/quit/reopen-days-later work.)
+- **Keep the rail as app chrome** (perma-docked left, always present); spawn plugin *content* as
+  normal Dockview panes that dock/float/tab like anything else.
+- **Define the manifest fields now** — `plugins{enabled,pinnedExports}` on the conversation,
+  `contextExports` on the plugin — so persistence is correct from day one, even though pinning
+  injection lands in P4.
+- **Validate every boundary payload with Zod at the receiving side** (manifest, host RPC, control).
+- **Make `context.update` the freshness mechanism:** the plugin pushes a new snapshot whenever the
+  user changes something inside it. Re-read snapshots at send time, every turn.
+- **Confirm the SDK context-injection mechanism against the live reference and record it in
+  docs/SDK_NOTES.md BEFORE building pinning** (per CLAUDE.md — the SDK surface drifts).
+- **Keep the host API identical** across whatever sandbox tech is chosen (webview vs iframe).
+- **Surface legibility in the rail:** each plugin's declared permissions, load/error status, and
+  the token cost of its pinned exports.
+
+**DON'T**
+- **Don't give plugins direct fs / SDK / process / raw IPC access.** Everything goes through the
+  host RPC. This single line is what keeps a malformed or agent-authored plugin contained.
+- **Don't hot-reload backend modules in-process.** Backends are child processes/workers, killed
+  and respawned on reload (stale-reference hazard). UI plugins reload by reloading their sandbox.
+- **Don't persist a plugin's DOM or in-memory runtime.** Only `storage` is restorable; anything
+  not written there is gone on reload. The host never snapshots plugin runtime.
+- **Don't put pinned context into the editable transcript.** It is a host-framed, ephemeral block
+  refreshed each turn — putting it in user/assistant content breaks editable history AND freshness.
+- **Don't let pinned context be unbounded.** Always enforce per-export `maxTokens`, mark truncation,
+  and show the cost. Silent context bloat is a regression.
+- **Don't conflate registry scope with enablement scope.** The registry is **app-wide**; *enabled*
+  (and thus mounted/displayed) is **per-conversation**. Making either global-or-local the wrong way
+  breaks the whole model.
+- **Don't hardcode plugins or layout.** A plugin is a folder; enablement/layout/pins are JSON. This
+  is precisely what enables the self-hosting loop and hot-reload — don't trade it for convenience.
+- **Don't constrain the control channel's vocabulary.** `plugin_control` fixes the *boundary*, not
+  the *content*; the plugin interprets commands freely. Locking the vocabulary kills "control
+  universally without limiting what's written inside."
+- **Don't let a bad plugin throw into the host.** Validate at the edge, isolate the failure, and
+  surface it in the rail — never let it crash the app or another plugin.
+- **Don't leak storage across conversations.** `(conversation, plugin)` is the scope; conversation
+  A's data is invisible to B even for the same plugin id.
+- **Don't block discovery on load.** Discovery is passive (watcher + validate); loading is an
+  explicit user action (or dev auto-load). A broken plugin still lists; it just doesn't mount.

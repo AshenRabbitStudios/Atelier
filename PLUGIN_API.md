@@ -174,6 +174,11 @@ alone. Treat every mount as a potential restore.
 
 ## 9. Open questions (record answers in docs/DECISIONS.md)
 
+> **See docs/PLUGIN_ARCHITECTURE.md** for the resolved design: per-conversation enablement
+> (app-wide registry), context pinning (`contextExports` + `context.update` + host injection),
+> and universal agent control (`plugin_control` over a `control:<pluginId>` channel), plus the
+> dos & don'ts that protect these invariants.
+
 - Tool scoping: are plugin-contributed tools global to all instances, or per-instance
   opt-in? Default global; revisit if it gets noisy.
 - Sandbox tech: Electron `<webview>` vs sandboxed iframe + preload. Pick one early and keep

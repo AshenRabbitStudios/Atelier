@@ -1,7 +1,7 @@
 {
   "id": "data-table",
   "name": "Data Table",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "icon": "M2.5 3.5h11v9h-11zM2.5 6.7h11M6.3 3.5v9M9.8 3.5v9",
   "kind": "panel",
   "entry": "index.html",

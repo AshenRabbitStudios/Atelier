@@ -7,7 +7,9 @@ import prettier from 'eslint-config-prettier'
 import globals from 'globals'
 
 export default tseslint.config(
-  { ignores: ['node_modules', 'out', 'dist', 'coverage', '**/*.tsbuildinfo'] },
+  // `plugins/` holds sandboxed browser plugin frontends (their own runtime + the injected
+  // `atelier` global); they aren't part of the app's lint surface. Prettier still formats them.
+  { ignores: ['node_modules', 'out', 'dist', 'coverage', '**/*.tsbuildinfo', 'plugins'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

@@ -1,0 +1,325 @@
+/* Data Table → Spreadsheet. Token-only colors (host CSS vars + slate fallbacks). */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  font-family: var(--font, system-ui, sans-serif);
+  background: var(--bg, #0f1117);
+  color: var(--text, #e7eaf0);
+  font-size: 13px;
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ── Formula / cell bar ──────────────────────────────────────────────── */
+#toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  border-bottom: 1px solid var(--border, #252b37);
+  background: var(--surface-2, #181d27);
+}
+#cellref {
+  flex: 0 0 auto;
+  min-width: 58px;
+  padding: 6px 10px;
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent, #5b9cff);
+  background: var(--surface-3, #202634);
+  border-right: 1px solid var(--border, #252b37);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+}
+#fx {
+  flex: 0 0 auto;
+  width: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono, monospace);
+  font-size: 12px;
+  font-style: italic;
+  color: var(--faint, #5e6677);
+  border-right: 1px solid var(--border, #252b37);
+  user-select: none;
+}
+#formula-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: var(--input, #1b2029);
+  color: var(--text, #e7eaf0);
+  font-family: var(--mono, monospace);
+  font-size: 12px;
+  padding: 6px 10px;
+}
+#formula-input:focus {
+  background: var(--surface, #14171e);
+  box-shadow: inset 0 0 0 1px var(--accent-weak, #1e2a44);
+}
+#formula-input::placeholder {
+  color: var(--faint, #5e6677);
+}
+
+/* ── Scroll area ─────────────────────────────────────────────────────── */
+#grid-scroll {
+  flex: 1 1 0;
+  overflow: auto;
+  min-height: 0;
+  position: relative;
+}
+
+#hint {
+  padding: 22px 18px;
+  color: var(--faint, #5e6677);
+  font-size: 11px;
+  font-family: var(--mono, monospace);
+  white-space: pre;
+  line-height: 1.7;
+}
+
+/* ── Grid ────────────────────────────────────────────────────────────── */
+table#grid {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+  table-layout: fixed;
+}
+
+table#grid th,
+table#grid td {
+  border-right: 1px solid var(--border, #252b37);
+  border-bottom: 1px solid var(--border, #252b37);
+  padding: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 320px;
+}
+
+/* Letter row (A, B, C …) */
+th.letter {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  width: 132px;
+  height: 18px;
+  background: var(--surface-3, #202634);
+  color: var(--dim, #8b93a5);
+  font-family: var(--mono, monospace);
+  font-size: 10px;
+  font-weight: 600;
+  text-align: center;
+  user-select: none;
+  cursor: pointer;
+}
+th.letter.active {
+  background: var(--accent-weak, #1e2a44);
+  color: var(--accent, #5b9cff);
+}
+
+/* Header-name row (the data's header row) */
+th.name {
+  position: sticky;
+  z-index: 2;
+  background: var(--surface-2, #181d27);
+  color: var(--text, #e7eaf0);
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+  user-select: none;
+}
+th.name:hover {
+  background: var(--surface-3, #202634);
+}
+th.name.active {
+  background: var(--accent-weak, #1e2a44);
+}
+th.name.num .cellbox {
+  text-align: right;
+  justify-content: flex-end;
+}
+th.name .cellbox {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 9px;
+}
+th.name .sort-ind {
+  font-size: 9px;
+  color: var(--accent, #5b9cff);
+}
+
+/* Corner cell (top-left) */
+th.corner {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 4;
+  background: var(--surface-3, #202634);
+  border-right: 1px solid var(--border-2, #333b4b);
+  border-bottom: 1px solid var(--border-2, #333b4b);
+  min-width: 42px;
+  width: 42px;
+  user-select: none;
+}
+
+/* Row-number gutter */
+td.gutter {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: 42px;
+  width: 42px;
+  background: var(--surface-2, #181d27);
+  color: var(--faint, #5e6677);
+  font-family: var(--mono, monospace);
+  font-size: 10px;
+  text-align: center;
+  border-right: 1px solid var(--border-2, #333b4b);
+  user-select: none;
+  cursor: default;
+}
+td.gutter.active {
+  background: var(--accent-weak, #1e2a44);
+  color: var(--accent, #5b9cff);
+}
+
+/* Body cells */
+td.cell {
+  background: var(--surface, #14171e);
+  color: var(--text, #e7eaf0);
+  cursor: cell;
+}
+tr.even td.cell {
+  background: var(--surface-2, #181d27);
+}
+td.cell .cellbox {
+  display: flex;
+  align-items: center;
+  padding: 5px 9px;
+  min-height: 26px;
+  position: relative;
+}
+td.cell.num .cellbox {
+  font-family: var(--mono, monospace);
+  justify-content: flex-end;
+  text-align: right;
+}
+td.cell.neg .cellbox {
+  color: var(--err, #f07178);
+}
+td.cell.formula .cellbox::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 0;
+  height: 0;
+  border-top: 4px solid var(--accent, #5b9cff);
+  border-left: 4px solid transparent;
+  opacity: 0.7;
+}
+td.cell.err .cellbox {
+  color: var(--err, #f07178);
+  font-style: italic;
+}
+
+/* Data-bar heat for numeric cells (token-only, very subtle) */
+td.cell .bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: var(--accent-weak, #1e2a44);
+  opacity: 0.45;
+  pointer-events: none;
+  z-index: 0;
+}
+td.cell .cellbox > span.val {
+  position: relative;
+  z-index: 1;
+}
+
+/* Selection */
+td.cell.selected {
+  outline: 2px solid var(--accent, #5b9cff);
+  outline-offset: -2px;
+  background: var(--accent-weak, #1e2a44);
+}
+td.cell.selected .bar {
+  opacity: 0.25;
+}
+
+/* In-cell editor */
+td.cell .editor {
+  width: 100%;
+  border: none;
+  outline: none;
+  background: var(--input, #1b2029);
+  color: var(--text, #e7eaf0);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 5px 8px;
+  margin: 0;
+  box-shadow: inset 0 0 0 2px var(--accent, #5b9cff);
+}
+td.cell.num .editor {
+  text-align: right;
+  font-family: var(--mono, monospace);
+}
+th.name .editor {
+  width: 100%;
+  border: none;
+  outline: none;
+  background: var(--input, #1b2029);
+  color: var(--text, #e7eaf0);
+  font-family: var(--font, system-ui, sans-serif);
+  font-weight: 700;
+  font-size: 12px;
+  padding: 6px 8px;
+  box-shadow: inset 0 0 0 2px var(--accent, #5b9cff);
+}
+
+/* ── Status bar ──────────────────────────────────────────────────────── */
+#statusbar {
+  flex: 0 0 auto;
+  padding: 3px 10px;
+  font-size: 10px;
+  color: var(--faint, #5e6677);
+  background: var(--surface-2, #181d27);
+  border-top: 1px solid var(--border, #252b37);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+#status-left {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#status-right {
+  flex: 0 0 auto;
+  font-family: var(--mono, monospace);
+}

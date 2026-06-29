@@ -307,117 +307,60 @@ body {
   flex: 1 1 auto;
   min-height: 0;
   background: transparent;
-  /* Override dockview-theme-abyss so its own (square) chrome doesn't show behind the Panel. */
+  /* Theme Dockview's NATIVE chrome to the design (DESIGN_SYSTEM.md §4). Keeping the native tab bar
+     is what makes every panel draggable / dockable / tabbable (drag a tab onto another panel's
+     header to tab them together — both titles show side by side). */
   --dv-group-view-background-color: transparent;
-  --dv-tabs-and-actions-container-background-color: transparent;
-  --dv-activegroup-visiblepanel-tab-background-color: transparent;
+  --dv-tabs-and-actions-container-background-color: var(--surface-2);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--surface-3);
+  --dv-activegroup-visiblepanel-tab-color: var(--text);
   --dv-inactivegroup-visiblepanel-tab-background-color: transparent;
+  --dv-inactivegroup-visiblepanel-tab-color: var(--dim);
+  --dv-activegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-activegroup-hiddenpanel-tab-color: var(--dim);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--faint);
   --dv-separator-border: transparent;
   --dv-paneview-active-outline-color: transparent;
-  --dv-tabs-container-scrollbar-color: transparent;
+  --dv-tab-divider-color: transparent;
+  --dv-drag-over-background-color: var(--accent-weak);
+  --dv-drag-over-border-color: var(--accent);
+  --dv-icon-hover-background-color: var(--surface-3);
+  --dv-border-radius: 9px;
 }
 
-/* ---- PANEL: the universal docked surface (DESIGN_SYSTEM.md §4) ---- */
-/* Suppress Dockview's native tab bar — the Panel header is the single chrome. */
-.dock-root .dv-tabs-and-actions-container {
-  display: none;
-}
-.dock-root .dv-groupview,
-.dock-root .dv-view-container,
-.dock-root .dv-content-container,
-.dock-root .dv-resize-container {
-  background: transparent;
-  border: none;
-  box-shadow: none;
-  outline: none;
-}
-/* Inset each panel within its group so the rounded surface floats and adjacent
- * panels show an ~8px --bg-2 gap between them (half from each side). */
-.dock-root .dv-content-container {
+/* ---- Each Dockview group = the rounded "Panel" card (DESIGN_SYSTEM.md §4). The group is a flex
+   column (tab bar + content); padding insets both, so the --bg-2 gutter shows between adjacent
+   panels (4px each side → ~8px gap). The tab bar (rounded top) + content (rounded bottom) stack
+   into one bordered card. ---- */
+.dock-root .dv-groupview {
   padding: 4px;
+  background: transparent;
 }
-.panel {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-width: 0;
-  min-height: 0;
+.dock-root .dv-tabs-and-actions-container {
+  height: var(--tab-h);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-top-left-radius: 9px;
+  border-top-right-radius: 9px;
+}
+.dock-root .dv-content-container {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 9px;
-  overflow: hidden;
+  border-top: none;
+  border-bottom-left-radius: 9px;
+  border-bottom-right-radius: 9px;
   box-shadow: var(--shadow);
 }
-.panel-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: 0 0 auto;
-  height: var(--tab-h);
-  padding: 0 6px;
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--border);
-}
-.panel-tabs {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  flex: 1 1 auto;
-  overflow: hidden;
-}
-.panel-actions {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  flex: 0 0 auto;
-}
-.panel-body {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: auto;
-}
-.panel-action {
-  display: grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  background: none;
-  border: none;
-  border-radius: 6px;
-  color: var(--faint);
-  cursor: pointer;
-}
-.panel-action:hover {
-  background: var(--surface-3);
-  color: var(--text);
-}
-
-/* ---- SELECTABLE pattern: tabs, conv tabs, question options, sidebar rows ---- */
-.tab,
-.selectable {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  height: calc(var(--tab-h) - 8px);
+/* Tabs: the selectable pill pattern (active = raised --surface-3, inactive = quiet). Draggable. */
+.dock-root .dv-tab {
+  height: calc(var(--tab-h) - 10px);
+  margin: 5px 2px;
   padding: 0 10px;
-  border: 1px solid transparent;
   border-radius: 6px;
   font-size: 12px;
-  font-weight: 500;
-  color: var(--dim);
-  background: transparent;
-  cursor: pointer;
-  white-space: nowrap;
 }
-.tab:hover,
-.selectable:hover {
-  color: var(--text);
-}
-.tab.is-selected,
-.selectable.is-selected {
-  background: var(--surface);
-  border-color: var(--border-2);
-  color: var(--text);
+.dock-root .dv-tab.dv-active-tab {
   font-weight: 600;
 }
 .icon {

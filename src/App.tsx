@@ -3,12 +3,10 @@ import { DockviewReact, type DockviewReadyEvent, type IDockviewPanelProps } from
 import type { AgentInstance, ConversationSummary, SessionSummary, UsageInfo } from '@shared/events'
 import type { DiscoveredPlugin, ConversationPluginState, DockPosition } from '@shared/plugins'
 import { ChatPanel } from './components/ChatPanel'
-import { Panel } from './components/Panel'
 import { PluginPane } from './components/PluginPane'
 import { PluginRail } from './components/PluginRail'
 import { UsageMeters } from './components/UsageMeters'
 import { LayoutService } from './services/LayoutService'
-import { ICONS } from './icons'
 
 const THEMES = ['slate', 'carbon', 'daylight'] as const
 
@@ -50,32 +48,25 @@ export function App() {
     window.dispatchEvent(new Event('atelier-theme'))
   }, [density])
 
-  // Dockview panel components. Stable (refs carry the live values), so Dockview never re-registers.
-  // The active conversation id flows through activeIdRef so a plugin's storage is always scoped to
-  // whatever conversation is showing, even after a switch.
+  // Dockview panel components — the kind only supplies the BODY; Dockview's themed native tab bar
+  // is the header (so panels drag/dock/tab natively). Stable (refs carry live values).
   const components = useMemo(
     () => ({
       claude: (props: IDockviewPanelProps<{ instanceId: string }>) => (
-        <Panel tabs={[{ id: 'claude', title: 'Claude', icon: ICONS.chat }]}>
-          <ChatPanel key={props.params.instanceId} instanceId={props.params.instanceId} />
-        </Panel>
+        <ChatPanel key={props.params.instanceId} instanceId={props.params.instanceId} />
       ),
       plugin: (props: IDockviewPanelProps<{ pluginId: string }>) => {
         const pluginId = props.params.pluginId
         const found = pluginsRef.current.find((p) => p.id === pluginId)
         return (
-          <Panel
-            tabs={[{ id: pluginId, title: found?.manifest?.name ?? pluginId, icon: ICONS.plugin }]}
-          >
-            <PluginPane
-              key={pluginId}
-              pluginId={pluginId}
-              permissions={found?.manifest?.permissions ?? []}
-              getConversationId={() => activeIdRef.current}
-              onDock={(pos: DockPosition) => layout.current?.dockPlugin(pluginId, pos)}
-              onSetTitle={(t: string) => layout.current?.setPluginTitle(pluginId, t)}
-            />
-          </Panel>
+          <PluginPane
+            key={pluginId}
+            pluginId={pluginId}
+            permissions={found?.manifest?.permissions ?? []}
+            getConversationId={() => activeIdRef.current}
+            onDock={(pos: DockPosition) => layout.current?.dockPlugin(pluginId, pos)}
+            onSetTitle={(t: string) => layout.current?.setPluginTitle(pluginId, t)}
+          />
         )
       }
     }),

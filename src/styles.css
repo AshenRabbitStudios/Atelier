@@ -185,6 +185,109 @@ body {
 .dock-root {
   flex: 1 1 auto;
   min-height: 0;
+  background: var(--bg-2);
+}
+
+/* ---- PANEL: the universal docked surface (DESIGN_SYSTEM.md §4) ---- */
+/* Suppress Dockview's native tab bar — the Panel header is the single chrome. */
+.dock-root .dv-tabs-and-actions-container {
+  display: none;
+}
+.dock-root .dv-groupview,
+.dock-root .dv-view-container,
+.dock-root .dv-content-container {
+  background: transparent;
+}
+.panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  height: var(--tab-h);
+  padding: 0 6px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+.panel-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+.panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+.panel-action {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--faint);
+  cursor: pointer;
+}
+.panel-action:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+/* ---- SELECTABLE pattern: tabs, conv tabs, question options, sidebar rows ---- */
+.tab,
+.selectable {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: calc(var(--tab-h) - 8px);
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--dim);
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tab:hover,
+.selectable:hover {
+  color: var(--text);
+}
+.tab.is-selected,
+.selectable.is-selected {
+  background: var(--surface);
+  border-color: var(--border-2);
+  color: var(--text);
+  font-weight: 600;
+}
+.icon {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.35;
+  stroke-linejoin: round;
+  stroke-linecap: round;
 }
 
 /* ---- Workspace row: perma-docked plugin rail + dock area ---- */

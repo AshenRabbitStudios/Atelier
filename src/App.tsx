@@ -9,9 +9,11 @@ import type {
 } from '@shared/events'
 import type { DiscoveredPlugin, ConversationPluginState, DockPosition } from '@shared/plugins'
 import { ChatPanel } from './components/ChatPanel'
+import { Panel } from './components/Panel'
 import { PluginPane } from './components/PluginPane'
 import { PluginRail } from './components/PluginRail'
 import { LayoutService } from './services/LayoutService'
+import { ICONS } from './icons'
 
 export function App() {
   const [open, setOpen] = useState<AgentInstance[]>([]) // open conversations (tabs)
@@ -57,20 +59,26 @@ export function App() {
   const components = useMemo(
     () => ({
       claude: (props: IDockviewPanelProps<{ instanceId: string }>) => (
-        <ChatPanel key={props.params.instanceId} instanceId={props.params.instanceId} />
+        <Panel tabs={[{ id: 'claude', title: 'Claude', icon: ICONS.chat }]}>
+          <ChatPanel key={props.params.instanceId} instanceId={props.params.instanceId} />
+        </Panel>
       ),
       plugin: (props: IDockviewPanelProps<{ pluginId: string }>) => {
         const pluginId = props.params.pluginId
         const found = pluginsRef.current.find((p) => p.id === pluginId)
         return (
-          <PluginPane
-            key={pluginId}
-            pluginId={pluginId}
-            permissions={found?.manifest?.permissions ?? []}
-            getConversationId={() => activeIdRef.current}
-            onDock={(pos: DockPosition) => layout.current?.dockPlugin(pluginId, pos)}
-            onSetTitle={(t: string) => layout.current?.setPluginTitle(pluginId, t)}
-          />
+          <Panel
+            tabs={[{ id: pluginId, title: found?.manifest?.name ?? pluginId, icon: ICONS.plugin }]}
+          >
+            <PluginPane
+              key={pluginId}
+              pluginId={pluginId}
+              permissions={found?.manifest?.permissions ?? []}
+              getConversationId={() => activeIdRef.current}
+              onDock={(pos: DockPosition) => layout.current?.dockPlugin(pluginId, pos)}
+              onSetTitle={(t: string) => layout.current?.setPluginTitle(pluginId, t)}
+            />
+          </Panel>
         )
       }
     }),

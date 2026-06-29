@@ -24,6 +24,12 @@ export function App() {
   const [usage, setUsage] = useState<UsageInfo | null>(null)
   const [plugins, setPlugins] = useState<DiscoveredPlugin[]>([])
   const [pluginState, setPluginState] = useState<Record<string, ConversationPluginState>>({})
+  // Theme + density (DESIGN_SYSTEM.md §1). Persisted in localStorage for now; the proper
+  // segmented switcher moves to the title bar in M3.
+  const [theme, setTheme] = useState<string>(() => localStorage.getItem('atelier:theme') ?? 'slate')
+  const [density, setDensity] = useState<string>(
+    () => localStorage.getItem('atelier:density') ?? 'comfortable'
+  )
   const layout = useRef<LayoutService | null>(null)
   const activeIdRef = useRef<string | null>(null)
   const pluginsRef = useRef<DiscoveredPlugin[]>([])
@@ -31,6 +37,19 @@ export function App() {
   const restoringRef = useRef(false)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   pluginsRef.current = plugins
+
+  useEffect(() => {
+    localStorage.setItem('atelier:theme', theme)
+  }, [theme])
+  useEffect(() => {
+    localStorage.setItem('atelier:density', density)
+  }, [density])
+  const cycleTheme = () =>
+    setTheme((t) => {
+      const order = ['slate', 'carbon', 'daylight']
+      return order[(order.indexOf(t) + 1) % order.length]
+    })
+  const cycleDensity = () => setDensity((d) => (d === 'comfortable' ? 'compact' : 'comfortable'))
 
   // Dockview panel components. Stable (refs carry the live values), so Dockview never re-registers.
   // The active conversation id flows through activeIdRef so a plugin's storage is always scoped to
@@ -304,7 +323,7 @@ export function App() {
   if (error) return <div className="boot boot-error">Failed to start: {error}</div>
 
   return (
-    <div className="app">
+    <div className="app" data-theme={theme} data-density={density}>
       <ConversationBar
         open={open}
         all={all}
@@ -318,6 +337,10 @@ export function App() {
         onClearPlugins={clearPlugins}
         onImport={startImport}
         onDelete={deleteConversation}
+        theme={theme}
+        density={density}
+        onCycleTheme={cycleTheme}
+        onCycleDensity={cycleDensity}
       />
       {usage && usage.windows.length > 0 && (
         <div className="usage-strip">
@@ -452,7 +475,11 @@ function ConversationBar({
   onClearChat,
   onClearPlugins,
   onImport,
-  onDelete
+  onDelete,
+  theme,
+  density,
+  onCycleTheme,
+  onCycleDensity
 }: {
   open: AgentInstance[]
   all: ConversationSummary[]
@@ -466,6 +493,10 @@ function ConversationBar({
   onClearPlugins: (id: string) => void
   onImport: () => void
   onDelete: (id: string) => void
+  theme: string
+  density: string
+  onCycleTheme: () => void
+  onCycleDensity: () => void
 }) {
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
@@ -575,6 +606,20 @@ function ConversationBar({
 
       {active && (
         <div className="conv-meta">
+          <button
+            className="icon-btn"
+            title={`Theme: ${theme} — click to switch (M3 moves this to the title bar)`}
+            onClick={onCycleTheme}
+          >
+            {theme}
+          </button>
+          <button
+            className="icon-btn"
+            title={`Density: ${density} — click to toggle`}
+            onClick={onCycleDensity}
+          >
+            {density === 'comfortable' ? 'cozy' : 'compact'}
+          </button>
           <span className="conv-cwd" title={active.cwd}>
             {active.cwd}
           </span>

@@ -5,3 +5,8 @@ coverage/
 *.log
 .DS_Store
 *.tsbuildinfo
+
+# Design handoff bundle — reference material, not app source. The durable spec is
+# copied into docs/DESIGN_SYSTEM.md; the prototype/CSS/TSX here are for migration only.
+design_handoff_visual_refresh/
+*.zip

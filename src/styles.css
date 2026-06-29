@@ -1,15 +1,130 @@
+/* ============================================================================
+ * Design tokens (DESIGN_SYSTEM.md §1). A theme is one map of variables, selected
+ * by [data-theme] on the app root; density is an orthogonal [data-density] axis.
+ * Components read var(--…) only — the ONLY allowed raw hex is the Windows close
+ * red #e81123. See docs/DESIGN_SYSTEM.md.
+ * ========================================================================== */
+
+/* ---- THEME: Slate (default) — cool, disciplined IDE dark ---- */
+:root,
+[data-theme='slate'] {
+  --bg: #0e1014;
+  --bg-2: #090b0f;
+  --surface: #14171e;
+  --surface-2: #191d26;
+  --surface-3: #202634;
+  --input: #1b2029;
+  --border: #252b37;
+  --border-2: #333b4b;
+  --text: #e7eaf0;
+  --dim: #99a2b4;
+  --faint: #5e6677;
+  --accent: #5b9cff;
+  --accent-2: #82b3ff;
+  --accent-weak: rgba(91, 156, 255, 0.13);
+  --on-accent: #06122a;
+  --ok: #46c79a;
+  --warn: #e3b25a;
+  --err: #ef7a63;
+  --ok-weak: rgba(70, 199, 154, 0.14);
+  --warn-weak: rgba(227, 178, 90, 0.1);
+  --scroll: #2a3140;
+  --scroll-hover: #3a4356;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+/* ---- THEME: Carbon — warm copper studio dark ---- */
+[data-theme='carbon'] {
+  --bg: #15120e;
+  --bg-2: #100d0a;
+  --surface: #1b1712;
+  --surface-2: #221d16;
+  --surface-3: #2a2419;
+  --input: #221c15;
+  --border: #322a20;
+  --border-2: #43392b;
+  --text: #f0e9dd;
+  --dim: #ad9f8c;
+  --faint: #6f6452;
+  --accent: #e08a46;
+  --accent-2: #f0a063;
+  --accent-weak: rgba(224, 138, 70, 0.14);
+  --on-accent: #1c1206;
+  --ok: #9cb86a;
+  --warn: #e0b54a;
+  --err: #e0694a;
+  --ok-weak: rgba(156, 184, 106, 0.15);
+  --warn-weak: rgba(224, 181, 74, 0.1);
+  --scroll: #3a3024;
+  --scroll-hover: #4d4030;
+  --shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+
+/* ---- THEME: Daylight — warm-paper light, ink-blue accent ---- */
+[data-theme='daylight'] {
+  --bg: #eceae3;
+  --bg-2: #e1ded4;
+  --surface: #ffffff;
+  --surface-2: #f6f4ee;
+  --surface-3: #eeebe2;
+  --input: #ffffff;
+  --border: #e0dccf;
+  --border-2: #cdc7b6;
+  --text: #23262b;
+  --dim: #6f6a5e;
+  --faint: #a39d8e;
+  --accent: #2f63e0;
+  --accent-2: #4a7bf0;
+  --accent-weak: rgba(47, 99, 224, 0.1);
+  --on-accent: #ffffff;
+  --ok: #2c9a6b;
+  --warn: #b07d18;
+  --err: #cf4a30;
+  --ok-weak: rgba(44, 154, 107, 0.12);
+  --warn-weak: rgba(176, 125, 24, 0.1);
+  --scroll: #cfcabb;
+  --scroll-hover: #b8b2a0;
+  --shadow: 0 10px 30px rgba(40, 36, 28, 0.16);
+}
+
+/* ---- Type stacks (theme-independent) ---- */
 :root {
-  --bg: #1e1e1e;
-  --bg-elev: #252526;
-  --bg-input: #2d2d2d;
-  --border: #3a3a3a;
-  --text: #e6e6e6;
-  --text-dim: #9a9a9a;
-  --accent: #4a9eff;
-  --accent-dim: #2b5d8f;
-  --ok: #4ec9b0;
-  --warn: #e2c08d;
-  --err: #f48771;
+  --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --mono: 'Cascadia Code', 'Cascadia Mono', ui-monospace, Consolas, monospace;
+}
+
+/* ---- Density (orthogonal to theme) ---- */
+[data-density='comfortable'] {
+  --fz: 14px;
+  --pad: 14px;
+  --tab-h: 34px;
+  --gap: 8px;
+  --lh: 1.6;
+}
+[data-density='compact'] {
+  --fz: 13px;
+  --pad: 9px;
+  --tab-h: 30px;
+  --gap: 7px;
+  --lh: 1.5;
+}
+:root {
+  --fz: 14px;
+  --pad: 14px;
+  --tab-h: 34px;
+  --gap: 8px;
+  --lh: 1.6;
+}
+
+/* ---- Legacy aliases (M1 bridge): existing component rules read these; they
+ * resolve to the semantic tokens so the whole sheet themes via the cascade.
+ * These are inlined away as regions migrate in M2/M5. ---- */
+:root {
+  --bg-elev: var(--surface-2);
+  --bg-input: var(--input);
+  --text-dim: var(--dim);
+  --accent-dim: var(--accent);
+  --panel: var(--surface);
   --chat-font-scale: 1;
 }
 
@@ -27,12 +142,39 @@ body,
 body {
   background: var(--bg);
   color: var(--text);
-  font-family:
-    'Segoe UI',
-    system-ui,
-    -apple-system,
-    sans-serif;
-  font-size: 14px;
+  font-family: var(--font);
+  font-size: var(--fz);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+::selection {
+  background: var(--accent-weak);
+}
+
+/* ---- Scrollbars (themed) ---- */
+::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scroll);
+  border-radius: 7px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scroll-hover);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
 }
 
 .app {
@@ -56,8 +198,8 @@ body {
   width: 40px;
   display: flex;
   flex-direction: column;
-  background: var(--panel, #232323);
-  border-right: 1px solid var(--border, #333);
+  background: var(--surface);
+  border-right: 1px solid var(--border);
   transition: width 0.12s ease;
 }
 .plugin-rail.open {
@@ -69,11 +211,11 @@ body {
   font-size: 18px;
   background: none;
   border: none;
-  color: var(--text, #e6e6e6);
+  color: var(--text);
   cursor: pointer;
 }
 .rail-toggle:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-3);
 }
 .rail-list {
   overflow-y: auto;
@@ -83,16 +225,16 @@ body {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--text-dim, #9a9a9a);
+  color: var(--dim);
   margin: 4px 0 8px;
 }
 .rail-empty {
   font-size: 12px;
-  color: var(--text-dim, #9a9a9a);
+  color: var(--dim);
 }
 .rail-item {
   padding: 6px 0;
-  border-bottom: 1px solid var(--border, #333);
+  border-bottom: 1px solid var(--border);
 }
 .rail-item.invalid {
   opacity: 0.85;
@@ -111,19 +253,19 @@ body {
 }
 .rail-item-perms {
   font-size: 11px;
-  color: var(--text-dim, #9a9a9a);
+  color: var(--dim);
   margin-top: 2px;
 }
 .rail-item-error {
   font-size: 11px;
-  color: #e06c75;
+  color: var(--err);
   margin-top: 2px;
   word-break: break-word;
 }
 .rail-error-badge {
   font-size: 11px;
-  color: #e06c75;
-  border: 1px solid #e06c75;
+  color: var(--err);
+  border: 1px solid var(--err);
   border-radius: 4px;
   padding: 0 4px;
 }
@@ -131,8 +273,8 @@ body {
   margin-top: 4px;
   font-size: 11px;
   background: none;
-  border: 1px solid var(--border, #333);
-  color: var(--text-dim, #9a9a9a);
+  border: 1px solid var(--border);
+  color: var(--dim);
   border-radius: 4px;
   padding: 1px 6px;
   cursor: pointer;
@@ -141,7 +283,7 @@ body {
   width: 100%;
   height: 100%;
   border: none;
-  background: #1e1e1e;
+  background: var(--bg-2);
 }
 
 /* ---- Top conversation bar ---- */
@@ -150,7 +292,7 @@ body {
   align-items: center;
   gap: 12px;
   padding: 4px 8px;
-  background: #141414;
+  background: var(--surface);
   border-bottom: 1px solid var(--border);
   -webkit-app-region: drag; /* feels like window chrome */
 }
@@ -231,7 +373,7 @@ body {
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: 6px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow);
   z-index: 100;
   padding: 4px;
 }
@@ -309,7 +451,7 @@ body {
 }
 .conv-trash:hover {
   color: var(--err);
-  background: rgba(244, 135, 113, 0.12);
+  background: var(--surface-3);
 }
 .conv-rename {
   background: var(--bg-input);
@@ -381,7 +523,7 @@ body {
   gap: 8px;
   padding: 6px 12px;
   border-bottom: 1px solid var(--border);
-  background: #1a1a1a;
+  background: var(--surface-2);
   font-size: 12px;
 }
 .instance-select,
@@ -564,7 +706,7 @@ body {
   display: flex;
   align-items: center;
   padding: 3px 12px;
-  background: #141414;
+  background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
 .usage-mini {
@@ -617,11 +759,11 @@ body {
   letter-spacing: 0.04em;
 }
 .badge-ok {
-  background: rgba(78, 201, 176, 0.15);
+  background: var(--ok-weak);
   color: var(--ok);
 }
 .badge-warn {
-  background: rgba(226, 192, 141, 0.15);
+  background: var(--warn-weak);
   color: var(--warn);
 }
 
@@ -753,8 +895,8 @@ body {
   line-height: 1.45;
 }
 .code-fallback {
-  background: #0d1117;
-  color: #c9d1d9;
+  background: var(--bg-2);
+  color: var(--dim);
   white-space: pre;
 }
 
@@ -808,7 +950,7 @@ body {
 .tool-io {
   margin: 4px 12px 10px;
   padding: 8px 10px;
-  background: #0d1117;
+  background: var(--bg-2);
   border-radius: 4px;
   overflow-x: auto;
   font-family: ui-monospace, monospace;
@@ -821,8 +963,8 @@ body {
 
 .error-note {
   color: var(--err);
-  background: rgba(244, 135, 113, 0.1);
-  border: 1px solid rgba(244, 135, 113, 0.3);
+  background: var(--surface-2);
+  border: 1px solid var(--err);
   border-radius: 4px;
   margin-bottom: 10px;
   font-size: 13px;
@@ -836,7 +978,7 @@ body {
 .error-detail {
   margin: 0;
   padding: 8px 10px;
-  border-top: 1px solid rgba(244, 135, 113, 0.3);
+  border-top: 1px solid var(--border);
   color: var(--text-dim);
   font-family: ui-monospace, monospace;
   font-size: 0.85em;
@@ -897,7 +1039,7 @@ body {
   left: 2px;
   width: 12px;
   height: 12px;
-  background: #cfcfcf;
+  background: #fff;
   border-radius: 50%;
   transition:
     transform 0.15s ease,
@@ -918,7 +1060,7 @@ body {
 /* ---- Permission approval cards ---- */
 .permissions {
   border-top: 1px solid var(--border);
-  background: rgba(226, 192, 141, 0.06);
+  background: var(--warn-weak);
   padding: 8px 12px;
   display: flex;
   flex-direction: column;
@@ -956,7 +1098,7 @@ body {
 .perm-input {
   margin: 0 0 8px;
   padding: 6px 8px;
-  background: #0d1117;
+  background: var(--bg-2);
   border-radius: 4px;
   font-family: ui-monospace, monospace;
   font-size: 0.8em;
@@ -970,10 +1112,10 @@ body {
   gap: 8px;
 }
 .btn-allow {
-  background: #2e7d4f;
+  background: var(--ok);
 }
 .btn-allow:hover {
-  background: #379a60;
+  background: var(--ok);
 }
 .btn-allow-always {
   background: var(--accent-dim);
@@ -982,16 +1124,16 @@ body {
   background: var(--accent);
 }
 .btn-deny {
-  background: #8f3b2b;
+  background: var(--err);
 }
 .btn-deny:hover {
-  background: #b8472f;
+  background: var(--err);
 }
 
 /* ---- Question card (AskUserQuestion: the agent asking the user) ---- */
 .questions {
   border-top: 1px solid var(--border);
-  background: rgba(74, 158, 255, 0.06);
+  background: var(--accent-weak);
   padding: 8px 12px;
   display: flex;
   flex-direction: column;
@@ -1064,7 +1206,7 @@ body {
 }
 .q-option-on {
   border-color: var(--accent);
-  background: rgba(74, 158, 255, 0.12);
+  background: var(--accent-weak);
 }
 .q-option-label {
   font-size: 13px;
@@ -1127,7 +1269,7 @@ body {
   border: none;
   font-size: 13px;
   cursor: pointer;
-  color: #fff;
+  color: var(--on-accent);
 }
 .btn:disabled {
   opacity: 0.5;
@@ -1140,8 +1282,8 @@ body {
   background: var(--accent);
 }
 .btn-stop {
-  background: #8f3b2b;
+  background: var(--err);
 }
 .btn-stop:hover {
-  background: #b8472f;
+  background: var(--err);
 }

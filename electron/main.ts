@@ -27,6 +27,8 @@ import {
   PluginStorageGetSchema,
   PluginStorageSetSchema,
   PluginStorageKeysSchema,
+  PluginContextGetSchema,
+  PluginContextSetSchema,
   type AgentEvent,
   type AuthStatus
 } from './shared/events.js'
@@ -34,6 +36,11 @@ import type { DiscoveredPlugin } from './shared/plugins.js'
 import { PluginRegistry } from './plugin/PluginRegistry.js'
 import { registerPluginScheme, handlePluginProtocol } from './plugin/protocol.js'
 import { pluginStorageGet, pluginStorageSet, pluginStorageKeys } from './plugin/pluginStorage.js'
+import {
+  buildContextBlock,
+  buildContextMcpServers,
+  contextStorageKey
+} from './plugin/contextTools.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -87,8 +94,6 @@ function sendToRenderer(e: AgentEvent): void {
   }
 }
 
-const agents = new AgentManager(sendToRenderer)
-
 function sendPlugins(list: DiscoveredPlugin[]): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send(IPC.pluginsChanged, list)
@@ -99,6 +104,17 @@ function sendPlugins(list: DiscoveredPlugin[]): void {
 // overridable for packaging via ATELIER_PLUGINS_DIR.
 const PLUGINS_DIR = process.env.ATELIER_PLUGINS_DIR ?? join(process.cwd(), 'plugins')
 const plugins = new PluginRegistry(PLUGINS_DIR, sendPlugins)
+
+// Context-document plugins (docs/CONTEXT_SYSTEM.md): inject each conversation's pinned exports as
+// per-turn context, and register one update tool per export. Both resolve against the registry.
+const agents = new AgentManager(
+  sendToRenderer,
+  (conversationId, pluginState) => buildContextBlock(plugins, conversationId, pluginState),
+  (conversationId, pluginState) =>
+    buildContextMcpServers(plugins, conversationId, pluginState, () => {
+      /* panes poll context.get to refresh; no push channel (see docs/MORNING_REVIEW.md) */
+    })
+)
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -307,7 +323,9 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.pluginsSetEnabled, (_e, payload) => {
     const { conversationId, pluginId, enabled } = SetPluginEnabledSchema.parse(payload)
-    agents.setPluginEnabled(conversationId, pluginId, enabled)
+    // Auto-pin the plugin's context exports on enable (docs/CONTEXT_SYSTEM.md).
+    const exportKeys = (plugins.get(pluginId)?.manifest?.contextExports ?? []).map((e) => e.key)
+    agents.setPluginEnabled(conversationId, pluginId, enabled, exportKeys)
   })
 
   ipcMain.handle(IPC.pluginsReload, (_e, payload) => {
@@ -329,6 +347,17 @@ function registerIpc(): void {
   ipcMain.handle(IPC.pluginStorageKeys, (_e, payload) => {
     const { conversationId, pluginId } = PluginStorageKeysSchema.parse(payload)
     return pluginStorageKeys(conversationId, pluginId)
+  })
+
+  ipcMain.handle(IPC.pluginContextGet, (_e, payload) => {
+    const { conversationId, pluginId, key } = PluginContextGetSchema.parse(payload)
+    const v = pluginStorageGet(conversationId, pluginId, contextStorageKey(key))
+    return typeof v === 'string' ? v : ''
+  })
+
+  ipcMain.handle(IPC.pluginContextSet, (_e, payload) => {
+    const { conversationId, pluginId, key, value } = PluginContextSetSchema.parse(payload)
+    pluginStorageSet(conversationId, pluginId, contextStorageKey(key), value)
   })
 }
 

@@ -325,6 +325,19 @@ export const PluginStorageKeysSchema = z.object({
   pluginId: z.string().min(1)
 })
 
+export const PluginContextGetSchema = z.object({
+  conversationId: z.string().min(1),
+  pluginId: z.string().min(1),
+  key: z.string().min(1)
+})
+
+export const PluginContextSetSchema = z.object({
+  conversationId: z.string().min(1),
+  pluginId: z.string().min(1),
+  key: z.string().min(1),
+  value: z.string()
+})
+
 // ---- Auth safety (billing) ----
 
 export interface AuthStatus {
@@ -375,6 +388,8 @@ export const IPC = {
   pluginStorageGet: 'plugin:storage-get',
   pluginStorageSet: 'plugin:storage-set',
   pluginStorageKeys: 'plugin:storage-keys',
+  pluginContextGet: 'plugin:context-get',
+  pluginContextSet: 'plugin:context-set',
   authStatus: 'auth:status',
   appDefaultCwd: 'app:default-cwd',
   appPickFolder: 'app:pick-folder',
@@ -442,6 +457,8 @@ export interface AtelierAPI {
     storageGet(conversationId: string, pluginId: string, key: string): Promise<unknown>
     storageSet(conversationId: string, pluginId: string, key: string, value: unknown): Promise<void>
     storageKeys(conversationId: string, pluginId: string): Promise<string[]>
+    contextGet(conversationId: string, pluginId: string, key: string): Promise<string>
+    contextSet(conversationId: string, pluginId: string, key: string, value: string): Promise<void>
     onChanged(cb: (plugins: DiscoveredPlugin[]) => void): () => void
   }
   auth: {

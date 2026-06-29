@@ -63,6 +63,10 @@ const api: AtelierAPI = {
       ipcRenderer.invoke(IPC.pluginStorageSet, { conversationId, pluginId, key, value }),
     storageKeys: (conversationId, pluginId) =>
       ipcRenderer.invoke(IPC.pluginStorageKeys, { conversationId, pluginId }),
+    contextGet: (conversationId, pluginId, key) =>
+      ipcRenderer.invoke(IPC.pluginContextGet, { conversationId, pluginId, key }),
+    contextSet: (conversationId, pluginId, key, value) =>
+      ipcRenderer.invoke(IPC.pluginContextSet, { conversationId, pluginId, key, value }),
     onChanged: (cb) => {
       const listener = (_e: IpcRendererEvent, plugins: DiscoveredPlugin[]) => cb(plugins)
       ipcRenderer.on(IPC.pluginsChanged, listener)

@@ -86,6 +86,12 @@ interface RawBlock {
   is_error?: boolean
 }
 
+/** Strip the host-injected `<atelier-context>…</atelier-context>` preamble from a user message so
+ *  the context-plugin block never shows in the transcript (it's added at send-time only). */
+function stripInjectedContext(text: string): string {
+  return text.replace(/^<atelier-context>[\s\S]*?<\/atelier-context>\n+/, '')
+}
+
 function parseLines(file: string): RawLine[] {
   const raw = readFileSync(file, 'utf8')
   const out: RawLine[] = []
@@ -139,7 +145,11 @@ export function readTranscript(sessionId: string): TranscriptMessage[] {
 
     // user
     if (typeof content === 'string') {
-      messages.push({ uuid, role: 'user', blocks: [{ kind: 'text', text: content }] })
+      messages.push({
+        uuid,
+        role: 'user',
+        blocks: [{ kind: 'text', text: stripInjectedContext(content) }]
+      })
       continue
     }
     if (Array.isArray(content)) {
@@ -156,10 +166,12 @@ export function readTranscript(sessionId: string): TranscriptMessage[] {
         }
         continue
       }
-      const text = arr
-        .filter((b) => b.type === 'text' && b.text)
-        .map((b) => b.text)
-        .join('')
+      const text = stripInjectedContext(
+        arr
+          .filter((b) => b.type === 'text' && b.text)
+          .map((b) => b.text)
+          .join('')
+      )
       if (text) messages.push({ uuid, role: 'user', blocks: [{ kind: 'text', text }] })
     }
   }

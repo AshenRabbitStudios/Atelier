@@ -122,6 +122,16 @@ interface ContentBlock {
   is_error?: boolean
 }
 
+/** Supplies the per-turn context block + the per-conversation MCP tool server (context plugins). */
+type ContextProvider = (
+  conversationId: string,
+  pluginState: Record<string, ConversationPluginState>
+) => string
+type McpProvider = (
+  conversationId: string,
+  pluginState: Record<string, ConversationPluginState>
+) => Options['mcpServers'] | undefined
+
 /** One isolated agent instance: its own cwd, SDK session, and transcript stream. */
 class Session {
   readonly id: string
@@ -136,6 +146,9 @@ class Session {
   readonly createdAt: number
   /** Called whenever persistent state changes, so the manager can save the manifest. */
   onChange?: () => void
+  /** Context-plugin hooks (set by the manager): per-turn injection + per-conversation tools. */
+  contextProvider?: ContextProvider
+  mcpProvider?: McpProvider
 
   private input = new InputQueue()
   private q!: Query
@@ -176,8 +189,12 @@ class Session {
   constructor(
     opts: CreateOpts,
     private emit: (e: AgentEvent) => void,
-    restore?: RestoreData
+    restore?: RestoreData,
+    hooks?: { context?: ContextProvider; mcp?: McpProvider }
   ) {
+    // Set before start() so a restored conversation's context tools are present on the first query.
+    this.contextProvider = hooks?.context
+    this.mcpProvider = hooks?.mcp
     this.id = restore?.id ?? randomUUID()
     this.cwd = opts.cwd
     this.title = opts.title ?? (basename(opts.cwd) || opts.cwd)
@@ -212,11 +229,12 @@ class Session {
     this.onChange?.()
   }
 
-  /** Enable/disable a plugin for THIS conversation (app-wide registry, per-conversation set). */
-  setPluginEnabled(pluginId: string, enabled: boolean): void {
-    const prev = this.pluginState[pluginId]
-    this.pluginState[pluginId] = { enabled, pinnedExports: prev?.pinnedExports ?? [] }
+  /** Enable/disable a plugin for THIS conversation; auto-pin its context exports. Rebinds so the
+   *  SDK query picks up (or drops) the plugin's generated tools. */
+  setPluginEnabled(pluginId: string, enabled: boolean, exportKeys: string[]): void {
+    this.pluginState[pluginId] = { enabled, pinnedExports: enabled ? exportKeys : [] }
     this.onChange?.()
+    if (exportKeys.length > 0) this.rebind() // tool set changed
   }
 
   pluginStateFor(): Record<string, ConversationPluginState> {
@@ -237,6 +255,11 @@ class Session {
       permissionMode: 'default',
       ...(this.model ? { model: this.model } : {}),
       ...(this.effort ? { effort: this.effort } : {}),
+      // Context plugins: register one update tool per pinned export (or nothing).
+      ...(() => {
+        const servers = this.mcpProvider?.(this.id, this.pluginState)
+        return servers ? { mcpServers: servers } : {}
+      })(),
       // Resume the active branch's session so history is preserved.
       ...(this.sessionId ? { resume: this.sessionId } : {}),
       ...(opts?.resumeAt ? { resumeSessionAt: opts.resumeAt } : {}),
@@ -556,7 +579,10 @@ class Session {
   send(text: string): void {
     this.interrupted = false
     this.setStatus('working')
-    this.input.push(text)
+    // Prepend the pinned context-plugin state so the agent sees its model/memory/plan each turn.
+    // The block is stripped from the displayed transcript by sessionStore (kept out of history).
+    const ctx = this.contextProvider?.(this.id, this.pluginState) ?? ''
+    this.input.push(ctx ? `${ctx}\n\n${text}` : text)
   }
 
   async interrupt(): Promise<void> {
@@ -822,7 +848,16 @@ export class AgentManager {
   // conversation (even idle/just-restored ones) can show bars immediately.
   private lastUsage: UsageInfo | null = null
 
-  constructor(private emit: (e: AgentEvent) => void) {}
+  constructor(
+    private emit: (e: AgentEvent) => void,
+    private contextProvider?: ContextProvider,
+    private mcpProvider?: McpProvider
+  ) {}
+
+  /** The context-plugin hooks passed into every new/restored Session constructor. */
+  private hooks(): { context?: ContextProvider; mcp?: McpProvider } {
+    return { context: this.contextProvider, mcp: this.mcpProvider }
+  }
 
   private persist(s: Session): void {
     saveConversation(s.toManifest())
@@ -834,15 +869,20 @@ export class AgentManager {
   }
 
   private restoreOne(m: ConversationManifest): Session {
-    const s = new Session({ cwd: m.cwd, title: m.title, model: m.model }, this.emit, {
-      id: m.id,
-      sessionId: m.activeBranch,
-      branches: m.branches,
-      createdAt: m.createdAt,
-      effort: m.effort,
-      layout: m.layout,
-      plugins: m.plugins
-    })
+    const s = new Session(
+      { cwd: m.cwd, title: m.title, model: m.model },
+      this.emit,
+      {
+        id: m.id,
+        sessionId: m.activeBranch,
+        branches: m.branches,
+        createdAt: m.createdAt,
+        effort: m.effort,
+        layout: m.layout,
+        plugins: m.plugins
+      },
+      this.hooks()
+    )
     s.onChange = () => this.persist(s)
     this.sessions.set(s.id, s)
     return s
@@ -858,7 +898,7 @@ export class AgentManager {
   }
 
   create(opts: CreateOpts): string {
-    const s = new Session(opts, this.emit)
+    const s = new Session(opts, this.emit, undefined, this.hooks())
     s.onChange = () => this.persist(s)
     this.sessions.set(s.id, s)
     this.persist(s)
@@ -1021,8 +1061,13 @@ export class AgentManager {
     return this.sessions.get(instanceId)?.layout ?? null
   }
 
-  setPluginEnabled(instanceId: string, pluginId: string, enabled: boolean): void {
-    this.require(instanceId).setPluginEnabled(pluginId, enabled)
+  setPluginEnabled(
+    instanceId: string,
+    pluginId: string,
+    enabled: boolean,
+    exportKeys: string[]
+  ): void {
+    this.require(instanceId).setPluginEnabled(pluginId, enabled, exportKeys)
   }
 
   pluginStateFor(instanceId: string): Record<string, ConversationPluginState> {

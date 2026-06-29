@@ -57,6 +57,12 @@ export const RUNTIME_JS = String.raw`
       float: function () { return call('layout', 'dock', ['float']) },
       setTitle: function (title) { return call('layout', 'setTitle', [title]) }
     },
+    context: {
+      // A context document (this plugin's contextExports). get/set the full value; the agent
+      // sees it as context every turn and updates it via its tool. Needs permission "context".
+      get: function (key) { return call('context', 'get', [key]) },
+      set: function (key, value) { return call('context', 'set', [key, value]) }
+    },
     on: function (event, cb) {
       if (listeners[event]) listeners[event].push(cb)
     }

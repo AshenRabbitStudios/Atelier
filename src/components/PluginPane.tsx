@@ -121,6 +121,30 @@ export function PluginPane({
           }
           return reply(d.id, false, undefined, `unknown layout method "${d.method}"`)
         }
+        if (d.ns === 'context') {
+          if (!permissions.includes('context')) {
+            return reply(d.id, false, undefined, 'permission "context" not granted')
+          }
+          const conv = getConversationId()
+          if (!conv) return reply(d.id, false, undefined, 'no active conversation')
+          if (d.method === 'get') {
+            return reply(
+              d.id,
+              true,
+              await window.atelier.plugins.contextGet(conv, pluginId, String(args[0]))
+            )
+          }
+          if (d.method === 'set') {
+            await window.atelier.plugins.contextSet(
+              conv,
+              pluginId,
+              String(args[0]),
+              String(args[1])
+            )
+            return reply(d.id, true)
+          }
+          return reply(d.id, false, undefined, `unknown context method "${d.method}"`)
+        }
         reply(d.id, false, undefined, `unknown namespace "${d.ns}"`)
       } catch (err) {
         reply(d.id, false, undefined, err instanceof Error ? err.message : String(err))

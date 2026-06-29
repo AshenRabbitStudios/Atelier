@@ -147,10 +147,14 @@ Target a pragmatic, value-first test pyramid — not coverage theater:
 
 ## 8. Continuous integration
 
-- A CI workflow runs on every push and PR: **install → typecheck → lint → test → build**. A red
-  pipeline blocks merge. `main` is protected.
+- A CI workflow runs on every push and PR: **install → typecheck → lint → format:check → test →
+  build**. A red pipeline blocks merge. `main` is protected.
 - CI is the objective gate; "works on my machine" is not a status.
 - Keep the pipeline fast (cache `node_modules`); a slow gate gets bypassed.
+- **Confirm the result after every push — don't assume green.** Run `npm run ci:status` (waits for
+  the run on `HEAD` and reports success/failure) or `npm run ci:check` (single, no wait). It reads
+  the Actions API via `$GH_TOKEN` or the local git credential helper, so no manual visit to the
+  Actions tab is needed. A push isn't "done" until its CI run is confirmed green.
 
 ---
 

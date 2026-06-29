@@ -1,0 +1,284 @@
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { existsSync } from 'node:fs'
+import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
+import { z } from 'zod'
+import { AgentManager } from './agent/AgentManager.js'
+import {
+  IPC,
+  CreateOptsSchema,
+  SendSchema,
+  InstanceRefSchema,
+  RenameSchema,
+  SaveLayoutSchema,
+  SessionsForSchema,
+  ImportSessionSchema,
+  PermissionDecisionSchema,
+  AnswerQuestionSchema,
+  SetPermissionModeSchema,
+  SetModelSchema,
+  SetEffortSchema,
+  EditSaveSchema,
+  ForkSchema,
+  SwitchBranchSchema,
+  type AgentEvent,
+  type AuthStatus
+} from './shared/events.js'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+
+// ---- Ensure the spawned agent (and its Bash tool) can find node/npm ----
+// When Atelier is launched from a GUI shortcut the inherited PATH may lack Node;
+// the agent's tools then fail with exit 127. Prepend a known Node dir if present.
+function ensureNodeOnPath(): void {
+  const sep = process.platform === 'win32' ? ';' : ':'
+  const exe = process.platform === 'win32' ? 'node.exe' : 'node'
+  const candidates =
+    process.platform === 'win32'
+      ? ['C:\\Program Files\\nodejs', 'C:\\Program Files (x86)\\nodejs']
+      : ['/usr/local/bin', '/opt/homebrew/bin', '/usr/bin']
+  const current = process.env.PATH ?? ''
+  const parts = current.split(sep)
+  for (const dir of candidates) {
+    if (existsSync(join(dir, exe)) && !parts.includes(dir)) {
+      process.env.PATH = dir + sep + current
+      return
+    }
+  }
+}
+
+// ---- Billing-safety: never let the API key path bill the user (see SDK_NOTES) ----
+// If ANTHROPIC_API_KEY is present it would override the subscription and bill the API
+// account. We remove it from the env the SDK child inherits, and surface the fact.
+const apiKeyWasPresent = Boolean(process.env.ANTHROPIC_API_KEY)
+if (apiKeyWasPresent) {
+  delete process.env.ANTHROPIC_API_KEY
+  // eslint-disable-next-line no-console
+  console.warn(
+    '[atelier] ANTHROPIC_API_KEY was set; removing it so Atelier uses your Claude ' +
+      'subscription session instead of pay-as-you-go API billing.'
+  )
+}
+let usingSubscription = false
+
+let mainWindow: BrowserWindow | null = null
+
+// 'oauth' = subscription login; 'none' = no API key (ambient Claude Code session).
+// Anything else ('user'/'project'/'org'/'temporary') means an API key is in play.
+const SAFE_KEY_SOURCES = new Set(['oauth', 'none'])
+
+function sendToRenderer(e: AgentEvent): void {
+  if (e.kind === 'system_init' && SAFE_KEY_SOURCES.has(e.apiKeySource)) usingSubscription = true
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(IPC.agentEvent, e)
+  }
+}
+
+const agents = new AgentManager(sendToRenderer)
+
+function createWindow(): void {
+  mainWindow = new BrowserWindow({
+    width: 1280,
+    height: 820,
+    backgroundColor: '#1e1e1e',
+    title: 'Atelier',
+    webPreferences: {
+      preload: join(__dirname, '../preload/preload.mjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  })
+
+  const devUrl = process.env.ELECTRON_RENDERER_URL
+  if (devUrl) {
+    void mainWindow.loadURL(devUrl)
+  } else {
+    void mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+  }
+
+  mainWindow.on('closed', () => {
+    mainWindow = null
+  })
+}
+
+function registerIpc(): void {
+  ipcMain.handle(IPC.agentCreate, (_e, payload) => {
+    const opts = CreateOptsSchema.parse(payload)
+    return agents.create({ ...opts, cwd: opts.cwd })
+  })
+
+  ipcMain.handle(IPC.agentSend, (_e, payload) => {
+    const { instanceId, text } = SendSchema.parse(payload)
+    agents.send(instanceId, text)
+  })
+
+  ipcMain.handle(IPC.agentInterrupt, async (_e, payload) => {
+    const { instanceId } = InstanceRefSchema.parse(payload)
+    await agents.interrupt(instanceId)
+  })
+
+  ipcMain.handle(IPC.agentClose, async (_e, payload) => {
+    const { instanceId } = InstanceRefSchema.parse(payload)
+    await agents.close(instanceId)
+  })
+
+  ipcMain.handle(IPC.agentDecide, (_e, payload) => {
+    const { instanceId, requestId, behavior, allowAlways } = PermissionDecisionSchema.parse(payload)
+    agents.decide(instanceId, requestId, behavior, allowAlways)
+  })
+
+  ipcMain.handle(IPC.agentAnswer, (_e, payload) => {
+    const { instanceId, requestId, answers, response } = AnswerQuestionSchema.parse(payload)
+    agents.answer(instanceId, requestId, answers, response)
+  })
+
+  ipcMain.handle(IPC.agentSetMode, async (_e, payload) => {
+    const { instanceId, mode } = SetPermissionModeSchema.parse(payload)
+    await agents.setPermissionMode(instanceId, mode)
+  })
+
+  ipcMain.handle(IPC.agentModels, (_e, payload) => {
+    const { instanceId } = InstanceRefSchema.parse(payload)
+    return agents.models(instanceId)
+  })
+
+  ipcMain.handle(IPC.agentSetModel, async (_e, payload) => {
+    const { instanceId, model } = SetModelSchema.parse(payload)
+    await agents.setModel(instanceId, model)
+  })
+
+  ipcMain.handle(IPC.agentSetEffort, (_e, payload) => {
+    const { instanceId, effort } = SetEffortSchema.parse(payload)
+    agents.setEffort(instanceId, effort)
+  })
+
+  ipcMain.handle(IPC.agentUsage, (_e, payload) => {
+    const { instanceId } = InstanceRefSchema.parse(payload)
+    return agents.usage(instanceId)
+  })
+
+  ipcMain.handle(IPC.agentTranscript, (_e, payload) => {
+    const { instanceId } = InstanceRefSchema.parse(payload)
+    return agents.transcript(instanceId)
+  })
+
+  ipcMain.handle(IPC.agentEditSave, (_e, payload) => {
+    const { instanceId, uuid, newText } = EditSaveSchema.parse(payload)
+    return agents.editSave(instanceId, uuid, newText)
+  })
+
+  ipcMain.handle(IPC.agentFork, (_e, payload) => {
+    const { instanceId, uuid, newText } = ForkSchema.parse(payload)
+    return agents.fork(instanceId, uuid, newText)
+  })
+
+  ipcMain.handle(IPC.agentForkPoints, (_e, payload) => {
+    const { instanceId } = InstanceRefSchema.parse(payload)
+    return agents.forkPoints(instanceId)
+  })
+
+  ipcMain.handle(IPC.agentSwitchBranch, (_e, payload) => {
+    const { instanceId, sessionId } = SwitchBranchSchema.parse(payload)
+    return agents.switchBranch(instanceId, sessionId)
+  })
+
+  ipcMain.handle(IPC.agentList, () => agents.list())
+
+  ipcMain.handle(IPC.agentListAll, () => agents.listAll())
+
+  ipcMain.handle(IPC.agentSessionsFor, (_e, payload) => {
+    const { cwd } = SessionsForSchema.parse(payload)
+    return agents.sessionsFor(cwd)
+  })
+
+  ipcMain.handle(IPC.agentImportSession, (_e, payload) => {
+    const { cwd, sessionId, title } = ImportSessionSchema.parse(payload)
+    return agents.importSession(cwd, sessionId, title)
+  })
+
+  ipcMain.handle(IPC.agentOpen, (_e, payload) => {
+    const { instanceId } = InstanceRefSchema.parse(payload)
+    return agents.open(instanceId)
+  })
+
+  ipcMain.handle(IPC.agentClearChat, (_e, payload) => {
+    const { instanceId } = InstanceRefSchema.parse(payload)
+    agents.clearChat(instanceId)
+  })
+
+  ipcMain.handle(IPC.agentClearPlugins, (_e, payload) => {
+    const { instanceId } = InstanceRefSchema.parse(payload)
+    agents.clearPlugins(instanceId)
+  })
+
+  ipcMain.handle(IPC.agentDelete, async (_e, payload) => {
+    const { instanceId } = InstanceRefSchema.parse(payload)
+    await agents.deleteConversation(instanceId)
+  })
+
+  ipcMain.handle(IPC.agentSetActive, (_e, payload) => {
+    const { instanceId } = InstanceRefSchema.parse(payload)
+    agents.setActive(instanceId)
+  })
+
+  ipcMain.handle(IPC.agentActiveId, () => agents.activeId())
+
+  ipcMain.handle(IPC.agentSaveLayout, (_e, payload) => {
+    const { instanceId, layout } = SaveLayoutSchema.parse(payload)
+    agents.setLayout(instanceId, layout)
+  })
+
+  ipcMain.handle(IPC.agentGetLayout, (_e, payload) => {
+    const { instanceId } = InstanceRefSchema.parse(payload)
+    return agents.getLayout(instanceId)
+  })
+
+  ipcMain.handle(IPC.authStatus, (): AuthStatus => ({
+    apiKeyWasPresent,
+    usingSubscription,
+    note: apiKeyWasPresent
+      ? 'ANTHROPIC_API_KEY was removed; using your Claude subscription session.'
+      : 'No API key set; using your Claude subscription session.'
+  }))
+
+  ipcMain.handle(IPC.appDefaultCwd, () => process.cwd())
+
+  ipcMain.handle(IPC.agentRename, (_e, payload) => {
+    const { instanceId, title } = RenameSchema.parse(payload)
+    agents.rename(instanceId, title)
+  })
+
+  ipcMain.handle(IPC.appPickFolder, async () => {
+    const win = mainWindow ?? undefined
+    const res = win
+      ? await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'] })
+      : await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] })
+    return res.canceled || res.filePaths.length === 0 ? null : res.filePaths[0]
+  })
+
+  ipcMain.handle(IPC.appOpenPath, async (_e, payload) => {
+    const path = z.string().min(1).parse(payload)
+    await shell.openPath(path)
+  })
+}
+
+app.whenReady().then(() => {
+  ensureNodeOnPath()
+  registerIpc()
+  agents.restore() // recreate persisted conversations, resuming each active branch
+  createWindow()
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  })
+})
+
+app.on('window-all-closed', () => {
+  void agents.closeAll()
+  if (process.platform !== 'darwin') app.quit()
+})
+
+app.on('before-quit', () => {
+  void agents.closeAll()
+})

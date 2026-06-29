@@ -29,6 +29,11 @@ export default tseslint.config(
       'no-console': 'error'
     }
   },
+  // Node scripts and config files (plain JS/ESM) — Node globals, console allowed.
+  {
+    files: ['**/*.{js,mjs,cjs}'],
+    languageOptions: { globals: { ...globals.node, fetch: 'readonly' } }
+  },
   // React renderer: hooks rules + flag any unsanctioned dangerouslySetInnerHTML.
   {
     files: ['src/**/*.{ts,tsx}'],

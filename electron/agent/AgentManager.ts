@@ -88,6 +88,11 @@ class InputQueue implements AsyncIterable<SDKUserMessage> {
     }
   }
 
+  /** A message has been queued (e.g. sent while a turn was running) but not yet consumed. */
+  hasPending(): boolean {
+    return this.items.length > 0
+  }
+
   async *[Symbol.asyncIterator](): AsyncIterator<SDKUserMessage> {
     while (true) {
       if (this.items.length > 0) {
@@ -783,7 +788,9 @@ class Session {
         } else {
           this.restarts = 0 // a clean (or cleanly-stopped) turn means we're healthy
         }
-        this.setStatus('idle')
+        // Stay 'working' if the user queued another message while this turn ran — the SDK reads
+        // it next, so the activity indicator should persist through the queued turn.
+        this.setStatus(this.input.hasPending() ? 'working' : 'idle')
         this.onChange?.() // bump updatedAt; persist any new branch from this turn
         break
       }

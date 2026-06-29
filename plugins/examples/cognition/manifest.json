@@ -2,6 +2,7 @@
   "id": "cognition",
   "name": "Cognition",
   "version": "0.1.0",
+  "icon": "M5.2 8.5a3.5 3.5 0 1 1 5.6 0l-.7 1.3v1.2h-4.2v-1.2zM6.5 12.2h3M7 13.5h2",
   "kind": "panel",
   "entry": "index.html",
   "permissions": ["context", "storage"],

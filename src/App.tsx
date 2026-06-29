@@ -10,6 +10,17 @@ import { LayoutService } from './services/LayoutService'
 
 const THEMES = ['slate', 'carbon', 'daylight'] as const
 
+// In-app confirm/alert. Native window.confirm/alert in a FRAMELESS Electron window leaves the web
+// contents without keyboard focus after dismissal (only a window blur/focus cycle restores it),
+// which read as the whole UI "locking up". A React modal keeps focus inside the renderer.
+type ConfirmReq = {
+  message: string
+  onConfirm: () => void
+  danger?: boolean
+  confirmLabel?: string
+  alert?: boolean // OK-only (replaces window.alert)
+}
+
 export function App() {
   const [open, setOpen] = useState<AgentInstance[]>([]) // open conversations (tabs)
   const [all, setAll] = useState<ConversationSummary[]>([]) // every conversation (dropdown)
@@ -18,6 +29,9 @@ export function App() {
   const [importing, setImporting] = useState<{ cwd: string; sessions: SessionSummary[] } | null>(
     null
   )
+  const [confirmReq, setConfirmReq] = useState<ConfirmReq | null>(null)
+  const askConfirm = (message: string, onConfirm: () => void, opts?: Partial<ConfirmReq>) =>
+    setConfirmReq({ message, onConfirm, ...opts })
   const [usage, setUsage] = useState<UsageInfo | null>(null)
   const [plugins, setPlugins] = useState<DiscoveredPlugin[]>([])
   const [pluginState, setPluginState] = useState<Record<string, ConversationPluginState>>({})
@@ -269,28 +283,27 @@ export function App() {
     await refresh()
   }
 
-  const clearChat = async (id: string) => {
-    if (
-      !window.confirm('Clear the chat context for this conversation? This starts a fresh session.')
-    )
-      return
-    await window.atelier.agent.clearChat(id)
-    // Reset the transcript VIEW only — don't remount the dock (that would disturb plugin panes,
-    // since Dockview's tab bar is suppressed). The ChatPanel reloads its now-empty transcript.
-    window.dispatchEvent(new CustomEvent('atelier-reload-transcript', { detail: id }))
-  }
+  const clearChat = (id: string) =>
+    askConfirm('Clear the chat context for this conversation? This starts a fresh session.', () => {
+      void window.atelier.agent.clearChat(id).then(() => {
+        // Reset the transcript VIEW only — the ChatPanel reloads its now-empty transcript.
+        window.dispatchEvent(new CustomEvent('atelier-reload-transcript', { detail: id }))
+      })
+    })
 
-  const clearPlugins = async (id: string) => {
-    if (!window.confirm('Clear all plugin data/state for this conversation?')) return
-    await window.atelier.agent.clearPlugins(id)
-  }
+  const clearPlugins = (id: string) =>
+    askConfirm(
+      'Clear all plugin data/state for this conversation?',
+      () => void window.atelier.agent.clearPlugins(id),
+      { danger: true }
+    )
 
   const startImport = async () => {
     const cwd = await window.atelier.app.pickFolder()
     if (!cwd) return
     const sessions = await window.atelier.agent.sessionsFor(cwd)
     if (sessions.length === 0) {
-      window.alert('No previous Claude sessions found in that folder.')
+      askConfirm('No previous Claude sessions found in that folder.', () => {}, { alert: true })
       return
     }
     setImporting({ cwd, sessions })
@@ -304,19 +317,20 @@ export function App() {
     setActiveId(id)
   }
 
-  const deleteConversation = async (id: string) => {
-    if (
-      !window.confirm(
-        'Delete this conversation and its session data permanently? This cannot be undone.'
-      )
+  const deleteConversation = (id: string) =>
+    askConfirm(
+      'Delete this conversation and its session data permanently? This cannot be undone.',
+      () => {
+        void (async () => {
+          await window.atelier.agent.delete(id)
+          const remaining = await window.atelier.agent.list()
+          setOpen(remaining)
+          setAll(await window.atelier.agent.listAll())
+          if (activeId === id) setActiveId(remaining[0]?.id ?? null)
+        })()
+      },
+      { danger: true, confirmLabel: 'Delete' }
     )
-      return
-    await window.atelier.agent.delete(id)
-    const remaining = await window.atelier.agent.list()
-    setOpen(remaining)
-    setAll(await window.atelier.agent.listAll())
-    if (activeId === id) setActiveId(remaining[0]?.id ?? null)
-  }
 
   if (error) return <div className="boot boot-error">Failed to start: {error}</div>
 
@@ -369,6 +383,34 @@ export function App() {
           onCancel={() => setImporting(null)}
         />
       )}
+      {confirmReq && <ConfirmModal req={confirmReq} onClose={() => setConfirmReq(null)} />}
+    </div>
+  )
+}
+
+function ConfirmModal({ req, onClose }: { req: ConfirmReq; onClose: () => void }) {
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal confirm-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="confirm-message">{req.message}</div>
+        <div className="modal-actions">
+          {!req.alert && (
+            <button className="btn btn-ghost" onClick={onClose}>
+              Cancel
+            </button>
+          )}
+          <button
+            className={`btn ${req.danger ? 'btn-danger' : 'btn-primary'}`}
+            autoFocus
+            onClick={() => {
+              req.onConfirm()
+              onClose()
+            }}
+          >
+            {req.confirmLabel ?? (req.alert ? 'OK' : 'Confirm')}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

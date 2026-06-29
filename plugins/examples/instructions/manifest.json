@@ -2,6 +2,7 @@
   "id": "instructions",
   "name": "Instructions",
   "version": "0.1.0",
+  "icon": "M4 2.5h6l2.5 2.5v8.5h-8.5zM10 2.5v2.5h2.5M5.5 8h5M5.5 10.5h5",
   "kind": "panel",
   "entry": "index.html",
   "permissions": ["context"],

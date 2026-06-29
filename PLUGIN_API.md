@@ -23,6 +23,7 @@ author.
   "id": "metrics-stream", // unique, == folder name, [a-z0-9-]
   "name": "Metrics Stream", // display name in the sidebar
   "version": "0.1.0",
+  "icon": "M2.5 13.5V2.5M2.5 13.5h11M5 11l2.5-3 2 2 3.5-4.5", // unique 16px line-icon `d` (see below)
   "kind": "panel", // "panel" | "tool" | "both"
   "entry": "index.html", // required if kind includes "panel"
   "backend": "plugin.js", // optional; required if it registers privileged tools
@@ -41,6 +42,12 @@ author.
 
 Manifests are Zod-validated on discovery. An invalid manifest surfaces an error in the
 sidebar and is not loaded; it never throws into the host.
+
+Every plugin should ship a unique `icon`: a single-path 16px line-icon `d` string
+(`viewBox 0 0 16 16`, fill none, stroke `currentColor` — DESIGN_SYSTEM.md §6) that visually
+distinguishes it in the collapsed sidebar rail. Color is inherited (idle `--faint`, active
+`--accent`), so author the path only. Omitting it falls back to a generic plug glyph shared
+by every icon-less plugin — avoid that; pick a shape distinct from the other plugins' icons.
 
 ## 2. Lifecycle
 

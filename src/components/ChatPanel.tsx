@@ -148,7 +148,7 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
 
   const send = (raw: string) => {
     const text = raw.trim()
-    if (!text || busy) return
+    if (!text) return // allowed while busy: the message queues and runs after the current turn
     atBottomRef.current = true // sending is an explicit action — jump to the tail
     dispatch({ type: 'user', id: crypto.randomUUID(), text })
     void window.atelier.agent.send(instanceId, text)
@@ -347,7 +347,7 @@ function Composer({
   const [input, setInput] = useState('')
   const submit = () => {
     const t = input.trim()
-    if (!t || busy) return
+    if (!t) return // allowed while busy — the message queues for after the current turn
     onSend(t)
     setInput('')
   }
@@ -363,18 +363,26 @@ function Composer({
               submit()
             }
           }}
-          placeholder="Message the agent…  (Enter to send, Shift+Enter for newline)"
+          placeholder={
+            busy
+              ? 'Queue a message…  (sent after the current step; Stop to interrupt)'
+              : 'Message the agent…  (Enter to send, Shift+Enter for newline)'
+          }
           rows={3}
         />
-        {busy ? (
-          <button className="stop-btn" onClick={onInterrupt} title="Stop">
+        {busy && (
+          <button className="stop-btn" onClick={onInterrupt} title="Stop the current turn">
             ■
           </button>
-        ) : (
-          <button className="send-btn" onClick={submit} disabled={!input.trim()} title="Send">
-            ↑
-          </button>
         )}
+        <button
+          className="send-btn"
+          onClick={submit}
+          disabled={!input.trim()}
+          title={busy ? 'Queue this message' : 'Send'}
+        >
+          ↑
+        </button>
       </div>
     </div>
   )

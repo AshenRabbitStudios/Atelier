@@ -59,11 +59,30 @@ pinnedExports}`), threaded through `Session`/`AgentManager` like `layout`.
 - **11 new unit tests** (manifest schema, registry scanning incl. broken/mismatch/nested, storage
   isolation). Suite now 39 tests.
 
-**Next slice (commit B):** the renderer — perma-docked left rail (app-wide list, per-conversation
-enable toggle, broken-plugin error) + the sandboxed plugin pane (iframe + postMessage↔IPC relay,
-permission-checked) mounted in Dockview. **Needs human spot-check** (GUI, not headlessly verifiable):
-hello-panel appears on discovery, loads into a pane, dock/float works, a typed value persists across
-reload, and a deliberately broken plugin shows an error without crashing the app.
+**Renderer landed (commit B; gate green):**
+
+- `src/components/PluginRail.tsx` — perma-docked left rail (app chrome, not a Dockview pane):
+  collapsed icon strip → expanded app-wide list; per-conversation enable toggle; broken plugins
+  shown with their error; per-plugin reload.
+- `src/components/PluginPane.tsx` — the sandboxed plugin host: an `<iframe sandbox="allow-scripts">`
+  over `atelier-plugin://`, plus the `postMessage` relay that permission-checks and forwards
+  storage→IPC and layout.dock/setTitle→LayoutService. Only messages from the pane's own frame are
+  honored.
+- `LayoutService` — `addPlugin`/`dockPlugin`/`removePlugin`/`setPluginTitle`/`hasPlugin` (Dockview
+  panes, dock-region + floating).
+- `App.tsx` — loads the catalog + subscribes `onChanged`; loads `enabledFor(activeId)`; reconciles
+  mounted panes with the enabled set; toggle + reload handlers; renders the rail beside the dock.
+
+**Needs human spot-check** (GUI, not headlessly verifiable) — P3 acceptance:
+
+- `hello-panel` appears in the rail on discovery and toggling it mounts a dockable pane.
+- The pane docks/floats via its buttons (`layout.dock`); typing a note persists across reload and
+  conversation switch (`storage`).
+- Editing the plugin file + reload updates the pane without an app restart.
+- A deliberately broken plugin lists with an error and does **not** crash the app.
+
+Deferred to P4 (per architecture): context pinning (`contextExports` + injection), the
+`plugin_control` channel, the DataBus, and tool-contributing backends.
 
 ## P0 acceptance — self-check
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { DockviewReact, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview-react'
 import type {
   AgentInstance,
@@ -7,16 +7,11 @@ import type {
   UsageInfo,
   UsageWindow
 } from '@shared/events'
+import type { DiscoveredPlugin, ConversationPluginState, DockPosition } from '@shared/plugins'
 import { ChatPanel } from './components/ChatPanel'
+import { PluginPane } from './components/PluginPane'
+import { PluginRail } from './components/PluginRail'
 import { LayoutService } from './services/LayoutService'
-
-// The workspace renders the ACTIVE conversation's Claude pane. Conversation
-// selection lives in the top bar, not inside the pane (SPEC §4.5).
-const components = {
-  claude: (props: IDockviewPanelProps<{ instanceId: string }>) => (
-    <ChatPanel key={props.params.instanceId} instanceId={props.params.instanceId} />
-  )
-}
 
 export function App() {
   const [open, setOpen] = useState<AgentInstance[]>([]) // open conversations (tabs)
@@ -27,11 +22,41 @@ export function App() {
     null
   )
   const [usage, setUsage] = useState<UsageInfo | null>(null)
+  const [plugins, setPlugins] = useState<DiscoveredPlugin[]>([])
+  const [pluginState, setPluginState] = useState<Record<string, ConversationPluginState>>({})
   const layout = useRef<LayoutService | null>(null)
   const activeIdRef = useRef<string | null>(null)
+  const pluginsRef = useRef<DiscoveredPlugin[]>([])
   const appliedRef = useRef<string | null>(null)
   const restoringRef = useRef(false)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  pluginsRef.current = plugins
+
+  // Dockview panel components. Stable (refs carry the live values), so Dockview never re-registers.
+  // The active conversation id flows through activeIdRef so a plugin's storage is always scoped to
+  // whatever conversation is showing, even after a switch.
+  const components = useMemo(
+    () => ({
+      claude: (props: IDockviewPanelProps<{ instanceId: string }>) => (
+        <ChatPanel key={props.params.instanceId} instanceId={props.params.instanceId} />
+      ),
+      plugin: (props: IDockviewPanelProps<{ pluginId: string }>) => {
+        const pluginId = props.params.pluginId
+        const found = pluginsRef.current.find((p) => p.id === pluginId)
+        return (
+          <PluginPane
+            key={pluginId}
+            pluginId={pluginId}
+            permissions={found?.manifest?.permissions ?? []}
+            getConversationId={() => activeIdRef.current}
+            onDock={(pos: DockPosition) => layout.current?.dockPlugin(pluginId, pos)}
+            onSetTitle={(t: string) => layout.current?.setPluginTitle(pluginId, t)}
+          />
+        )
+      }
+    }),
+    []
+  )
 
   // Account-wide usage, polled every 10s off the active conversation (the manager
   // caches the last non-empty snapshot, so idle/just-restored sessions still report).
@@ -120,6 +145,71 @@ export function App() {
     void applyLayout(activeId)
     void window.atelier.agent.setActive(activeId)
   }, [activeId])
+
+  // The app-wide plugin catalog (registry), kept live as files change on disk.
+  useEffect(() => {
+    let alive = true
+    void window.atelier.plugins.list().then((list) => {
+      if (alive) setPlugins(list)
+    })
+    const off = window.atelier.plugins.onChanged((list) => setPlugins(list))
+    return () => {
+      alive = false
+      off()
+    }
+  }, [])
+
+  // Which plugins THIS conversation has enabled (per-conversation set).
+  useEffect(() => {
+    if (!activeId) {
+      setPluginState({})
+      return
+    }
+    let alive = true
+    void window.atelier.plugins.enabledFor(activeId).then((s) => {
+      if (alive) setPluginState(s)
+    })
+    return () => {
+      alive = false
+    }
+  }, [activeId])
+
+  // Reconcile mounted plugin panes with the enabled set: mount the enabled, unmount the disabled.
+  useEffect(() => {
+    const ls = layout.current
+    if (!ls || restoringRef.current) return
+    for (const p of plugins) {
+      const isEnabled = p.valid && Boolean(pluginState[p.id]?.enabled)
+      const mounted = ls.hasPlugin(p.id)
+      if (isEnabled && !mounted) {
+        ls.addPlugin(p.id, p.manifest?.name ?? p.id, p.manifest?.defaultDock ?? 'right')
+      } else if (!isEnabled && mounted) {
+        ls.removePlugin(p.id)
+      }
+    }
+  }, [plugins, pluginState, activeId])
+
+  const togglePlugin = async (pluginId: string, enabled: boolean) => {
+    if (!activeId) return
+    await window.atelier.plugins.setEnabled(activeId, pluginId, enabled)
+    setPluginState((s) => ({
+      ...s,
+      [pluginId]: { enabled, pinnedExports: s[pluginId]?.pinnedExports ?? [] }
+    }))
+  }
+
+  const reloadPlugin = async (pluginId: string) => {
+    await window.atelier.plugins.reload(pluginId)
+    const ls = layout.current
+    if (!ls || !ls.hasPlugin(pluginId)) return
+    const p = pluginsRef.current.find((x) => x.id === pluginId)
+    ls.removePlugin(pluginId) // remount to bust the iframe cache
+    setTimeout(
+      () =>
+        ls.addPlugin(pluginId, p?.manifest?.name ?? pluginId, p?.manifest?.defaultDock ?? 'right'),
+      0
+    )
+  }
 
   const onReady = (event: DockviewReadyEvent) => {
     const ls = new LayoutService(event.api)
@@ -234,15 +324,23 @@ export function App() {
           <UsageMini windows={usage.windows} />
         </div>
       )}
-      {activeId ? (
-        <DockviewReact
-          className="dockview-theme-abyss dock-root"
-          components={components}
-          onReady={onReady}
+      <div className="workspace-row">
+        <PluginRail
+          plugins={plugins}
+          enabled={pluginState}
+          onToggle={togglePlugin}
+          onReload={reloadPlugin}
         />
-      ) : (
-        <div className="boot">No conversation open — pick one from ▾ Previous, or ＋ New.</div>
-      )}
+        {activeId ? (
+          <DockviewReact
+            className="dockview-theme-abyss dock-root"
+            components={components}
+            onReady={onReady}
+          />
+        ) : (
+          <div className="boot">No conversation open — pick one from ▾ Previous, or ＋ New.</div>
+        )}
+      </div>
       {importing && (
         <ImportModal
           sessions={importing.sessions}

@@ -1,4 +1,12 @@
 import type { DockviewApi } from 'dockview'
+import type { DockPosition } from '@shared/plugins'
+
+// Dockview docking directions we map the plugin dock positions onto.
+const DIRECTION: Partial<Record<DockPosition, 'left' | 'right' | 'below'>> = {
+  left: 'left',
+  right: 'right',
+  bottom: 'below'
+}
 
 /**
  * Thin wrapper over Dockview so the rest of the app never touches the docking
@@ -29,6 +37,41 @@ export class LayoutService {
       title: 'Claude',
       params: { instanceId }
     })
+  }
+
+  // ---- Plugin panes (P3) ----
+
+  addPlugin(pluginId: string, title: string, position: DockPosition = 'right'): void {
+    const id = `plugin:${pluginId}`
+    if (this.api.getPanel(id)) return
+    // AddPanelOptions is a discriminated union: floating and position are mutually exclusive,
+    // so each variant is built explicitly rather than via conditional spread.
+    const base = { id, component: 'plugin', title, params: { pluginId } }
+    const dir = DIRECTION[position]
+    if (position === 'float') this.api.addPanel({ ...base, floating: true })
+    else if (dir) this.api.addPanel({ ...base, position: { direction: dir } })
+    else this.api.addPanel(base)
+  }
+
+  /** Re-dock a plugin pane to a new region (remove + re-add — robust across regions/float). */
+  dockPlugin(pluginId: string, position: DockPosition): void {
+    const panel = this.api.getPanel(`plugin:${pluginId}`)
+    const title = panel?.title ?? pluginId
+    if (panel) this.api.removePanel(panel)
+    this.addPlugin(pluginId, title, position)
+  }
+
+  setPluginTitle(pluginId: string, title: string): void {
+    this.api.getPanel(`plugin:${pluginId}`)?.setTitle(title)
+  }
+
+  removePlugin(pluginId: string): void {
+    const panel = this.api.getPanel(`plugin:${pluginId}`)
+    if (panel) this.api.removePanel(panel)
+  }
+
+  hasPlugin(pluginId: string): boolean {
+    return Boolean(this.api.getPanel(`plugin:${pluginId}`))
   }
 
   // ---- Per-conversation layout serialization (SPEC §4.5) ----

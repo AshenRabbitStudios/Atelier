@@ -30,6 +30,13 @@ export const RUNTIME_JS = String.raw`
       else p.reject(new Error(d.error || 'plugin host error'))
       return
     }
+    if (d.__atelierEvent && d.event === 'theme' && d.payload) {
+      // The host pushes the active theme's token values so the plugin body can use
+      // var(--surface)/var(--text)/… and read as native across the iframe boundary.
+      var root = document.documentElement
+      for (var k in d.payload) root.style.setProperty(k, d.payload[k])
+      return
+    }
     if (d.__atelierEvent && listeners[d.event]) {
       var cbs = listeners[d.event].slice()
       for (var i = 0; i < cbs.length; i++) {

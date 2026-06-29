@@ -21,6 +21,30 @@ interface RpcMessage {
   args?: unknown[]
 }
 
+// Theme tokens pushed into the plugin frame so its body can read as native (DESIGN_SYSTEM.md §4).
+const THEME_TOKENS = [
+  '--bg',
+  '--bg-2',
+  '--surface',
+  '--surface-2',
+  '--surface-3',
+  '--input',
+  '--border',
+  '--border-2',
+  '--text',
+  '--dim',
+  '--faint',
+  '--accent',
+  '--accent-2',
+  '--accent-weak',
+  '--on-accent',
+  '--ok',
+  '--warn',
+  '--err',
+  '--font',
+  '--mono'
+]
+
 export function PluginPane({
   pluginId,
   permissions,
@@ -39,6 +63,19 @@ export function PluginPane({
       frame.contentWindow?.postMessage({ __atelierReply: true, id, ok, result, error }, '*')
     }
 
+    // Push the active theme's token values into the (cross-origin) plugin frame so its body can
+    // use var(--…) and read native. Re-pushed on theme/density change (App dispatches 'atelier-theme').
+    const pushTheme = (): void => {
+      const cs = getComputedStyle(document.documentElement)
+      const tokens: Record<string, string> = {}
+      for (const name of THEME_TOKENS) tokens[name] = cs.getPropertyValue(name).trim()
+      frame.contentWindow?.postMessage(
+        { __atelierEvent: true, event: 'theme', payload: tokens },
+        '*'
+      )
+    }
+    window.addEventListener('atelier-theme', pushTheme)
+
     const onMessage = async (e: MessageEvent): Promise<void> => {
       if (e.source !== frame.contentWindow) return // only this plugin's own frame
       const d = e.data as RpcMessage
@@ -46,7 +83,8 @@ export function PluginPane({
       const args = d.args ?? []
       try {
         if (d.ns === 'lifecycle' && d.method === 'ready') {
-          // The frame is live — fire its 'load' hook so it can rebuild from storage.
+          // The frame is live — send the theme tokens, then fire its 'load' hook.
+          pushTheme()
           frame.contentWindow?.postMessage({ __atelierEvent: true, event: 'load' }, '*')
           return
         }
@@ -90,7 +128,10 @@ export function PluginPane({
     }
 
     window.addEventListener('message', onMessage)
-    return () => window.removeEventListener('message', onMessage)
+    return () => {
+      window.removeEventListener('message', onMessage)
+      window.removeEventListener('atelier-theme', pushTheme)
+    }
   }, [pluginId, permissions, getConversationId, onDock, onSetTitle])
 
   return (

@@ -158,6 +158,32 @@ Deferred to P4 (per architecture): context pinning (`contextExports` + injection
 - Plugin tool scoping: global vs per-instance — default global (P4).
 - Sandbox tech: Electron `<webview>` vs sandboxed iframe — pick early in P3.
 
+## Visual-refresh migration (docs/DESIGN_SYSTEM.md) — M1–M6 done
+
+Tokenized, themeable design system (Slate/Carbon/Daylight × comfortable/compact). All six
+migration steps landed, each gate-green (typecheck/lint/format/39 tests/build) and CI-verified:
+
+- **M1 Tokenize** — `[data-theme]`/`[data-density]` token blocks; every component color re-pointed.
+- **M2 Panel** — universal `Panel` shell; every Dockview kind routed through it; native Dockview
+  tabs suppressed (Panel header is the single chrome).
+- **M3 Chrome** — frameless window + window-control IPC; 36px title bar with app mark, **LD-2**
+  `UsageMeters` (account-wide, always visible), segmented theme switcher, Windows controls.
+- **M4 Sidebar** — plugin rail reworked to the §5 sidebar over the real registry.
+- **M5 Blocks** — composer (round Send / square Stop), tool-kind tints; **LD-1** holds (branch nav
+  on the user message row, never the header).
+- **M6 Reference** — plugin frames themed by pushing token values into the sandbox; `hello-panel`
+  re-skinned to tokens-only as the canonical plugin body.
+
+**Needs human spot-check** (GUI): launch `npm run dev` and verify in **all three themes** + both
+densities against the prototype (`design_handoff_visual_refresh/reference/Atelier Workspace.dc.html`)
+— chrome reads native, frameless window controls work, both usage meters show bar+%+reset, the
+Panel shell looks right (watch for chat double-header / suppressed Dockview tabs), the plugin pane
+reskins with the theme, and Carbon/Daylight have no missing tokens.
+
+**Remaining §5 polish (follow-up, non-blocking):** diff line colors, card-strip restructure for
+permission/question cards, block-summary chevrons, and folding ChatPanel's instance/chat header
+into the Panel header (removes the transitional chat double-header).
+
 ## Engineering hardening run — DONE (2026-06-28)
 
 The hardening run is complete; the three previously-unwired practices in docs/ENGINEERING.md are

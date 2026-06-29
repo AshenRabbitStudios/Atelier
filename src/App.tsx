@@ -39,9 +39,11 @@ export function App() {
 
   useEffect(() => {
     localStorage.setItem('atelier:theme', theme)
+    window.dispatchEvent(new Event('atelier-theme')) // re-push tokens to plugin frames
   }, [theme])
   useEffect(() => {
     localStorage.setItem('atelier:density', density)
+    window.dispatchEvent(new Event('atelier-theme'))
   }, [density])
 
   // Dockview panel components. Stable (refs carry the live values), so Dockview never re-registers.

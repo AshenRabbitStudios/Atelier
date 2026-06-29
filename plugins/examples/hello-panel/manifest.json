@@ -1,0 +1,9 @@
+{
+  "id": "hello-panel",
+  "name": "Hello Panel",
+  "version": "0.1.0",
+  "kind": "panel",
+  "entry": "index.html",
+  "permissions": ["storage"],
+  "defaultDock": "right"
+}

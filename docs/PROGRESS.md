@@ -2,9 +2,10 @@
 
 ## Status
 
-- **Current phase:** P1 — Multiple instances + editable history. **Substantially complete**
-  (see P1 breakdown below); one acceptance item ("Also rewind files") remains. P2 has been
-  partially started early (per-conversation layout persistence already landed).
+- **Current phase:** P3 — Plugin host. **Backend slice landed** (registry/watcher/schema,
+  per-conversation enablement, storage, `atelier-plugin://` sandbox protocol + runtime, IPC,
+  hello-panel, 11 tests — see P3 section). Renderer rail/pane is next. P1 is functionally
+  complete (rewind descoped); P2 partially started early (per-conversation layout persistence).
 - **Verified headlessly (2026-06-28):** `npm run typecheck` clean (both bundles). Earlier:
   `npm run build` clean; `npm run dev` launches Electron (4 processes, no errors); a one-shot
   SDK probe confirmed subscription auth (apiKeySource `none`, no API key) and token-by-token
@@ -38,6 +39,31 @@
       adds the single Claude pane today).
 - [ ] Font-scale control on the chat panel — not yet.
       _(Full P2 begins after P1's rewind item closes.)_
+
+## P3 — Plugin host + first panel plugin (in progress)
+
+**Backend landed (commit, gate green: typecheck/lint/format/test/build):**
+
+- `electron/shared/plugins.ts` — Zod `ManifestSchema` (+ permissions, tools, contextExports for
+  day-one persistence), `DiscoveredPlugin`, `ConversationPluginState`.
+- `electron/plugin/PluginRegistry.ts` — app-wide discovery of /plugins (depth ≤ 2 so `examples/`
+  is found), Zod validation, broken manifest → invalid entry (never throws), `fs.watch` + debounced
+  re-scan, `plugins:changed` push.
+- Per-conversation **enablement** persisted in the conversation manifest (`plugins{enabled,
+pinnedExports}`), threaded through `Session`/`AgentManager` like `layout`.
+- `electron/plugin/pluginStorage.ts` — per-(conversation, plugin) KV (the restorable state).
+- `electron/plugin/protocol.ts` + `runtime.ts` — `atelier-plugin://` scheme serving plugin assets
+  (traversal-guarded) + the injected `window.atelier` host runtime (postMessage RPC).
+- IPC: `plugins:list/enabled-for/set-enabled/reload`, `plugin:storage-get/set/keys`, `plugins:changed`.
+- `plugins/examples/hello-panel/` — storage + layout.dock example.
+- **11 new unit tests** (manifest schema, registry scanning incl. broken/mismatch/nested, storage
+  isolation). Suite now 39 tests.
+
+**Next slice (commit B):** the renderer — perma-docked left rail (app-wide list, per-conversation
+enable toggle, broken-plugin error) + the sandboxed plugin pane (iframe + postMessage↔IPC relay,
+permission-checked) mounted in Dockview. **Needs human spot-check** (GUI, not headlessly verifiable):
+hello-panel appears on discovery, loads into a pane, dock/float works, a typed value persists across
+reload, and a deliberately broken plugin shows an error without crashing the app.
 
 ## P0 acceptance — self-check
 

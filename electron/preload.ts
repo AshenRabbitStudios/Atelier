@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { IPC, type AgentEvent, type AtelierAPI } from './shared/events.js'
+import type { DiscoveredPlugin } from './shared/plugins.js'
 
 // The ONLY bridge between the sandboxed renderer and the privileged main process.
 const api: AtelierAPI = {
@@ -47,6 +48,26 @@ const api: AtelierAPI = {
       ipcRenderer.on(IPC.agentEvent, listener)
       return () => {
         ipcRenderer.removeListener(IPC.agentEvent, listener)
+      }
+    }
+  },
+  plugins: {
+    list: () => ipcRenderer.invoke(IPC.pluginsList),
+    enabledFor: (conversationId) => ipcRenderer.invoke(IPC.pluginsEnabledFor, { conversationId }),
+    setEnabled: (conversationId, pluginId, enabled) =>
+      ipcRenderer.invoke(IPC.pluginsSetEnabled, { conversationId, pluginId, enabled }),
+    reload: (pluginId) => ipcRenderer.invoke(IPC.pluginsReload, { pluginId }),
+    storageGet: (conversationId, pluginId, key) =>
+      ipcRenderer.invoke(IPC.pluginStorageGet, { conversationId, pluginId, key }),
+    storageSet: (conversationId, pluginId, key, value) =>
+      ipcRenderer.invoke(IPC.pluginStorageSet, { conversationId, pluginId, key, value }),
+    storageKeys: (conversationId, pluginId) =>
+      ipcRenderer.invoke(IPC.pluginStorageKeys, { conversationId, pluginId }),
+    onChanged: (cb) => {
+      const listener = (_e: IpcRendererEvent, plugins: DiscoveredPlugin[]) => cb(plugins)
+      ipcRenderer.on(IPC.pluginsChanged, listener)
+      return () => {
+        ipcRenderer.removeListener(IPC.pluginsChanged, listener)
       }
     }
   },

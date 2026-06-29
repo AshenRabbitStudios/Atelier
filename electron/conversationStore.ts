@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
+import type { ConversationPluginState } from './shared/plugins.js'
 
 /** One branch (SDK session) in a conversation's fork tree. */
 export interface PersistedBranch {
@@ -22,7 +23,9 @@ export interface ConversationManifest {
   branches: PersistedBranch[]
   activeBranch?: string // sessionId of the active branch
   layout?: unknown // per-conversation Dockview serialization (reserved)
-  plugins?: unknown[] // reserved for the plugin system (P3)
+  // Per-conversation plugin enablement + pinned exports (app-wide registry, per-conversation
+  // enabled set — PLUGIN_ARCHITECTURE.md §1). Keyed by plugin id.
+  plugins?: Record<string, ConversationPluginState>
   createdAt: number
   updatedAt: number
 }

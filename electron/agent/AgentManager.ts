@@ -27,6 +27,7 @@ import type {
   UsageInfo,
   UsageWindow
 } from '../shared/events.js'
+import type { ConversationPluginState } from '../shared/plugins.js'
 import { readTranscript, editMessageText, parentUuidOf, childUuidOf } from './sessionStore.js'
 import {
   listConversations,
@@ -50,6 +51,7 @@ interface RestoreData {
   createdAt?: number
   effort?: EffortLevel
   layout?: unknown
+  plugins?: Record<string, ConversationPluginState>
 }
 
 /**
@@ -128,6 +130,7 @@ class Session {
   model?: string
   effort?: EffortLevel
   layout?: unknown
+  pluginState: Record<string, ConversationPluginState> = {}
   sessionId?: string
   status: AgentStatus = 'idle'
   readonly createdAt: number
@@ -182,6 +185,7 @@ class Session {
     this.createdAt = restore?.createdAt ?? Date.now()
     this.effort = restore?.effort
     this.layout = restore?.layout
+    if (restore?.plugins) this.pluginState = restore.plugins
     if (restore?.sessionId) this.sessionId = restore.sessionId
     if (restore?.branches) this.branches = restore.branches
     this.start() // resumes this.sessionId (the active branch) when restoring
@@ -195,6 +199,7 @@ class Session {
       model: this.model,
       effort: this.effort,
       layout: this.layout,
+      plugins: this.pluginState,
       branches: this.branches,
       activeBranch: this.sessionId,
       createdAt: this.createdAt,
@@ -205,6 +210,17 @@ class Session {
   setLayout(layout: unknown): void {
     this.layout = layout
     this.onChange?.()
+  }
+
+  /** Enable/disable a plugin for THIS conversation (app-wide registry, per-conversation set). */
+  setPluginEnabled(pluginId: string, enabled: boolean): void {
+    const prev = this.pluginState[pluginId]
+    this.pluginState[pluginId] = { enabled, pinnedExports: prev?.pinnedExports ?? [] }
+    this.onChange?.()
+  }
+
+  pluginStateFor(): Record<string, ConversationPluginState> {
+    return this.pluginState
   }
 
   private buildOptions(opts?: { resumeAt?: string; fork?: boolean }): Options {
@@ -824,7 +840,8 @@ export class AgentManager {
       branches: m.branches,
       createdAt: m.createdAt,
       effort: m.effort,
-      layout: m.layout
+      layout: m.layout,
+      plugins: m.plugins
     })
     s.onChange = () => this.persist(s)
     this.sessions.set(s.id, s)
@@ -1002,6 +1019,14 @@ export class AgentManager {
 
   getLayout(instanceId: string): unknown {
     return this.sessions.get(instanceId)?.layout ?? null
+  }
+
+  setPluginEnabled(instanceId: string, pluginId: string, enabled: boolean): void {
+    this.require(instanceId).setPluginEnabled(pluginId, enabled)
+  }
+
+  pluginStateFor(instanceId: string): Record<string, ConversationPluginState> {
+    return this.sessions.get(instanceId)?.pluginStateFor() ?? {}
   }
 
   async usage(instanceId: string): Promise<UsageInfo> {

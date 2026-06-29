@@ -21,11 +21,24 @@ import {
   EditSaveSchema,
   ForkSchema,
   SwitchBranchSchema,
+  ConversationRefSchema,
+  PluginIdSchema,
+  SetPluginEnabledSchema,
+  PluginStorageGetSchema,
+  PluginStorageSetSchema,
+  PluginStorageKeysSchema,
   type AgentEvent,
   type AuthStatus
 } from './shared/events.js'
+import type { DiscoveredPlugin } from './shared/plugins.js'
+import { PluginRegistry } from './plugin/PluginRegistry.js'
+import { registerPluginScheme, handlePluginProtocol } from './plugin/protocol.js'
+import { pluginStorageGet, pluginStorageSet, pluginStorageKeys } from './plugin/pluginStorage.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+
+// Register the plugin asset scheme as privileged BEFORE app `ready` (Electron requirement).
+registerPluginScheme()
 
 // ---- Ensure the spawned agent (and its Bash tool) can find node/npm ----
 // When Atelier is launched from a GUI shortcut the inherited PATH may lack Node;
@@ -75,6 +88,17 @@ function sendToRenderer(e: AgentEvent): void {
 }
 
 const agents = new AgentManager(sendToRenderer)
+
+function sendPlugins(list: DiscoveredPlugin[]): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(IPC.pluginsChanged, list)
+  }
+}
+
+// App-wide plugin catalog. In dev `process.cwd()` is the repo root, so /plugins is discovered;
+// overridable for packaging via ATELIER_PLUGINS_DIR.
+const PLUGINS_DIR = process.env.ATELIER_PLUGINS_DIR ?? join(process.cwd(), 'plugins')
+const plugins = new PluginRegistry(PLUGINS_DIR, sendPlugins)
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -261,11 +285,48 @@ function registerIpc(): void {
     const path = z.string().min(1).parse(payload)
     await shell.openPath(path)
   })
+
+  // ---- Plugin host ----
+
+  ipcMain.handle(IPC.pluginsList, () => plugins.list())
+
+  ipcMain.handle(IPC.pluginsEnabledFor, (_e, payload) => {
+    const { conversationId } = ConversationRefSchema.parse(payload)
+    return agents.pluginStateFor(conversationId)
+  })
+
+  ipcMain.handle(IPC.pluginsSetEnabled, (_e, payload) => {
+    const { conversationId, pluginId, enabled } = SetPluginEnabledSchema.parse(payload)
+    agents.setPluginEnabled(conversationId, pluginId, enabled)
+  })
+
+  ipcMain.handle(IPC.pluginsReload, (_e, payload) => {
+    PluginIdSchema.parse(payload)
+    plugins.scan() // re-read manifests; the renderer remounts affected panes
+    sendPlugins(plugins.list())
+  })
+
+  ipcMain.handle(IPC.pluginStorageGet, (_e, payload) => {
+    const { conversationId, pluginId, key } = PluginStorageGetSchema.parse(payload)
+    return pluginStorageGet(conversationId, pluginId, key)
+  })
+
+  ipcMain.handle(IPC.pluginStorageSet, (_e, payload) => {
+    const { conversationId, pluginId, key, value } = PluginStorageSetSchema.parse(payload)
+    pluginStorageSet(conversationId, pluginId, key, value)
+  })
+
+  ipcMain.handle(IPC.pluginStorageKeys, (_e, payload) => {
+    const { conversationId, pluginId } = PluginStorageKeysSchema.parse(payload)
+    return pluginStorageKeys(conversationId, pluginId)
+  })
 }
 
 app.whenReady().then(() => {
   ensureNodeOnPath()
   registerIpc()
+  handlePluginProtocol(plugins) // serve plugin assets to sandboxes (after ready)
+  plugins.start() // discover /plugins and watch for changes
   agents.restore() // recreate persisted conversations, resuming each active branch
   createWindow()
 
@@ -276,6 +337,7 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   void agents.closeAll()
+  plugins.stop()
   if (process.platform !== 'darwin') app.quit()
 })
 

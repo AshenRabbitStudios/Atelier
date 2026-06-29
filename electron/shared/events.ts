@@ -1,6 +1,7 @@
 // Shared, Node-free contract between main, preload, and renderer.
 // Every cross-boundary payload is validated with these Zod schemas at the receiving side.
 import { z } from 'zod'
+import type { DiscoveredPlugin, ConversationPluginState } from './plugins.js'
 
 export type AgentStatus = 'idle' | 'working' | 'error' | 'closed'
 
@@ -294,6 +295,36 @@ export const SwitchBranchSchema = z.object({
   sessionId: z.string().min(1)
 })
 
+// ---- Plugin host payloads ----
+
+export const ConversationRefSchema = z.object({ conversationId: z.string().min(1) })
+
+export const PluginIdSchema = z.object({ pluginId: z.string().min(1) })
+
+export const SetPluginEnabledSchema = z.object({
+  conversationId: z.string().min(1),
+  pluginId: z.string().min(1),
+  enabled: z.boolean()
+})
+
+export const PluginStorageGetSchema = z.object({
+  conversationId: z.string().min(1),
+  pluginId: z.string().min(1),
+  key: z.string().min(1)
+})
+
+export const PluginStorageSetSchema = z.object({
+  conversationId: z.string().min(1),
+  pluginId: z.string().min(1),
+  key: z.string().min(1),
+  value: z.unknown()
+})
+
+export const PluginStorageKeysSchema = z.object({
+  conversationId: z.string().min(1),
+  pluginId: z.string().min(1)
+})
+
 // ---- Auth safety (billing) ----
 
 export interface AuthStatus {
@@ -337,12 +368,20 @@ export const IPC = {
   agentBranches: 'agent:branches',
   agentForkPoints: 'agent:fork-points',
   agentSwitchBranch: 'agent:switch-branch',
+  pluginsList: 'plugins:list',
+  pluginsEnabledFor: 'plugins:enabled-for',
+  pluginsSetEnabled: 'plugins:set-enabled',
+  pluginsReload: 'plugins:reload',
+  pluginStorageGet: 'plugin:storage-get',
+  pluginStorageSet: 'plugin:storage-set',
+  pluginStorageKeys: 'plugin:storage-keys',
   authStatus: 'auth:status',
   appDefaultCwd: 'app:default-cwd',
   appPickFolder: 'app:pick-folder',
   appOpenPath: 'app:open-path',
   // push (main → renderer)
-  agentEvent: 'agent:event'
+  agentEvent: 'agent:event',
+  pluginsChanged: 'plugins:changed'
 } as const
 
 /** The typed surface exposed on `window.atelier` by the preload bridge. */
@@ -391,6 +430,16 @@ export interface AtelierAPI {
       sessionId: string
     ): Promise<{ transcript: TranscriptMessage[]; forkPoints: ForkPoints }>
     onEvent(cb: (e: AgentEvent) => void): () => void
+  }
+  plugins: {
+    list(): Promise<DiscoveredPlugin[]>
+    enabledFor(conversationId: string): Promise<Record<string, ConversationPluginState>>
+    setEnabled(conversationId: string, pluginId: string, enabled: boolean): Promise<void>
+    reload(pluginId: string): Promise<void>
+    storageGet(conversationId: string, pluginId: string, key: string): Promise<unknown>
+    storageSet(conversationId: string, pluginId: string, key: string, value: unknown): Promise<void>
+    storageKeys(conversationId: string, pluginId: string): Promise<string[]>
+    onChanged(cb: (plugins: DiscoveredPlugin[]) => void): () => void
   }
   auth: {
     status(): Promise<AuthStatus>

@@ -295,10 +295,26 @@ body {
 .usage-meter .um-reset {
   color: var(--faint);
 }
+/* The dock gutter: panels float on --bg-2 with margin (8px) + gaps (DESIGN_SYSTEM.md §4). */
+.dock-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  background: var(--bg-2);
+  padding: 8px;
+}
 .dock-root {
   flex: 1 1 auto;
   min-height: 0;
-  background: var(--bg-2);
+  background: transparent;
+  /* Override dockview-theme-abyss so its own (square) chrome doesn't show behind the Panel. */
+  --dv-group-view-background-color: transparent;
+  --dv-tabs-and-actions-container-background-color: transparent;
+  --dv-activegroup-visiblepanel-tab-background-color: transparent;
+  --dv-inactivegroup-visiblepanel-tab-background-color: transparent;
+  --dv-separator-border: transparent;
+  --dv-paneview-active-outline-color: transparent;
+  --dv-tabs-container-scrollbar-color: transparent;
 }
 
 /* ---- PANEL: the universal docked surface (DESIGN_SYSTEM.md §4) ---- */
@@ -308,8 +324,17 @@ body {
 }
 .dock-root .dv-groupview,
 .dock-root .dv-view-container,
-.dock-root .dv-content-container {
+.dock-root .dv-content-container,
+.dock-root .dv-resize-container {
   background: transparent;
+  border: none;
+  box-shadow: none;
+  outline: none;
+}
+/* Inset each panel within its group so the rounded surface floats and adjacent
+ * panels show an ~8px --bg-2 gap between them (half from each side). */
+.dock-root .dv-content-container {
+  padding: 4px;
 }
 .panel {
   display: flex;

@@ -353,15 +353,17 @@ export function App() {
           onToggle={togglePlugin}
           onReload={reloadPlugin}
         />
-        {activeId ? (
-          <DockviewReact
-            className="dockview-theme-abyss dock-root"
-            components={components}
-            onReady={onReady}
-          />
-        ) : (
-          <div className="boot">No conversation open — pick one from ▾ Previous, or ＋ New.</div>
-        )}
+        <div className="dock-host">
+          {activeId ? (
+            <DockviewReact
+              className="dockview-theme-abyss dock-root"
+              components={components}
+              onReady={onReady}
+            />
+          ) : (
+            <div className="boot">No conversation open — pick one from ▾ Previous, or ＋ New.</div>
+          )}
+        </div>
       </div>
       {importing && (
         <ImportModal

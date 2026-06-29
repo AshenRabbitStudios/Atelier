@@ -1487,32 +1487,72 @@ body {
   margin-top: 8px;
 }
 
-/* ---- Composer ---- */
+/* ---- Composer (§5: bar with an inset field, round Send / square Stop) ---- */
 .composer {
+  flex: 0 0 auto;
+  background: var(--surface-2);
   border-top: 1px solid var(--border);
-  background: var(--bg-elev);
-  padding: 8px 12px;
+  padding: 10px 12px;
+}
+.composer-field {
+  display: flex;
+  align-items: flex-end;
+  gap: 9px;
+  background: var(--input);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 7px 8px 7px 13px;
+}
+.composer-field:focus-within {
+  border-color: var(--accent);
 }
 .composer textarea {
-  width: 100%;
-  resize: vertical;
-  background: var(--bg-input);
+  flex: 1 1 auto;
+  background: none;
+  border: none;
   color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 8px 10px;
-  font-family: inherit;
-  font-size: inherit;
-  line-height: 1.4;
-}
-.composer textarea:focus {
+  resize: none;
+  font: inherit;
+  line-height: 1.5;
   outline: none;
-  border-color: var(--accent-dim);
+  max-height: 150px;
 }
-.composer-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 6px;
+.send-btn,
+.stop-btn {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+}
+.send-btn {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.send-btn:disabled {
+  background: var(--surface-3);
+  color: var(--faint);
+  cursor: default;
+}
+.stop-btn {
+  background: var(--err);
+  color: var(--on-accent);
+}
+
+/* ---- Tool-kind tints (§5) ---- */
+.tool-kind-read {
+  color: var(--accent);
+}
+.tool-kind-edit {
+  color: var(--warn);
+}
+.tool-kind-bash {
+  color: var(--ok);
 }
 .btn {
   padding: 5px 16px;

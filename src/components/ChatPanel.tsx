@@ -311,26 +311,26 @@ function Composer({
   }
   return (
     <div className="composer">
-      <textarea
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault()
-            submit()
-          }
-        }}
-        placeholder="Message the agent…  (Enter to send, Shift+Enter for newline)"
-        rows={3}
-      />
-      <div className="composer-actions">
+      <div className="composer-field">
+        <textarea
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              submit()
+            }
+          }}
+          placeholder="Message the agent…  (Enter to send, Shift+Enter for newline)"
+          rows={3}
+        />
         {busy ? (
-          <button className="btn btn-stop" onClick={onInterrupt}>
-            Stop
+          <button className="stop-btn" onClick={onInterrupt} title="Stop">
+            ■
           </button>
         ) : (
-          <button className="btn btn-send" onClick={submit} disabled={!input.trim()}>
-            Send
+          <button className="send-btn" onClick={submit} disabled={!input.trim()} title="Send">
+            ↑
           </button>
         )}
       </div>
@@ -448,7 +448,7 @@ function BlockView({ block }: { block: Block }) {
       return (
         <details className="block-tool">
           <summary>
-            <span className="tool-name">{block.name}</span>
+            <span className={`tool-name ${toolKindClass(block.name)}`}>{block.name}</span>
             {block.result && (
               <span className={`tool-status ${block.result.ok ? 'ok' : 'err'}`}>
                 {block.result.ok ? '✓' : '✕'}
@@ -571,6 +571,14 @@ function QuestionCard({ req, onAnswer }: { req: QuestionRequest; onAnswer: Answe
       </div>
     </div>
   )
+}
+
+// Tint a tool by kind (DESIGN_SYSTEM.md §5): read=accent, edit=warn, bash=ok.
+function toolKindClass(name: string): string {
+  if (/^(read|glob|grep|ls|webfetch|websearch)$/i.test(name)) return 'tool-kind-read'
+  if (/^(edit|write|notebookedit|multiedit)$/i.test(name)) return 'tool-kind-edit'
+  if (/^bash/i.test(name)) return 'tool-kind-bash'
+  return ''
 }
 
 // 'oauth' = subscription login, 'none' = no API key (ambient session). Both are safe.

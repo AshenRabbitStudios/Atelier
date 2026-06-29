@@ -284,7 +284,9 @@ export function App() {
     )
       return
     await window.atelier.agent.clearChat(id)
-    layout.current?.setClaudeInstance(id) // remount the pane → shows the empty transcript
+    // Reset the transcript VIEW only — don't remount the dock (that would disturb plugin panes,
+    // since Dockview's tab bar is suppressed). The ChatPanel reloads its now-empty transcript.
+    window.dispatchEvent(new CustomEvent('atelier-reload-transcript', { detail: id }))
   }
 
   const clearPlugins = async (id: string) => {

@@ -62,6 +62,19 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [instanceId])
 
+  // Clear-chat resets the transcript VIEW (not the dock layout, so plugin panes are
+  // untouched). App dispatches this after agent.clearChat starts a fresh session.
+  useEffect(() => {
+    const onReload = (e: Event) => {
+      if ((e as CustomEvent).detail !== instanceId) return
+      dispatch({ type: 'transcript', messages: [] })
+      void loadCanonical()
+    }
+    window.addEventListener('atelier-reload-transcript', onReload)
+    return () => window.removeEventListener('atelier-reload-transcript', onReload)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [instanceId])
+
   // Hydrate when (re)mounted onto an existing instance: load its transcript and
   // current model, since system_init already fired before this panel mounted.
   useEffect(() => {

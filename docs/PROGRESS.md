@@ -104,6 +104,12 @@
 - Plugin tool scoping: global vs per-instance — default global (P4).
 - Sandbox tech: Electron `<webview>` vs sandboxed iframe — pick early in P3.
 
+## ⚑ TODO (scheduled NEXT): engineering hardening run
+Do a dedicated hardening run **soon** to bring the codebase up to docs/ENGINEERING.md: wire
+Vitest + a seed test suite (session/transcript model, conversation store, Zod schemas), add
+ESLint + Prettier (and clear the inert `eslint-disable` assumptions), and a CI workflow
+(typecheck → lint → test → build). Owner: next focused session. Details below. ↓
+
 ## Engineering hardening (tracked — see docs/ENGINEERING.md)
 The repo now has an engineering-standards doc (docs/ENGINEERING.md). Three practices it
 prescribes are **not yet mechanically wired** and are the top hardening backlog item, to land

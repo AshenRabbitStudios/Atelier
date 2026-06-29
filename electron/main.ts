@@ -104,8 +104,9 @@ function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
-    backgroundColor: '#1e1e1e',
+    backgroundColor: '#0e1014',
     title: 'Atelier',
+    frame: false, // custom 36px title bar (DESIGN_SYSTEM.md M3); controls via window:* IPC
     webPreferences: {
       preload: join(__dirname, '../preload/preload.mjs'),
       contextIsolation: true,
@@ -285,6 +286,15 @@ function registerIpc(): void {
     const path = z.string().min(1).parse(payload)
     await shell.openPath(path)
   })
+
+  // ---- Frameless window controls ----
+  ipcMain.handle(IPC.windowMinimize, () => mainWindow?.minimize())
+  ipcMain.handle(IPC.windowMaximize, () => {
+    if (!mainWindow) return
+    if (mainWindow.isMaximized()) mainWindow.unmaximize()
+    else mainWindow.maximize()
+  })
+  ipcMain.handle(IPC.windowClose, () => mainWindow?.close())
 
   // ---- Plugin host ----
 

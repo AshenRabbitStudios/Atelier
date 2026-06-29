@@ -78,6 +78,11 @@ const api: AtelierAPI = {
     defaultCwd: () => ipcRenderer.invoke(IPC.appDefaultCwd),
     pickFolder: () => ipcRenderer.invoke(IPC.appPickFolder),
     openPath: (path) => ipcRenderer.invoke(IPC.appOpenPath, path)
+  },
+  window: {
+    minimize: () => ipcRenderer.invoke(IPC.windowMinimize),
+    maximize: () => ipcRenderer.invoke(IPC.windowMaximize),
+    close: () => ipcRenderer.invoke(IPC.windowClose)
   }
 }
 

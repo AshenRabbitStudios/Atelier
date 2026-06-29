@@ -379,6 +379,9 @@ export const IPC = {
   appDefaultCwd: 'app:default-cwd',
   appPickFolder: 'app:pick-folder',
   appOpenPath: 'app:open-path',
+  windowMinimize: 'window:minimize',
+  windowMaximize: 'window:maximize',
+  windowClose: 'window:close',
   // push (main → renderer)
   agentEvent: 'agent:event',
   pluginsChanged: 'plugins:changed'
@@ -448,5 +451,10 @@ export interface AtelierAPI {
     defaultCwd(): Promise<string>
     pickFolder(): Promise<string | null>
     openPath(path: string): Promise<void>
+  }
+  window: {
+    minimize(): Promise<void>
+    maximize(): Promise<void>
+    close(): Promise<void>
   }
 }

@@ -1,19 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { DockviewReact, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview-react'
-import type {
-  AgentInstance,
-  ConversationSummary,
-  SessionSummary,
-  UsageInfo,
-  UsageWindow
-} from '@shared/events'
+import type { AgentInstance, ConversationSummary, SessionSummary, UsageInfo } from '@shared/events'
 import type { DiscoveredPlugin, ConversationPluginState, DockPosition } from '@shared/plugins'
 import { ChatPanel } from './components/ChatPanel'
 import { Panel } from './components/Panel'
 import { PluginPane } from './components/PluginPane'
 import { PluginRail } from './components/PluginRail'
+import { UsageMeters } from './components/UsageMeters'
 import { LayoutService } from './services/LayoutService'
 import { ICONS } from './icons'
+
+const THEMES = ['slate', 'carbon', 'daylight'] as const
 
 export function App() {
   const [open, setOpen] = useState<AgentInstance[]>([]) // open conversations (tabs)
@@ -46,12 +43,6 @@ export function App() {
   useEffect(() => {
     localStorage.setItem('atelier:density', density)
   }, [density])
-  const cycleTheme = () =>
-    setTheme((t) => {
-      const order = ['slate', 'carbon', 'daylight']
-      return order[(order.indexOf(t) + 1) % order.length]
-    })
-  const cycleDensity = () => setDensity((d) => (d === 'comfortable' ? 'compact' : 'comfortable'))
 
   // Dockview panel components. Stable (refs carry the live values), so Dockview never re-registers.
   // The active conversation id flows through activeIdRef so a plugin's storage is always scoped to
@@ -332,6 +323,13 @@ export function App() {
 
   return (
     <div className="app" data-theme={theme} data-density={density}>
+      <TitleBar
+        theme={theme}
+        setTheme={setTheme}
+        density={density}
+        setDensity={setDensity}
+        usage={usage}
+      />
       <ConversationBar
         open={open}
         all={all}
@@ -345,16 +343,7 @@ export function App() {
         onClearPlugins={clearPlugins}
         onImport={startImport}
         onDelete={deleteConversation}
-        theme={theme}
-        density={density}
-        onCycleTheme={cycleTheme}
-        onCycleDensity={cycleDensity}
       />
-      {usage && usage.windows.length > 0 && (
-        <div className="usage-strip">
-          <UsageMini windows={usage.windows} />
-        </div>
-      )}
       <div className="workspace-row">
         <PluginRail
           plugins={plugins}
@@ -420,55 +409,70 @@ function ImportModal({
   )
 }
 
-/** Account-wide usage meters shown in a thin strip under the conversation bar. */
-function UsageMini({ windows }: { windows: UsageWindow[] }) {
+/** The frameless Windows title bar (DESIGN_SYSTEM.md M3): app mark · usage meters (LD-2) ·
+ *  theme switcher · density · window controls. Account-wide usage lives here, always visible. */
+function TitleBar({
+  theme,
+  setTheme,
+  density,
+  setDensity,
+  usage
+}: {
+  theme: string
+  setTheme: (t: string) => void
+  density: string
+  setDensity: (d: string) => void
+  usage: UsageInfo | null
+}) {
   return (
-    <div className="usage-mini">
-      {windows.slice(0, 2).map((w) => {
-        const pct = Math.max(0, Math.min(100, w.utilization))
-        const tone = pct >= 90 ? 'err' : pct >= 70 ? 'warn' : 'ok'
-        return (
-          <div
-            key={w.key}
-            className="usage-mini-row"
-            title={
-              w.resetsAt
-                ? `${w.label}: ${pct.toFixed(0)}% — resets ${resetAbsolute(w.resetsAt)}`
-                : `${w.label}: ${pct.toFixed(0)}%`
-            }
+    <div className="titlebar">
+      <span className="app-mark">Atelier</span>
+      <div className="titlebar-spacer" />
+      {usage && usage.windows.length > 0 && <UsageMeters windows={usage.windows} />}
+      <div className="seg no-drag">
+        {THEMES.map((t) => (
+          <button
+            key={t}
+            className={t === theme ? 'is-selected' : ''}
+            onClick={() => setTheme(t)}
+            title={`${t} theme`}
           >
-            <span className="usage-mini-label">{w.label}</span>
-            <span className="usage-bar-track">
-              <span className={`usage-bar-fill ${tone}`} style={{ width: `${pct}%` }} />
-            </span>
-            <span className="usage-mini-pct">{pct.toFixed(0)}%</span>
-            {w.resetsAt && (
-              <span className="usage-mini-reset">resets {resetShort(w.resetsAt)}</span>
-            )}
-          </div>
-        )
-      })}
+            {t[0].toUpperCase() + t.slice(1)}
+          </button>
+        ))}
+      </div>
+      <button
+        className="win-ctl no-drag"
+        title={`Density: ${density}`}
+        onClick={() => setDensity(density === 'comfortable' ? 'compact' : 'comfortable')}
+      >
+        ⇕
+      </button>
+      <div className="win-controls no-drag">
+        <button
+          className="win-ctl"
+          title="Minimize"
+          onClick={() => void window.atelier.window.minimize()}
+        >
+          ─
+        </button>
+        <button
+          className="win-ctl"
+          title="Maximize"
+          onClick={() => void window.atelier.window.maximize()}
+        >
+          ▢
+        </button>
+        <button
+          className="win-ctl close"
+          title="Close"
+          onClick={() => void window.atelier.window.close()}
+        >
+          ✕
+        </button>
+      </div>
     </div>
   )
-}
-
-function resetShort(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
-  let mins = Math.round((d.getTime() - Date.now()) / 60000)
-  if (mins <= 0) return 'now'
-  if (mins < 60) return `${mins}m`
-  if (mins < 1440) {
-    const h = Math.floor(mins / 60)
-    mins = mins % 60
-    return mins ? `${h}h${mins}m` : `${h}h`
-  }
-  return `${Math.round(mins / 1440)}d`
-}
-
-function resetAbsolute(iso: string): string {
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString()
 }
 
 function ConversationBar({
@@ -483,11 +487,7 @@ function ConversationBar({
   onClearChat,
   onClearPlugins,
   onImport,
-  onDelete,
-  theme,
-  density,
-  onCycleTheme,
-  onCycleDensity
+  onDelete
 }: {
   open: AgentInstance[]
   all: ConversationSummary[]
@@ -501,10 +501,6 @@ function ConversationBar({
   onClearPlugins: (id: string) => void
   onImport: () => void
   onDelete: (id: string) => void
-  theme: string
-  density: string
-  onCycleTheme: () => void
-  onCycleDensity: () => void
 }) {
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
@@ -614,20 +610,6 @@ function ConversationBar({
 
       {active && (
         <div className="conv-meta">
-          <button
-            className="icon-btn"
-            title={`Theme: ${theme} — click to switch (M3 moves this to the title bar)`}
-            onClick={onCycleTheme}
-          >
-            {theme}
-          </button>
-          <button
-            className="icon-btn"
-            title={`Density: ${density} — click to toggle`}
-            onClick={onCycleDensity}
-          >
-            {density === 'comfortable' ? 'cozy' : 'compact'}
-          </button>
           <span className="conv-cwd" title={active.cwd}>
             {active.cwd}
           </span>

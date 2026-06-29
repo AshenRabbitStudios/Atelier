@@ -33,11 +33,36 @@ export function PluginRail({ plugins, enabled, onToggle, onReload }: Props): Rea
     <div className={`plugin-rail ${open ? 'open' : ''}`}>
       <button
         className="rail-toggle"
-        title={`Plugins${broken ? ` (${broken} with errors)` : ''}`}
+        title={open ? 'Collapse plugins' : `Plugins${broken ? ` (${broken} with errors)` : ''}`}
         onClick={() => setOpen((o) => !o)}
       >
         <PlugIcon active={false} />
       </button>
+      <div className="rail-sep" />
+      {!open && (
+        // Collapsed: a lit/unlit icon per plugin — click to load/eject without expanding; hover
+        // shows the name. (Loaded → accent.)
+        <div className="rail-icons">
+          {plugins.map((p) => {
+            const on = p.valid && Boolean(enabled[p.id]?.enabled)
+            return (
+              <button
+                key={p.id}
+                className={`rail-icon ${on ? 'is-loaded' : ''} ${p.valid ? '' : 'invalid'}`}
+                title={
+                  p.valid
+                    ? `${p.manifest?.name ?? p.id}${on ? ' — loaded (click to eject)' : ' — click to load'}`
+                    : `${p.id}: ${p.error}`
+                }
+                disabled={!p.valid}
+                onClick={() => onToggle(p.id, !on)}
+              >
+                <PlugIcon active={on} />
+              </button>
+            )
+          })}
+        </div>
+      )}
       {open && (
         <div className="rail-list">
           <div className="rail-head">Plugins</div>

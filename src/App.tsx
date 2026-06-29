@@ -37,11 +37,15 @@ export function App() {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   pluginsRef.current = plugins
 
+  // Theme/density on the document root (not just .app) so EVERY element inherits — including
+  // Dockview panels, which render through React portals that can sit outside the .app subtree.
   useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
     localStorage.setItem('atelier:theme', theme)
     window.dispatchEvent(new Event('atelier-theme')) // re-push tokens to plugin frames
   }, [theme])
   useEffect(() => {
+    document.documentElement.setAttribute('data-density', density)
     localStorage.setItem('atelier:density', density)
     window.dispatchEvent(new Event('atelier-theme'))
   }, [density])

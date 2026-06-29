@@ -1,0 +1,15 @@
+{
+  "id": "cognition",
+  "name": "Cognition",
+  "version": "0.1.0",
+  "kind": "panel",
+  "entry": "index.html",
+  "permissions": ["context", "storage"],
+  "defaultDock": "right",
+  "contextExports": [
+    { "key": "model", "label": "Mental model", "format": "markdown", "maxTokens": 1800 },
+    { "key": "slots", "label": "Working memory (10 slots)", "format": "text", "maxTokens": 1200 },
+    { "key": "plan", "label": "Plan (A→B)", "format": "markdown", "maxTokens": 1500 },
+    { "key": "problems", "label": "Problems", "format": "text", "maxTokens": 1500 }
+  ]
+}

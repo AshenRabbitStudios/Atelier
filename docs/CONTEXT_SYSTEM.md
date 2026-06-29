@@ -86,6 +86,27 @@ plugin (the export is Mermaid source the agent edits; the pane renders it for yo
 log**, a **data table** the agent reads/writes. They all reuse the exact mechanism above —
 declare `contextExports`, get injection + an update tool + a pane for free.
 
+## Per-section author guide (user-owned, agent-read-only)
+
+Each context-document section also carries an optional **usage guide**: a fixed instruction _you_
+write for how the agent should use/maintain that section ("keep this under 5 bullets", "only
+record decisions, not status"). It is injected into the same `<atelier-context>` block alongside
+the doc value, framed as fixed author instructions — but the agent **cannot edit it**:
+
+- The doc value lives at storage key `ctx:<key>`; the guide lives at a **separate** key
+  `guide:<key>`. The agent's auto-generated `set_<plugin>__<key>` tool only ever writes
+  `ctx:<key>`, so the guide is structurally out of its reach — read-only by storage layout, not by
+  asking it nicely.
+- The pane writes the guide via the generic `storage` API (`window.atelier.storage.set('guide:<key>',
+…)`, requires the `storage` permission) — no new host API. `buildContextBlock` reads `guide:<key>`
+  and prepends it to the section, labeled "fixed instructions from the author; follow them, do not
+  edit or echo them."
+- It's per-conversation and persisted exactly like the doc value (same `storage.json`), survives
+  Clear chat, restart, and pane open/close.
+
+In the panes this is a collapsible "Usage instructions" footer (`<details>`), so it stays out of
+the way of the main editor. Generic: any context-export plugin gets this for free.
+
 ## Build status
 
 The shared infrastructure (context store, host `context` API, per-export tool generation,

@@ -17,6 +17,22 @@ export function contextStorageKey(exportKey: string): string {
   return `ctx:${exportKey}`
 }
 
+/**
+ * Storage key for an export's user-authored usage guide — a fixed instruction the pane writes (via
+ * the generic `storage` API) and the host injects alongside the value. Deliberately NOT under
+ * `ctx:`, so the agent's `set_<plugin>__<key>` tool (which only writes `ctx:<key>`) can never
+ * overwrite it: the doc is the agent's to maintain, the guide is the author's.
+ */
+export function guideStorageKey(exportKey: string): string {
+  return `guide:${exportKey}`
+}
+
+/** Trim a stored value and cap it to the export's token budget (chars ≈ tokens × 4). */
+function capValue(raw: unknown, cap: number): string {
+  const v = typeof raw === 'string' ? raw.trim() : ''
+  return v.length > cap ? v.slice(0, cap) + '\n…[truncated]' : v
+}
+
 /** MCP tool names must be identifier-safe; plugin ids are [a-z0-9-]. */
 function sanitize(s: string): string {
   return s.replace(/[^a-zA-Z0-9_]/g, '_')
@@ -64,12 +80,23 @@ export function buildContextBlock(
 ): string {
   const sections: string[] = []
   for (const ex of pinnedExports(registry, pluginState)) {
-    const raw = pluginStorageGet(conversationId, ex.pluginId, contextStorageKey(ex.key))
-    const value = typeof raw === 'string' ? raw.trim() : ''
-    if (!value) continue
     const cap = ex.maxTokens * APPROX_CHARS_PER_TOKEN
-    const text = value.length > cap ? value.slice(0, cap) + '\n…[truncated]' : value
-    sections.push(`## ${ex.label}\n${text}`)
+    const value = capValue(
+      pluginStorageGet(conversationId, ex.pluginId, contextStorageKey(ex.key)),
+      cap
+    )
+    // The author's usage guide for this section: injected alongside the value, but the agent
+    // never edits it (separate storage key; its set_ tool only writes the `ctx:` value).
+    const guide = capValue(
+      pluginStorageGet(conversationId, ex.pluginId, guideStorageKey(ex.key)),
+      cap
+    )
+    if (!value && !guide) continue
+    const head = guide
+      ? `_How to use this section — fixed instructions from the author. Follow them; do not edit ` +
+        `them or copy them into your updates._\n${guide}\n\n`
+      : ''
+    sections.push(`## ${ex.label}\n${head}${value}`.trimEnd())
   }
   if (sections.length === 0) return ''
   return (
@@ -80,6 +107,32 @@ export function buildContextBlock(
     sections.join('\n\n') +
     '\n</atelier-context>'
   )
+}
+
+/**
+ * The standing instruction fed to `systemPrompt.append`, concatenated from every enabled plugin
+ * that declares `systemInstruction` in its manifest (value sourced from the same `ctx:<key>`
+ * storage as a context export). Unlike buildContextBlock, this is NOT injected into the per-turn
+ * user message — the host puts it at the top of the system prompt, so an unchanged instruction
+ * stays prompt-cached across turns. Returns '' when no enabled plugin contributes one.
+ */
+export function buildSystemInstruction(
+  registry: PluginRegistry,
+  conversationId: string,
+  pluginState: Record<string, ConversationPluginState>
+): string {
+  const parts: string[] = []
+  for (const [pluginId, st] of Object.entries(pluginState)) {
+    if (!st.enabled) continue
+    const si = registry.get(pluginId)?.manifest?.systemInstruction
+    if (!si) continue
+    const raw = pluginStorageGet(conversationId, pluginId, contextStorageKey(si.key))
+    const value = typeof raw === 'string' ? raw.trim() : ''
+    if (!value) continue
+    const cap = si.maxTokens * APPROX_CHARS_PER_TOKEN
+    parts.push(value.length > cap ? value.slice(0, cap) + '\n…[truncated]' : value)
+  }
+  return parts.join('\n\n')
 }
 
 /**

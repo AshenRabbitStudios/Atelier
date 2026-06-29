@@ -94,12 +94,57 @@
       .slot-input:focus {
         border-color: var(--accent, #5b9cff);
       }
+
+      #guide {
+        flex: 0 0 auto;
+        border-top: 1px solid var(--border, #252b37);
+      }
+
+      #guide > summary {
+        padding: 6px 12px;
+        font-size: 11px;
+        color: var(--dim, #8b97ae);
+        cursor: pointer;
+        user-select: none;
+      }
+
+      #guide > summary::marker {
+        color: var(--faint, #5e6677);
+      }
+
+      #guide-editor {
+        width: 100%;
+        height: 110px;
+        box-sizing: border-box;
+        padding: 10px 12px;
+        border: none;
+        outline: none;
+        resize: vertical;
+        background: var(--bg-2, #0f1117);
+        color: var(--dim, #8b97ae);
+        font-family: var(--mono, monospace);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      #guide-editor::placeholder {
+        color: var(--faint, #5e6677);
+        font-style: italic;
+      }
     </style>
   </head>
   <body>
     <div class="pane">
       <div class="header">Working memory — 10 things to keep recursing on</div>
       <div class="slots" id="slots"></div>
+      <details id="guide">
+        <summary>Usage instructions (read-only to the agent)</summary>
+        <textarea
+          id="guide-editor"
+          spellcheck="false"
+          placeholder="Fixed notes on how to use this section. The agent sees these every turn but never edits them."
+        ></textarea>
+      </details>
     </div>
 
     <script>
@@ -227,6 +272,34 @@
         }
         setInterval(poll, POLL_MS)
       })
+
+      // The author's usage guide for this section. Stored under `guide:slots` — the agent's set_
+      // tool only writes `ctx:slots`, so it can never overwrite this — and injected alongside the
+      // doc as read-only context each turn.
+      ;(function () {
+        const GUIDE_KEY = 'guide:slots'
+        const g = document.getElementById('guide-editor')
+        let guideTimer = null
+        async function loadGuide() {
+          try {
+            const v = await window.atelier.storage.get(GUIDE_KEY)
+            g.value = typeof v === 'string' ? v : ''
+          } catch (_) {
+            // silent — host may not be ready yet
+          }
+        }
+        g.addEventListener('input', () => {
+          clearTimeout(guideTimer)
+          guideTimer = setTimeout(async () => {
+            try {
+              await window.atelier.storage.set(GUIDE_KEY, g.value)
+            } catch (_) {
+              // ignore transient save failure; the next edit retries
+            }
+          }, 400)
+        })
+        window.atelier.on('load', loadGuide)
+      })()
     </script>
   </body>
 </html>

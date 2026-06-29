@@ -2,9 +2,10 @@
   "id": "mental-model",
   "name": "Mental Model",
   "version": "0.1.0",
+  "icon": "M6 11.2a3.2 3.2 0 1 1 4 0 1.8 1.8 0 0 0-.7 1.3H6.7a1.8 1.8 0 0 0-.7-1.3zM6.7 13.8h2.6",
   "kind": "panel",
   "entry": "index.html",
-  "permissions": ["context"],
+  "permissions": ["context", "storage"],
   "defaultDock": "right",
   "contextExports": [
     { "key": "model", "label": "Mental model", "format": "markdown", "maxTokens": 1800 }

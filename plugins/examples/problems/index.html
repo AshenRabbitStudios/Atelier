@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Problems</title>
+    <!-- Host injects window.atelier; all SDK access goes through it. -->
+    <script src="atelier-plugin://__runtime__/atelier.js"></script>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        font-family: var(--font, system-ui, sans-serif);
+        background: var(--bg, #0f1117);
+        color: var(--text, #e7eaf0);
+        overflow: hidden;
+      }
+
+      .pane {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        padding: 12px;
+        gap: 8px;
+      }
+
+      .header {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--dim, #8890a0);
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--border, #252b37);
+        flex-shrink: 0;
+      }
+
+      .rows {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        flex: 1;
+        overflow-y: auto;
+      }
+
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding-left: 6px;
+        border-left: 3px solid transparent;
+        border-radius: 2px;
+        transition: border-left-color 0.15s;
+      }
+
+      /* Left bar warms cool→hot with combined priority (sig+urg, 2..20). */
+      .row.p-low {
+        border-left-color: var(--faint, #5e6677);
+      }
+      .row.p-mid {
+        border-left-color: var(--accent, #5b9cff);
+      }
+      .row.p-high {
+        border-left-color: #e0a23a;
+      }
+      .row.p-crit {
+        border-left-color: #e0533a;
+      }
+
+      .score {
+        width: 38px;
+        flex-shrink: 0;
+        padding: 4px 2px;
+        text-align: center;
+        background: var(--input, #1b2029);
+        color: var(--text, #e7eaf0);
+        border: 1px solid var(--border, #252b37);
+        border-radius: 4px;
+        font-family: var(--mono, monospace);
+        font-size: 12px;
+        outline: none;
+        -moz-appearance: textfield;
+      }
+
+      .score::-webkit-outer-spin-button,
+      .score::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+
+      .score:focus {
+        border-color: var(--accent, #5b9cff);
+      }
+
+      .score-label {
+        font-size: 9px;
+        font-family: var(--mono, monospace);
+        color: var(--faint, #5e6677);
+        width: 10px;
+        flex-shrink: 0;
+        user-select: none;
+      }
+
+      .text {
+        flex: 1;
+        padding: 5px 8px;
+        background: var(--input, #1b2029);
+        color: var(--text, #e7eaf0);
+        border: 1px solid var(--border, #252b37);
+        border-radius: 4px;
+        font-family: var(--font, system-ui, sans-serif);
+        font-size: 13px;
+        outline: none;
+        min-width: 0;
+        transition: border-color 0.12s;
+      }
+
+      .text::placeholder {
+        color: var(--faint, #5e6677);
+      }
+
+      .text:focus {
+        border-color: var(--accent, #5b9cff);
+      }
+
+      .remove {
+        flex-shrink: 0;
+        width: 22px;
+        height: 22px;
+        padding: 0;
+        background: transparent;
+        color: var(--faint, #5e6677);
+        border: none;
+        border-radius: 4px;
+        font-size: 15px;
+        line-height: 1;
+        cursor: pointer;
+      }
+
+      .remove:hover {
+        color: #e0533a;
+        background: var(--input, #1b2029);
+      }
+
+      .add {
+        flex-shrink: 0;
+        margin-top: 2px;
+        padding: 6px 10px;
+        background: transparent;
+        color: var(--dim, #8b97ae);
+        border: 1px dashed var(--border, #252b37);
+        border-radius: 4px;
+        font-family: var(--font, system-ui, sans-serif);
+        font-size: 12px;
+        cursor: pointer;
+        text-align: left;
+      }
+
+      .add:hover {
+        color: var(--text, #e7eaf0);
+        border-color: var(--accent, #5b9cff);
+      }
+
+      .empty {
+        font-size: 12px;
+        color: var(--faint, #5e6677);
+        font-style: italic;
+        padding: 8px 6px;
+      }
+
+      #guide {
+        flex: 0 0 auto;
+        border-top: 1px solid var(--border, #252b37);
+      }
+
+      #guide > summary {
+        padding: 6px 12px;
+        font-size: 11px;
+        color: var(--dim, #8b97ae);
+        cursor: pointer;
+        user-select: none;
+      }
+
+      #guide > summary::marker {
+        color: var(--faint, #5e6677);
+      }
+
+      #guide-editor {
+        width: 100%;
+        height: 110px;
+        box-sizing: border-box;
+        padding: 10px 12px;
+        border: none;
+        outline: none;
+        resize: vertical;
+        background: var(--bg-2, #0f1117);
+        color: var(--dim, #8b97ae);
+        font-family: var(--mono, monospace);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      #guide-editor::placeholder {
+        color: var(--faint, #5e6677);
+        font-style: italic;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="pane">
+      <div class="header">Problems — significance × urgency, highest priority first</div>
+      <div class="rows" id="rows"></div>
+      <button class="add" id="add" type="button">+ Add problem</button>
+      <details id="guide">
+        <summary>Usage instructions (read-only to the agent)</summary>
+        <textarea
+          id="guide-editor"
+          spellcheck="false"
+          placeholder="Fixed notes on how to use this section. The agent sees these every turn but never edits them."
+        ></textarea>
+      </details>
+    </div>
+
+    <script>
+      const POLL_MS = 1500
+      const DEBOUNCE_MS = 400
+
+      // ── Model ─────────────────────────────────────────────────────────
+      // Each problem is { sig, urg, text }: significance and urgency, both 1–10.
+      // The pane owns an in-memory list; the agent owns the same list via its
+      // set_problems__problems tool. Both serialize to the line format below.
+
+      let problems = []
+
+      function clampScore(n) {
+        n = Math.round(Number(n))
+        if (!Number.isFinite(n)) return 5
+        return Math.max(1, Math.min(10, n))
+      }
+
+      function priority(p) {
+        return p.sig + p.urg // 2..20; equal weighting, sig breaks ties on sort
+      }
+
+      // ── Format: "[S<sig> U<urg>] <text>", one line per problem ─────────
+      // Parser tolerates loose spacing and untagged lines (default 5/5) so an
+      // agent edit never silently drops a problem. Serializer always emits the
+      // canonical tagged form and skips blank-text rows.
+
+      const LINE = /^\s*\[\s*s\s*(\d{1,2})\s+u\s*(\d{1,2})\s*\]\s*(.*)$/i
+
+      function parse(raw) {
+        const out = []
+        if (typeof raw !== 'string') return out
+        for (const line of raw.split('\n')) {
+          if (!line.trim()) continue
+          const m = line.match(LINE)
+          if (m) {
+            out.push({ sig: clampScore(m[1]), urg: clampScore(m[2]), text: m[3].trim() })
+          } else {
+            out.push({ sig: 5, urg: 5, text: line.trim() })
+          }
+        }
+        return out
+      }
+
+      function serialize(list) {
+        return list
+          .filter((p) => p.text.trim().length > 0)
+          .map((p) => `[S${p.sig} U${p.urg}] ${p.text.trim()}`)
+          .join('\n')
+      }
+
+      function sortByPriority(list) {
+        return [...list].sort((a, b) => priority(b) - priority(a) || b.sig - a.sig)
+      }
+
+      // ── Render ─────────────────────────────────────────────────────────
+
+      const rowsEl = document.getElementById('rows')
+
+      function priorityClass(p) {
+        const v = priority(p)
+        if (v >= 17) return 'p-crit'
+        if (v >= 13) return 'p-high'
+        if (v >= 8) return 'p-mid'
+        return 'p-low'
+      }
+
+      function render() {
+        rowsEl.innerHTML = ''
+        if (problems.length === 0) {
+          const empty = document.createElement('div')
+          empty.className = 'empty'
+          empty.textContent = 'No problems tracked. They persist here until resolved.'
+          rowsEl.appendChild(empty)
+          return
+        }
+        problems.forEach((p, i) => {
+          const row = document.createElement('div')
+          row.className = 'row ' + priorityClass(p)
+
+          const sLabel = document.createElement('span')
+          sLabel.className = 'score-label'
+          sLabel.textContent = 'S'
+          const sig = document.createElement('input')
+          sig.type = 'number'
+          sig.min = '1'
+          sig.max = '10'
+          sig.className = 'score'
+          sig.title = 'Significance (1–10)'
+          sig.value = String(p.sig)
+
+          const uLabel = document.createElement('span')
+          uLabel.className = 'score-label'
+          uLabel.textContent = 'U'
+          const urg = document.createElement('input')
+          urg.type = 'number'
+          urg.min = '1'
+          urg.max = '10'
+          urg.className = 'score'
+          urg.title = 'Urgency (1–10)'
+          urg.value = String(p.urg)
+
+          const text = document.createElement('input')
+          text.type = 'text'
+          text.className = 'text'
+          text.placeholder = 'Describe the problem…'
+          text.value = p.text
+
+          const remove = document.createElement('button')
+          remove.className = 'remove'
+          remove.type = 'button'
+          remove.title = 'Remove problem'
+          remove.textContent = '✕'
+
+          sig.addEventListener('input', () => {
+            problems[i].sig = clampScore(sig.value)
+            row.className = 'row ' + priorityClass(problems[i])
+            scheduleWrite()
+          })
+          urg.addEventListener('input', () => {
+            problems[i].urg = clampScore(urg.value)
+            row.className = 'row ' + priorityClass(problems[i])
+            scheduleWrite()
+          })
+          text.addEventListener('input', () => {
+            problems[i].text = text.value
+            scheduleWrite()
+          })
+          remove.addEventListener('click', () => {
+            problems.splice(i, 1)
+            render()
+            scheduleWrite()
+          })
+
+          row.append(sLabel, sig, uLabel, urg, text, remove)
+          rowsEl.appendChild(row)
+        })
+      }
+
+      // ── Focus tracking (don't reorder/replace under an active cursor) ──
+
+      let focused = false
+      rowsEl.addEventListener('focusin', () => {
+        focused = true
+      })
+      rowsEl.addEventListener('focusout', () => {
+        focused = false
+      })
+
+      // ── Debounced write ────────────────────────────────────────────────
+
+      let writeTimer = null
+      let lastKnownRaw = null
+
+      function scheduleWrite() {
+        clearTimeout(writeTimer)
+        writeTimer = setTimeout(async () => {
+          const raw = serialize(problems)
+          lastKnownRaw = raw
+          try {
+            await window.atelier.context.set('problems', raw)
+          } catch (_) {
+            /* silent — host not yet wired during dev */
+          }
+        }, DEBOUNCE_MS)
+      }
+
+      // ── Add ────────────────────────────────────────────────────────────
+
+      document.getElementById('add').addEventListener('click', () => {
+        problems.push({ sig: 5, urg: 5, text: '' })
+        render()
+        // Focus the text field of the row just added.
+        const inputs = rowsEl.querySelectorAll('.row .text')
+        const last = inputs[inputs.length - 1]
+        if (last) last.focus()
+      })
+
+      // ── Poll for agent updates ─────────────────────────────────────────
+      // Re-sort by priority on every external apply; while the user holds a
+      // cursor we leave the list alone so it never jumps under them.
+
+      async function poll() {
+        try {
+          const raw = await window.atelier.context.get('problems')
+          if (raw !== lastKnownRaw && !focused) {
+            lastKnownRaw = raw
+            problems = sortByPriority(parse(raw))
+            render()
+          }
+        } catch (_) {
+          /* ignore */
+        }
+      }
+
+      // ── Load ───────────────────────────────────────────────────────────
+
+      window.atelier.on('load', async () => {
+        try {
+          const raw = await window.atelier.context.get('problems')
+          lastKnownRaw = raw
+          problems = sortByPriority(parse(raw))
+        } catch (_) {
+          /* start empty */
+        }
+        render()
+        setInterval(poll, POLL_MS)
+      })
+
+      // The author's usage guide for this section. Stored under `guide:problems` — the agent's set_
+      // tool only writes `ctx:problems`, so it can never overwrite this — and injected alongside the
+      // doc as read-only context each turn.
+      ;(function () {
+        const GUIDE_KEY = 'guide:problems'
+        const g = document.getElementById('guide-editor')
+        let guideTimer = null
+        async function loadGuide() {
+          try {
+            const v = await window.atelier.storage.get(GUIDE_KEY)
+            g.value = typeof v === 'string' ? v : ''
+          } catch (_) {
+            // silent — host may not be ready yet
+          }
+        }
+        g.addEventListener('input', () => {
+          clearTimeout(guideTimer)
+          guideTimer = setTimeout(async () => {
+            try {
+              await window.atelier.storage.set(GUIDE_KEY, g.value)
+            } catch (_) {
+              // ignore transient save failure; the next edit retries
+            }
+          }, 400)
+        })
+        window.atelier.on('load', loadGuide)
+      })()
+    </script>
+  </body>
+</html>

@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Mental Model</title>
+    <title>Instructions</title>
     <script src="atelier-plugin://__runtime__/atelier.js"></script>
     <style>
       *,
@@ -40,6 +40,13 @@
       #header strong {
         color: var(--text, #e7eaf0);
         font-weight: 600;
+      }
+
+      #hint {
+        margin-top: 2px;
+        font-size: 10px;
+        color: var(--faint, #5e6677);
+        font-style: italic;
       }
 
       #sync-indicator {
@@ -91,66 +98,25 @@
       #editor:focus {
         background: var(--bg-2, #0f1117);
       }
-
-      #guide {
-        flex: 0 0 auto;
-        border-top: 1px solid var(--border, #252b37);
-      }
-
-      #guide > summary {
-        padding: 6px 12px;
-        font-size: 11px;
-        color: var(--dim, #8b97ae);
-        cursor: pointer;
-        user-select: none;
-      }
-
-      #guide > summary::marker {
-        color: var(--faint, #5e6677);
-      }
-
-      #guide-editor {
-        width: 100%;
-        height: 110px;
-        box-sizing: border-box;
-        padding: 10px 12px;
-        border: none;
-        outline: none;
-        resize: vertical;
-        background: var(--bg-2, #0f1117);
-        color: var(--dim, #8b97ae);
-        font-family: var(--mono, monospace);
-        font-size: 12px;
-        line-height: 1.5;
-      }
-
-      #guide-editor::placeholder {
-        color: var(--faint, #5e6677);
-        font-style: italic;
-      }
     </style>
   </head>
   <body>
     <div id="root">
       <div id="header">
-        <strong>Mental model</strong> — the agent's working picture (editable)
+        <strong>Instructions</strong> — pinned to the top system prompt
         <span id="sync-indicator"></span>
+        <div id="hint">
+          Stays in force for the whole conversation. Leave it unchanged and it's cached for free;
+          editing it re-applies on your next message (a one-time cost).
+        </div>
       </div>
       <div id="textarea-wrap">
         <textarea
           id="editor"
           spellcheck="false"
-          placeholder="The agent will build its mental model here. You can edit it too."
+          placeholder="Standing instructions for this conversation. State them as facts (e.g. 'This project is Go; write Go'), not as overrides of the user."
         ></textarea>
       </div>
-      <details id="guide">
-        <summary>Usage instructions (read-only to the agent)</summary>
-        <textarea
-          id="guide-editor"
-          spellcheck="false"
-          placeholder="Fixed notes on how to use this section. The agent sees these every turn but never edits them."
-        ></textarea>
-      </details>
     </div>
 
     <script>
@@ -165,7 +131,7 @@
       function showIndicator(state) {
         indicator.className = state
         if (state === 'active') {
-          indicator.textContent = 'synced'
+          indicator.textContent = 'saved'
         } else if (state === 'saving') {
           indicator.textContent = 'saving…'
         } else {
@@ -182,7 +148,7 @@
 
       async function loadValue() {
         try {
-          const val = await window.atelier.context.get('model')
+          const val = await window.atelier.context.get('instruction')
           const v = typeof val === 'string' ? val : ''
           lastKnownValue = v
           editor.value = v
@@ -195,7 +161,7 @@
         const v = editor.value
         try {
           showIndicator('saving')
-          await window.atelier.context.set('model', v)
+          await window.atelier.context.set('instruction', v)
           lastKnownValue = v
           showIndicator('active')
         } catch (e) {
@@ -219,7 +185,7 @@
         pollTimer = setInterval(async () => {
           if (focused) return
           try {
-            const val = await window.atelier.context.get('model')
+            const val = await window.atelier.context.get('instruction')
             const v = typeof val === 'string' ? val : ''
             if (v !== lastKnownValue) {
               lastKnownValue = v
@@ -236,34 +202,6 @@
         await loadValue()
         startPolling()
       })
-
-      // The author's usage guide for this section. Stored under `guide:model` — the agent's set_
-      // tool only writes `ctx:model`, so it can never overwrite this — and injected alongside the
-      // doc as read-only context each turn.
-      ;(function () {
-        const GUIDE_KEY = 'guide:model'
-        const g = document.getElementById('guide-editor')
-        let guideTimer = null
-        async function loadGuide() {
-          try {
-            const v = await window.atelier.storage.get(GUIDE_KEY)
-            g.value = typeof v === 'string' ? v : ''
-          } catch (_) {
-            // silent — host may not be ready yet
-          }
-        }
-        g.addEventListener('input', () => {
-          clearTimeout(guideTimer)
-          guideTimer = setTimeout(async () => {
-            try {
-              await window.atelier.storage.set(GUIDE_KEY, g.value)
-            } catch (_) {
-              // ignore transient save failure; the next edit retries
-            }
-          }, 400)
-        })
-        window.atelier.on('load', loadGuide)
-      })()
     </script>
   </body>
 </html>

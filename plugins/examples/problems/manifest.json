@@ -1,0 +1,12 @@
+{
+  "id": "problems",
+  "name": "Problems",
+  "version": "0.1.0",
+  "kind": "panel",
+  "entry": "index.html",
+  "permissions": ["context", "storage"],
+  "defaultDock": "right",
+  "contextExports": [
+    { "key": "problems", "label": "Problems", "format": "text", "maxTokens": 1500 }
+  ]
+}

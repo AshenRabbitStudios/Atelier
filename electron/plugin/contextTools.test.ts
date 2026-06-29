@@ -7,7 +7,13 @@ vi.mock('electron', () => ({
   app: { getPath: () => process.env.ATELIER_TEST_USERDATA as string }
 }))
 
-import { buildContextBlock, buildContextMcpServers, contextStorageKey } from './contextTools.js'
+import {
+  buildContextBlock,
+  buildContextMcpServers,
+  buildSystemInstruction,
+  contextStorageKey,
+  guideStorageKey
+} from './contextTools.js'
 import { pluginStorageSet } from './pluginStorage.js'
 import type { PluginRegistry } from './PluginRegistry.js'
 import type { ConversationPluginState } from '../shared/plugins.js'
@@ -64,6 +70,21 @@ describe('buildContextBlock', () => {
     })
     expect(buildContextBlock(reg, 'c1', { big: pinned(['model']) })).toContain('…[truncated]')
   })
+
+  it('injects the author guide alongside the value, framed read-only', () => {
+    pluginStorageSet('c1', 'mm', contextStorageKey('model'), 'A house has 3 rooms')
+    pluginStorageSet('c1', 'mm', guideStorageKey('model'), 'Keep this under 5 bullet points.')
+    const block = buildContextBlock(REG, 'c1', { mm: pinned(['model']) })
+    expect(block).toContain('Keep this under 5 bullet points.')
+    expect(block).toContain('do not edit')
+    expect(block).toContain('A house has 3 rooms')
+  })
+
+  it('injects a guide even when the value is empty', () => {
+    pluginStorageSet('c1', 'mm', guideStorageKey('model'), 'Author note with no doc yet.')
+    const block = buildContextBlock(REG, 'c1', { mm: pinned(['model']) })
+    expect(block).toContain('Author note with no doc yet.')
+  })
 })
 
 describe('buildContextMcpServers', () => {
@@ -75,5 +96,43 @@ describe('buildContextMcpServers', () => {
     const servers = buildContextMcpServers(REG, 'c1', { mm: pinned(['model']) }, () => {})
     expect(servers?.atelier_context).toBeDefined()
     expect(servers?.atelier_context.type).toBe('sdk')
+  })
+})
+
+describe('buildSystemInstruction', () => {
+  // A registry whose `instr` plugin declares a systemInstruction sourced from ctx:instruction.
+  const SI = {
+    get: (id: string) =>
+      id === 'instr'
+        ? { manifest: { systemInstruction: { key: 'instruction', maxTokens: 1000 } } }
+        : undefined
+  } as unknown as PluginRegistry
+  const on = (): ConversationPluginState => ({ enabled: true, pinnedExports: [] })
+
+  it('is empty when no enabled plugin contributes one', () => {
+    expect(buildSystemInstruction(SI, 'c1', {})).toBe('')
+  })
+
+  it('returns the stored instruction for an enabled plugin', () => {
+    pluginStorageSet('c1', 'instr', contextStorageKey('instruction'), 'This project is Go.')
+    expect(buildSystemInstruction(SI, 'c1', { instr: on() })).toBe('This project is Go.')
+  })
+
+  it('skips disabled plugins, empty values, and other conversations', () => {
+    pluginStorageSet('c1', 'instr', contextStorageKey('instruction'), 'X')
+    expect(buildSystemInstruction(SI, 'c1', { instr: { enabled: false, pinnedExports: [] } })).toBe(
+      ''
+    )
+    pluginStorageSet('c2', 'instr', contextStorageKey('instruction'), '   ')
+    expect(buildSystemInstruction(SI, 'c2', { instr: on() })).toBe('')
+    expect(buildSystemInstruction(SI, 'c3', { instr: on() })).toBe('') // no value for c3
+  })
+
+  it('truncates past the cap', () => {
+    const big = {
+      get: () => ({ manifest: { systemInstruction: { key: 'instruction', maxTokens: 10 } } }) // ~40 chars
+    } as unknown as PluginRegistry
+    pluginStorageSet('c1', 'instr', contextStorageKey('instruction'), 'x'.repeat(200))
+    expect(buildSystemInstruction(big, 'c1', { instr: on() })).toContain('…[truncated]')
   })
 })

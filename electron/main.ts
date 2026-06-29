@@ -39,6 +39,7 @@ import { pluginStorageGet, pluginStorageSet, pluginStorageKeys } from './plugin/
 import {
   buildContextBlock,
   buildContextMcpServers,
+  buildSystemInstruction,
   contextStorageKey
 } from './plugin/contextTools.js'
 
@@ -113,7 +114,8 @@ const agents = new AgentManager(
   (conversationId, pluginState) =>
     buildContextMcpServers(plugins, conversationId, pluginState, () => {
       /* panes poll context.get to refresh; no push channel (see docs/MORNING_REVIEW.md) */
-    })
+    }),
+  (conversationId, pluginState) => buildSystemInstruction(plugins, conversationId, pluginState)
 )
 
 function createWindow(): void {

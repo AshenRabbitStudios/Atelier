@@ -131,6 +131,11 @@ type McpProvider = (
   conversationId: string,
   pluginState: Record<string, ConversationPluginState>
 ) => Options['mcpServers'] | undefined
+/** Supplies the standing instruction appended to the system prompt (instructions plugin). */
+type InstructionProvider = (
+  conversationId: string,
+  pluginState: Record<string, ConversationPluginState>
+) => string
 
 /** One isolated agent instance: its own cwd, SDK session, and transcript stream. */
 class Session {
@@ -140,6 +145,9 @@ class Session {
   model?: string
   effort?: EffortLevel
   layout?: unknown
+  // Permission mode (e.g. bypass approvals). Remembered so it survives a rebind — buildOptions
+  // reapplies it, instead of every clear-chat/fork/effort change silently reverting to 'default'.
+  permissionMode: PermissionMode = 'default'
   pluginState: Record<string, ConversationPluginState> = {}
   sessionId?: string
   status: AgentStatus = 'idle'
@@ -149,8 +157,12 @@ class Session {
   /** Context-plugin hooks (set by the manager): per-turn injection + per-conversation tools. */
   contextProvider?: ContextProvider
   mcpProvider?: McpProvider
+  instructionProvider?: InstructionProvider
 
   private input = new InputQueue()
+  // The instruction string baked into the live query's systemPrompt. Compared on each send so we
+  // only rebind (and pay the one-time history cache invalidation) when it actually changes.
+  private appliedInstruction = ''
   private q!: Query
   private currentMessageId = ''
   private restarts = 0
@@ -190,11 +202,12 @@ class Session {
     opts: CreateOpts,
     private emit: (e: AgentEvent) => void,
     restore?: RestoreData,
-    hooks?: { context?: ContextProvider; mcp?: McpProvider }
+    hooks?: { context?: ContextProvider; mcp?: McpProvider; instruction?: InstructionProvider }
   ) {
     // Set before start() so a restored conversation's context tools are present on the first query.
     this.contextProvider = hooks?.context
     this.mcpProvider = hooks?.mcp
+    this.instructionProvider = hooks?.instruction
     this.id = restore?.id ?? randomUUID()
     this.cwd = opts.cwd
     this.title = opts.title ?? (basename(opts.cwd) || opts.cwd)
@@ -242,17 +255,26 @@ class Session {
   }
 
   private buildOptions(opts?: { resumeAt?: string; fork?: boolean }): Options {
+    // Standing instruction (instructions plugin) appended to the system prompt. Read here and
+    // remembered so `send()` can detect a change and rebind; unchanged → byte-identical prefix →
+    // stays prompt-cached across turns (docs/CONTEXT_SYSTEM.md).
+    const append = (this.instructionProvider?.(this.id, this.pluginState) ?? '').trim()
+    this.appliedInstruction = append
     return {
       cwd: this.cwd,
       includePartialMessages: true,
-      // Load this project's CLAUDE.md (requires the claude_code preset too).
+      // Load this project's CLAUDE.md (requires the claude_code preset too); append the standing
+      // instruction (if any) after it so it shares the same cached system block.
       settingSources: ['project'],
-      systemPrompt: { type: 'preset', preset: 'claude_code' },
+      systemPrompt: append
+        ? { type: 'preset', preset: 'claude_code', append }
+        : { type: 'preset', preset: 'claude_code' },
       // Route every approval prompt to the UI; default to asking, never auto-allow.
       canUseTool: (toolName, input, ctx) => this.requestPermission(toolName, input, ctx),
       // Permit switching to bypass mode at runtime via the UI toggle.
       allowDangerouslySkipPermissions: true,
-      permissionMode: 'default',
+      // Reapply the remembered mode so bypass survives a rebind (clear chat / fork / effort).
+      permissionMode: this.permissionMode,
       ...(this.model ? { model: this.model } : {}),
       ...(this.effort ? { effort: this.effort } : {}),
       // Context plugins: register one update tool per pinned export (or nothing).
@@ -322,9 +344,15 @@ class Session {
     this.branches = []
     this.currentMessageId = ''
     this.pendingFork = undefined
-    this.rebind() // no resume → fresh session; init creates a new 'main' branch
     this.setStatus('idle')
     this.onChange?.()
+    // Defer the (potentially heavy) query teardown+rebuild off this IPC handler so the main
+    // process can forward queued keyboard/mouse input first — a synchronous rebuild here freezes
+    // input in Electron. The renderer has already reset the view to empty; the fresh session
+    // initializes a tick later.
+    setImmediate(() => {
+      if (!this.closed) this.rebind() // no resume → fresh session; init creates a new 'main' branch
+    })
   }
 
   /** Save: edit a message's text on disk (no regen), then rebind so the SDK reloads it. */
@@ -479,6 +507,7 @@ class Session {
   }
 
   async setPermissionMode(mode: PermissionMode): Promise<void> {
+    this.permissionMode = mode // remember it so a later rebind keeps it
     await this.q.setPermissionMode(mode)
     this.emit({ instanceId: this.id, kind: 'permission_mode', mode })
   }
@@ -578,6 +607,11 @@ class Session {
 
   send(text: string): void {
     this.interrupted = false
+    // If the standing instruction changed since the live query started, rebind first so the new
+    // systemPrompt takes effect this turn. Resume preserves history; only this turn re-reads the
+    // (now-changed) prefix uncached. No change → no rebind → the prefix stays cached.
+    const want = (this.instructionProvider?.(this.id, this.pluginState) ?? '').trim()
+    if (want !== this.appliedInstruction) this.rebind()
     this.setStatus('working')
     // Prepend the pinned context-plugin state so the agent sees its model/memory/plan each turn.
     // The block is stripped from the displayed transcript by sessionStore (kept out of history).
@@ -851,12 +885,21 @@ export class AgentManager {
   constructor(
     private emit: (e: AgentEvent) => void,
     private contextProvider?: ContextProvider,
-    private mcpProvider?: McpProvider
+    private mcpProvider?: McpProvider,
+    private instructionProvider?: InstructionProvider
   ) {}
 
   /** The context-plugin hooks passed into every new/restored Session constructor. */
-  private hooks(): { context?: ContextProvider; mcp?: McpProvider } {
-    return { context: this.contextProvider, mcp: this.mcpProvider }
+  private hooks(): {
+    context?: ContextProvider
+    mcp?: McpProvider
+    instruction?: InstructionProvider
+  } {
+    return {
+      context: this.contextProvider,
+      mcp: this.mcpProvider,
+      instruction: this.instructionProvider
+    }
   }
 
   private persist(s: Session): void {

@@ -236,3 +236,33 @@ burned down; add the dev-compatible strict CSP (below).
   slim highlighter with a fixed language set in a later polish pass.
 - No CSP meta yet (would break Vite HMR). Add a dev-compatible strict CSP in a hardening pass.
 - React StrictMode is off to avoid Dockview double-panel mounts in dev; revisit.
+
+## 2026-06-29 — instructions plugin (standing system-prompt instruction)
+
+New `plugins/examples/instructions/` panel: one per-conversation textarea whose value is pinned
+to the **top system prompt** via `systemPrompt.append` (not the per-turn `<atelier-context>`
+block). Generic manifest field `systemInstruction: { key, maxTokens }`; host helper
+`buildSystemInstruction()` (third provider hook into AgentManager). Cache-safe: unchanged value
+replays verbatim and stays prompt-cached; `send()` rebinds (resume → history preserved) only when
+the value changed. Builds clean; `buildSystemInstruction` unit-tested (contextTools.test.ts).
+
+Needs human spot-check (not verifiable headlessly):
+
+- Enable the `instructions` plugin, type an instruction, send a turn → agent honors it.
+- Edit it and send again → it re-applies that turn.
+- Leave it unchanged across turns → `usage.cache_read_input_tokens` stays non-zero (still cached).
+- Apply timing: takes effect on the next `send()` after an edit (one long-lived query is rebound
+  then). Confirm the rebind-on-change isn't disruptive if a turn is in flight.
+
+## 2026-06-29 — per-section author guide (mental-model / working-memory / plan)
+
+Each cognitive pane now has a collapsible "Usage instructions" footer: a user-authored note on
+how to use that section, injected into the `<atelier-context>` block alongside the doc but stored
+under `guide:<key>` (separate from `ctx:<key>`), so the agent's set_ tool can never edit it.
+Host: `buildContextBlock` reads+frames the guide (unit-tested); panes write it via the generic
+`storage` API (added `"storage"` permission to all three manifests). mental-model built as the
+reference; plan + working-memory done by two parallel subagents (each confined to its own folder).
+Builds clean; 51 tests pass; prettier/lint clean.
+
+Needs human spot-check: open each pane, expand "Usage instructions", type a note → it persists and
+appears in the agent's context next turn, and the agent's set_ updates never wipe it.

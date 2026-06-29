@@ -169,3 +169,14 @@ rendering option `preview` fields as HTML if we later want rich previews.
 - [ ] Hook event identifier casing in `Options.hooks` (P4 Bash tap).
 - [ ] What enables file checkpointing so `rewindFiles` has snapshots to revert to (P1).
 - [ ] `mcpServers` config discriminant for in-process tools (`type:'sdk'`) (P4).
+
+## Input is user-messages-only — system prompt is the only system-role lever (confirmed v0.3.195)
+
+`SDKUserMessage.message` is a `MessageParam` (role `user`); there is no system-role input message.
+So a raw mid-conversation `role:"system"` entry in `messages[]` is NOT expressible via `query()`.
+The only system-prompt levers are `options.systemPrompt`
+(`string | string[] | { type:'preset', preset:'claude_code', append? }`) and the
+`SYSTEM_PROMPT_DYNAMIC_BOUNDARY` marker (string[] form only) splitting cached-static from
+per-send-dynamic. `systemPrompt` is fixed at query construction (we run one long-lived streaming
+query), so changing it mid-conversation requires a `rebind()` (resume keeps history). The
+`instructions` plugin uses `append` and rebinds on change in `send()`.

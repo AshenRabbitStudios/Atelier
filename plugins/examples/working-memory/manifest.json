@@ -2,9 +2,10 @@
   "id": "working-memory",
   "name": "Working Memory",
   "version": "0.1.0",
+  "icon": "M3 4h1.2M3 8h1.2M3 12h1.2M6.2 4h6.8M6.2 8h6.8M6.2 12h6.8",
   "kind": "panel",
   "entry": "index.html",
-  "permissions": ["context"],
+  "permissions": ["context", "storage"],
   "defaultDock": "right",
   "contextExports": [
     { "key": "slots", "label": "Working memory (10 slots)", "format": "text", "maxTokens": 1200 }

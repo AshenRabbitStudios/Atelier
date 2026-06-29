@@ -13,11 +13,11 @@ interface Props {
   onReload: (pluginId: string) => void
 }
 
-function PlugIcon({ active }: { active: boolean }): React.JSX.Element {
+function PlugIcon({ d, active }: { d?: string; active: boolean }): React.JSX.Element {
   return (
     <svg viewBox="0 0 16 16" width={16} height={16} style={{ display: 'block' }}>
       <path
-        d={ICONS.plugin}
+        d={d ?? ICONS.plugin}
         className="icon"
         style={{ stroke: active ? 'var(--accent)' : 'var(--faint)' }}
       />
@@ -57,7 +57,7 @@ export function PluginRail({ plugins, enabled, onToggle, onReload }: Props): Rea
                 disabled={!p.valid}
                 onClick={() => onToggle(p.id, !on)}
               >
-                <PlugIcon active={on} />
+                <PlugIcon d={p.manifest?.icon} active={on} />
               </button>
             )
           })}
@@ -82,7 +82,7 @@ export function PluginRail({ plugins, enabled, onToggle, onReload }: Props): Rea
                 className={`rail-item ${on ? 'is-loaded' : ''} ${p.valid ? '' : 'invalid'}`}
               >
                 <span className="rail-item-icon">
-                  <PlugIcon active={on} />
+                  <PlugIcon d={p.manifest?.icon} active={on} />
                 </span>
                 <div className="rail-item-text">
                   <span className="rail-item-name" title={p.dir}>

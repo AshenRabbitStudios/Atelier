@@ -36,17 +36,31 @@ export const ContextExportSchema = z.object({
 })
 export type ContextExport = z.infer<typeof ContextExportSchema>
 
+// A standing instruction the plugin contributes to the top system prompt (docs/CONTEXT_SYSTEM.md).
+// Sourced from the same `ctx:<key>` storage as a context export, but the host feeds it to
+// `systemPrompt.append` (read at query-build time, replayed verbatim) instead of injecting it into
+// the per-turn user message — so an unchanged instruction stays prompt-cached across turns.
+export const SystemInstructionSchema = z.object({
+  key: z.string().min(1),
+  maxTokens: z.number().int().positive().max(20000).default(2000)
+})
+export type SystemInstruction = z.infer<typeof SystemInstructionSchema>
+
 export const ManifestSchema = z.object({
   id: z.string().regex(/^[a-z0-9-]+$/, 'id must be lowercase letters, digits, and hyphens only'),
   name: z.string().min(1),
   version: z.string().min(1),
+  // Optional single-path 16px line-icon `d` string (DESIGN_SYSTEM.md §6), shown in the sidebar so
+  // each plugin is distinguishable when collapsed. Falls back to a generic plug icon if omitted.
+  icon: z.string().min(1).optional(),
   kind: PluginKind.default('panel'),
   entry: z.string().min(1).optional(), // required when kind includes "panel" — checked in registry
   backend: z.string().min(1).optional(),
   permissions: z.array(z.enum(PLUGIN_PERMISSIONS)).default([]),
   defaultDock: z.enum(DOCK_POSITIONS).default('right'),
   tools: z.array(PluginToolSchema).default([]),
-  contextExports: z.array(ContextExportSchema).default([])
+  contextExports: z.array(ContextExportSchema).default([]),
+  systemInstruction: SystemInstructionSchema.optional()
 })
 export type Manifest = z.infer<typeof ManifestSchema>
 

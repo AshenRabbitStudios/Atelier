@@ -472,7 +472,6 @@
       // own author guide under guide:<key>. The agent edits each via its set_cognition__<key> tool;
       // guide:<key> stays author-only. See docs/CONTEXT_SYSTEM.md.
 
-      const POLL_MS = 1500
       const DEBOUNCE_MS = 400
 
       function panel(key) {
@@ -588,7 +587,8 @@
           }, DEBOUNCE_MS)
         })
 
-        setInterval(async () => {
+        window.atelier.on('context', async (p) => {
+          if (!p || p.key !== key) return
           if (document.activeElement === ed) return
           try {
             const v = await window.atelier.context.get(key)
@@ -600,7 +600,7 @@
           } catch (_) {
             // silent — host may not be ready yet
           }
-        }, POLL_MS)
+        })
       }
 
       // ── Working memory (10 fixed salience slots) ──────────────────────
@@ -681,7 +681,8 @@
         } catch (_) {
           // start with 10 empty slots
         }
-        setInterval(async () => {
+        window.atelier.on('context', async (p) => {
+          if (!p || p.key !== key) return
           try {
             const raw = await window.atelier.context.get(key)
             if (raw !== lastKnownRaw && focusedIdx < 0) {
@@ -691,7 +692,7 @@
           } catch (_) {
             // ignore
           }
-        }, POLL_MS)
+        })
       }
 
       // ── Problems (scored, priority-sorted, dynamic) ───────────────────
@@ -847,7 +848,8 @@
           // start empty
         }
         render()
-        setInterval(async () => {
+        window.atelier.on('context', async (p) => {
+          if (!p || p.key !== key) return
           try {
             const raw = await window.atelier.context.get(key)
             if (raw !== lastKnownRaw && !focused) {
@@ -858,7 +860,7 @@
           } catch (_) {
             // ignore
           }
-        }, POLL_MS)
+        })
       }
 
       // ── Tabs ──────────────────────────────────────────────────────────

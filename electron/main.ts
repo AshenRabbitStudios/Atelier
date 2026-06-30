@@ -114,8 +114,11 @@ const agents = new AgentManager(
   sendToRenderer,
   (conversationId, pluginState) => buildContextBlock(plugins, conversationId, pluginState),
   (conversationId, pluginState) =>
-    buildContextMcpServers(plugins, conversationId, pluginState, () => {
-      /* panes poll context.get to refresh; no push channel (see docs/MORNING_REVIEW.md) */
+    buildContextMcpServers(plugins, conversationId, pluginState, (pluginId, key) => {
+      // The agent rewrote a pinned export — push it so the owning pane refreshes (no polling).
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(IPC.contextChanged, { conversationId, pluginId, key })
+      }
     }),
   (conversationId, pluginState) => buildSystemInstruction(plugins, conversationId, pluginState)
 )

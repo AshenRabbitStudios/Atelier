@@ -926,8 +926,9 @@
     render()
   }
 
-  /* ── Poll for agent updates ────────────────────────────────────────── */
-  setInterval(function () {
+  /* ── Refresh when the agent rewrites the table (host pushes 'context') ──── */
+  window.atelier.on('context', function (p) {
+    if (!p || p.key !== 'table') return
     if (editing || headerEditing || fxFocused) return
     window.atelier.context
       .get('table')
@@ -940,7 +941,7 @@
         }
       })
       .catch(function () {})
-  }, 1500)
+  })
 
   /* ── On load: rebuild from context (treat every mount as a restore) ── */
   window.atelier.on('load', function () {

@@ -409,8 +409,20 @@ export const IPC = {
   windowClose: 'window:close',
   // push (main → renderer)
   agentEvent: 'agent:event',
-  pluginsChanged: 'plugins:changed'
+  pluginsChanged: 'plugins:changed',
+  contextChanged: 'context:changed'
 } as const
+
+/**
+ * Pushed (main → renderer) when a pinned context export's value is rewritten by the agent's
+ * `set_<plugin>__<key>` tool, so the owning pane can refresh without polling. Carries enough to
+ * route it to the right mounted pane (active conversation + plugin) and tell it which key moved.
+ */
+export interface ContextChangedEvent {
+  conversationId: string
+  pluginId: string
+  key: string
+}
 
 /** The typed surface exposed on `window.atelier` by the preload bridge. */
 export interface AtelierAPI {
@@ -471,6 +483,7 @@ export interface AtelierAPI {
     contextGet(conversationId: string, pluginId: string, key: string): Promise<string>
     contextSet(conversationId: string, pluginId: string, key: string, value: string): Promise<void>
     onChanged(cb: (plugins: DiscoveredPlugin[]) => void): () => void
+    onContextChanged(cb: (e: ContextChangedEvent) => void): () => void
   }
   auth: {
     status(): Promise<AuthStatus>

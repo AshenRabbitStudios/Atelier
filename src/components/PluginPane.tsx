@@ -76,6 +76,17 @@ export function PluginPane({
     }
     window.addEventListener('atelier-theme', pushTheme)
 
+    // The agent rewrote one of this plugin's pinned context exports (main pushes context:changed).
+    // Forward it into the frame as a 'context' event so the pane refreshes that key — replacing the
+    // per-plugin polling loops. Filtered to this pane's plugin and its active conversation.
+    const offContext = window.atelier.plugins.onContextChanged((evt) => {
+      if (evt.pluginId !== pluginId || evt.conversationId !== getConversationId()) return
+      frame.contentWindow?.postMessage(
+        { __atelierEvent: true, event: 'context', payload: { key: evt.key } },
+        '*'
+      )
+    })
+
     const onMessage = async (e: MessageEvent): Promise<void> => {
       if (e.source !== frame.contentWindow) return // only this plugin's own frame
       const d = e.data as RpcMessage
@@ -155,6 +166,7 @@ export function PluginPane({
     return () => {
       window.removeEventListener('message', onMessage)
       window.removeEventListener('atelier-theme', pushTheme)
+      offContext()
     }
   }, [pluginId, permissions, getConversationId, onDock, onSetTitle])
 

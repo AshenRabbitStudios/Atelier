@@ -537,8 +537,9 @@ NodeId       (node, id only)</pre>
         }
       }
 
-      /* ── Poll for agent-driven updates every 1 500 ms ────────────────── */
-      setInterval(async () => {
+      /* ── Refresh when the agent rewrites the graph (host pushes 'context') ──── */
+      window.atelier.on('context', async (p) => {
+        if (!p || p.key !== 'graph') return
         if (isFocused) return // never clobber user typing
         try {
           const raw = await window.atelier.context.get('graph')
@@ -557,7 +558,7 @@ NodeId       (node, id only)</pre>
         } catch (_) {
           /* silent — host may not be ready yet */
         }
-      }, 1500)
+      })
 
       /* ── Re-render on pane resize (keeps layout in sync) ─────────────── */
       if (typeof ResizeObserver !== 'undefined') {

@@ -858,6 +858,10 @@
           writeSelection([])
           engine.init()
           populateLibrary()
+          // Seed from any value the agent already pushed while this pane was closed (the per-turn
+          // 'context' events only cover changes made while it's open).
+          pollArchitecture()
+          pollCommand()
         }
         function teardown() {
           if (engine) {
@@ -925,7 +929,9 @@
           else engine.deselect()
         })
 
-        // ── Live architecture push: poll the `architecture` export; render on change (no reload) ──
+        // ── Live architecture push: the agent rewrites the `architecture` export and the host
+        // pushes a 'context' event; render on change (no reload). The host writes the full value
+        // before signalling, so there's no mid-write partial-read to wait out anymore. ──
         var lastArch = null
         async function pollArchitecture() {
           if (!engine) return
@@ -937,7 +943,7 @@
             try {
               scene = JSON.parse(val)
             } catch (e) {
-              return // partial / invalid JSON mid-write — wait for the next tick
+              return // malformed scene — ignore until the next push
             }
             lastArch = val
             engine.loadScene(scene)
@@ -945,11 +951,12 @@
             /* host not ready yet */
           }
         }
-        setInterval(pollArchitecture, 600)
 
-        // Agent → pane control: poll the `command` export (e.g. focus a node). Unhandled commands
-        // (scene still loading / mid-animation) stay un-consumed so they retry on the next tick.
+        // Agent → pane control: the `command` export (e.g. focus a node). A command that can't be
+        // handled yet (camera mid-tween, or its scene level not loaded) is retried on a short timer
+        // until it lands — a bounded retry tied to the pending command, not an always-on poll.
         var lastCmd = null
+        var cmdRetry = null
         async function pollCommand() {
           if (!engine) return
           try {
@@ -963,12 +970,28 @@
               lastCmd = val
               return
             }
-            if (engine.focusNode(cmd)) lastCmd = val
+            if (engine.focusNode(cmd)) {
+              lastCmd = val
+              if (cmdRetry) {
+                clearTimeout(cmdRetry)
+                cmdRetry = null
+              }
+            } else {
+              if (cmdRetry) clearTimeout(cmdRetry)
+              cmdRetry = setTimeout(pollCommand, 250)
+            }
           } catch (e) {
             /* host not ready */
           }
         }
-        setInterval(pollCommand, 250)
+
+        window.atelier.on('context', function (p) {
+          if (!p) return
+          if (p.key === 'architecture') pollArchitecture()
+          // A command may target a node in the just-pushed scene, so re-attempt on an architecture
+          // change too — the level it needs may only now be loaded.
+          if (p.key === 'command' || p.key === 'architecture') pollCommand()
+        })
 
         window.atelier.on('load', boot)
         window.atelier.on('unload', teardown)

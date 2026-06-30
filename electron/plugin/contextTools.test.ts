@@ -104,6 +104,24 @@ describe('buildContextMcpServers', () => {
     expect(servers?.atelier_context).toBeDefined()
     expect(servers?.atelier_context.type).toBe('sdk')
   })
+
+  it('the set_ tool persists the value and fires onChange (the push trigger)', async () => {
+    const changes: { pluginId: string; key: string }[] = []
+    const servers = buildContextMcpServers(REG, 'c1', { mm: pinned(['model']) }, (pluginId, key) =>
+      changes.push({ pluginId, key })
+    )
+    // Invoke the registered tool's callback the way the agent would (reaches into the MCP
+    // SDK's McpServer internals — brittle by design, so an SDK upgrade fails loudly here).
+    const reg = (servers!.atelier_context.instance as unknown as Record<string, unknown>)
+      ._registeredTools as Record<string, { handler: (a: { content: string }) => Promise<unknown> }>
+    const entry = reg['set_mm__model']
+    expect(entry).toBeDefined()
+    await entry.handler({ content: 'new model text' })
+    // Value landed in storage …
+    expect(pluginValueOrDefault(REG, 'c1', 'mm', contextStorageKey('model'))).toBe('new model text')
+    // … and onChange fired with the routing keys main.ts forwards as context:changed.
+    expect(changes).toEqual([{ pluginId: 'mm', key: 'model' }])
+  })
 })
 
 describe('push-only exports (inject:false)', () => {

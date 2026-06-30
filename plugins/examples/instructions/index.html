@@ -126,7 +126,6 @@
       let focused = false
       let lastKnownValue = null
       let debounceTimer = null
-      let pollTimer = null
 
       function showIndicator(state) {
         indicator.className = state
@@ -181,8 +180,10 @@
         debounceTimer = setTimeout(saveValue, 400)
       })
 
+      // Refresh when the agent rewrites the instruction (host pushes a 'context' event).
       function startPolling() {
-        pollTimer = setInterval(async () => {
+        window.atelier.on('context', async (p) => {
+          if (!p || p.key !== 'instruction') return
           if (focused) return
           try {
             const val = await window.atelier.context.get('instruction')
@@ -195,7 +196,7 @@
           } catch (_) {
             // silent — host may not be ready yet
           }
-        }, 1500)
+        })
       }
 
       window.atelier.on('load', async () => {

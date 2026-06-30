@@ -10,7 +10,7 @@ export const RUNTIME_JS = String.raw`
   var pluginId = location.hostname
   var pending = new Map()
   var seq = 0
-  var listeners = { load: [], unload: [], reload: [] }
+  var listeners = { load: [], unload: [], reload: [], context: [] }
 
   function call(ns, method, args) {
     return new Promise(function (resolve, reject) {

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
-import { IPC, type AgentEvent, type AtelierAPI } from './shared/events.js'
+import { IPC, type AgentEvent, type AtelierAPI, type ContextChangedEvent } from './shared/events.js'
 import type { DiscoveredPlugin } from './shared/plugins.js'
 
 // The ONLY bridge between the sandboxed renderer and the privileged main process.
@@ -74,6 +74,13 @@ const api: AtelierAPI = {
       ipcRenderer.on(IPC.pluginsChanged, listener)
       return () => {
         ipcRenderer.removeListener(IPC.pluginsChanged, listener)
+      }
+    },
+    onContextChanged: (cb) => {
+      const listener = (_e: IpcRendererEvent, evt: ContextChangedEvent) => cb(evt)
+      ipcRenderer.on(IPC.contextChanged, listener)
+      return () => {
+        ipcRenderer.removeListener(IPC.contextChanged, listener)
       }
     }
   },

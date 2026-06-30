@@ -141,8 +141,10 @@ function summary(name: string, input: unknown): { label: string; detail: string;
   const i = asRecord(input)
   const n = name.toLowerCase()
   if (SHELL_RE.test(n)) return { label: shellLabel(n), detail: str(i.command), mono: true }
-  if (/^(edit|write|multiedit|notebookedit)$/.test(n))
+  if (/^(edit|write|multiedit)$/.test(n))
     return { label: name, detail: baseName(str(i.file_path)), mono: true }
+  if (/^notebookedit$/.test(n))
+    return { label: 'Notebook', detail: baseName(str(i.notebook_path)), mono: true }
   if (/^read$/.test(n)) return { label: 'Read', detail: baseName(str(i.file_path)), mono: true }
   if (/^grep$/.test(n)) return { label: 'Grep', detail: str(i.pattern), mono: true }
   if (/^glob$/.test(n)) return { label: 'Glob', detail: str(i.pattern), mono: true }
@@ -160,8 +162,27 @@ function summary(name: string, input: unknown): { label: string; detail: string;
     const first = asRecord((Array.isArray(i.questions) ? i.questions : [])[0])
     return { label: 'Question', detail: str(first.header) || str(first.question), mono: false }
   }
+  if (/^exitplanmode$/.test(n)) return { label: 'Plan', detail: '', mono: false }
+  if (/^workflow$/.test(n))
+    return {
+      label: 'Workflow',
+      detail: str(i.name) || (i.scriptPath ? baseName(str(i.scriptPath)) : 'script'),
+      mono: false
+    }
+  if (/^schedulewakeup$/.test(n)) return { label: 'Wake-up', detail: str(i.reason), mono: false }
   if (isContextWrite(name)) return { label: 'Context', detail: ctxKeyName(name), mono: false }
+  if (/^mcp__/.test(n)) {
+    // mcp__<server>__<method> → a clean "MCP · server · method" instead of the raw id.
+    const parts = name.split('__').slice(1)
+    return { label: 'MCP', detail: parts.join(' · ').replace(/_/g, ' '), mono: false }
+  }
   return { label: name, detail: '', mono: false }
+}
+
+function fmtDelay(s: number): string {
+  if (s < 60) return `${Math.round(s)}s`
+  if (s < 3600) return `${Math.round(s / 60)}m`
+  return `${Math.round(s / 360) / 10}h`
 }
 
 // A readable value for the generic field view: short scalars inline, long/multiline strings and
@@ -474,6 +495,77 @@ function ToolBody({ block }: { block: ToolUse }) {
           <div className="ask-answer">
             <span className="q-label">answer</span> {out}
           </div>
+        )}
+      </div>
+    )
+  }
+
+  if (/^notebookedit$/.test(n)) {
+    const src = str(i.new_source)
+    const lang = str(i.cell_type) === 'markdown' ? 'markdown' : 'python'
+    return (
+      <div className="tool-body">
+        <div className="tool-query">
+          <span className="q-label">{str(i.edit_mode) || 'replace'}</span>
+          <code>{baseName(str(i.notebook_path))}</code>
+          {str(i.cell_id) && <span className="q-path">cell {str(i.cell_id)}</span>}
+        </div>
+        {src && (
+          <div className="tool-md">
+            <CodeBlock code={src} lang={lang} />
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  if (/^exitplanmode$/.test(n)) {
+    return (
+      <div className="tool-body">
+        <div className="block-text tool-md">
+          <Markdown text={str(i.plan)} />
+        </div>
+      </div>
+    )
+  }
+
+  if (/^workflow$/.test(n)) {
+    const script = str(i.script)
+    return (
+      <div className="tool-body">
+        {(str(i.name) || str(i.description)) && (
+          <div className="task-meta">
+            {str(i.name) && <span className="task-type">{str(i.name)}</span>}
+            {str(i.description) && <span className="task-desc">{str(i.description)}</span>}
+          </div>
+        )}
+        {str(i.scriptPath) && <div className="shell-desc">{str(i.scriptPath)}</div>}
+        {script && (
+          <div className="tool-md">
+            <CodeBlock code={script} lang="js" />
+          </div>
+        )}
+        {block.result && <pre className="tool-io">{out}</pre>}
+      </div>
+    )
+  }
+
+  if (/^schedulewakeup$/.test(n)) {
+    const d = Number(i.delaySeconds)
+    return (
+      <div className="tool-body">
+        <div className="tool-query">
+          <span className="q-label">wake in</span>
+          <code>{Number.isFinite(d) ? fmtDelay(d) : str(i.delaySeconds)}</code>
+        </div>
+        {str(i.reason) && <div className="shell-desc">{str(i.reason)}</div>}
+        {str(i.prompt) && (
+          <details className="task-prompt">
+            <summary>prompt</summary>
+            <div className="block-text tool-md">
+              <Markdown text={str(i.prompt)} />
+            </div>
+          </details>
         )}
       </div>
     )

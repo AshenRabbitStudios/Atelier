@@ -1,0 +1,891 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hologram</title>
+    <!-- Host runtime injects window.atelier. Must be the first script. -->
+    <script src="atelier-plugin://__runtime__/atelier.js"></script>
+    <style>
+      /* Self-hosted fonts (offline). Two families only — Rajdhani (display) + IBM Plex Mono. */
+      @font-face {
+        font-family: 'Rajdhani';
+        font-weight: 400;
+        font-display: swap;
+        src: url('./assets/fonts/rajdhani-latin-400-normal.woff2') format('woff2');
+      }
+      @font-face {
+        font-family: 'Rajdhani';
+        font-weight: 500;
+        font-display: swap;
+        src: url('./assets/fonts/rajdhani-latin-500-normal.woff2') format('woff2');
+      }
+      @font-face {
+        font-family: 'Rajdhani';
+        font-weight: 600;
+        font-display: swap;
+        src: url('./assets/fonts/rajdhani-latin-600-normal.woff2') format('woff2');
+      }
+      @font-face {
+        font-family: 'Rajdhani';
+        font-weight: 700;
+        font-display: swap;
+        src: url('./assets/fonts/rajdhani-latin-700-normal.woff2') format('woff2');
+      }
+      @font-face {
+        font-family: 'IBM Plex Mono';
+        font-weight: 400;
+        font-display: swap;
+        src: url('./assets/fonts/ibm-plex-mono-latin-400-normal.woff2') format('woff2');
+      }
+      @font-face {
+        font-family: 'IBM Plex Mono';
+        font-weight: 500;
+        font-display: swap;
+        src: url('./assets/fonts/ibm-plex-mono-latin-500-normal.woff2') format('woff2');
+      }
+
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #03070d;
+        overflow: hidden;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      @keyframes hpulse {
+        0%,
+        100% {
+          opacity: 0.35;
+        }
+        50% {
+          opacity: 0.9;
+        }
+      }
+      @keyframes hscan {
+        0% {
+          transform: translateY(0);
+        }
+        100% {
+          transform: translateY(100vh);
+        }
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      ::-webkit-scrollbar {
+        width: 6px;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: rgba(53, 215, 255, 0.4);
+        border-radius: 3px;
+      }
+
+      #root {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        color: #cfeefc;
+        font-family: 'IBM Plex Mono', monospace;
+        background: radial-gradient(120% 120% at 50% 35%, #061826 0%, #03070d 55%, #01040a 100%);
+      }
+      #stage {
+        position: absolute;
+        inset: 0;
+      }
+      .ov {
+        position: absolute;
+        pointer-events: none;
+      }
+      .ctl {
+        pointer-events: auto;
+      }
+
+      /* HUD buttons */
+      .hbtn {
+        cursor: pointer;
+        padding: 8px 16px;
+        font-family: 'Rajdhani', sans-serif;
+        font-weight: 600;
+        font-size: 13px;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        border-radius: 3px;
+        backdrop-filter: blur(4px);
+        transition: all 0.2s;
+        color: #7fd6f0;
+        background: rgba(20, 44, 60, 0.45);
+        border: 1px solid rgba(53, 215, 255, 0.35);
+      }
+      .hbtn:hover {
+        border-color: rgba(53, 215, 255, 0.7);
+        color: #cdf3ff;
+      }
+      .hbtn.active {
+        color: #03121a;
+        background: #35d7ff;
+        border-color: #35d7ff;
+        box-shadow: 0 0 18px rgba(53, 215, 255, 0.5);
+      }
+
+      /* spec rows */
+      .spec {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 4px 0;
+        border-bottom: 1px solid rgba(53, 215, 255, 0.08);
+      }
+      .spec .k {
+        color: #6fb4cc;
+      }
+      .spec .v {
+        color: #cfeefc;
+      }
+
+      /* Inspector "maximize" — pop the panel large to read long tables / descriptions */
+      #inspector.maximized {
+        left: 7% !important;
+        right: 7% !important;
+        top: 7% !important;
+        width: auto !important;
+        max-height: 86% !important;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div id="stage"></div>
+
+      <!-- scanline + vignette (decorative) -->
+      <div
+        class="ov"
+        style="
+          inset: 0;
+          background: repeating-linear-gradient(
+            0deg,
+            rgba(53, 215, 255, 0.03) 0px,
+            rgba(53, 215, 255, 0.03) 1px,
+            transparent 2px,
+            transparent 4px
+          );
+          mix-blend-mode: screen;
+          opacity: 0.5;
+        "
+      ></div>
+      <div
+        class="ov"
+        style="
+          left: 0;
+          right: 0;
+          height: 2px;
+          top: 0;
+          background: linear-gradient(90deg, transparent, rgba(53, 215, 255, 0.5), transparent);
+          animation: hscan 7s linear infinite;
+          opacity: 0.4;
+        "
+      ></div>
+      <div class="ov" style="inset: 0; box-shadow: inset 0 0 220px 40px rgba(2, 8, 16, 0.9)"></div>
+
+      <!-- corner brackets -->
+      <div
+        class="ov"
+        style="
+          top: 14px;
+          left: 14px;
+          width: 24px;
+          height: 24px;
+          border-left: 2px solid rgba(53, 215, 255, 0.55);
+          border-top: 2px solid rgba(53, 215, 255, 0.55);
+        "
+      ></div>
+      <div
+        class="ov"
+        style="
+          top: 14px;
+          right: 14px;
+          width: 24px;
+          height: 24px;
+          border-right: 2px solid rgba(53, 215, 255, 0.55);
+          border-top: 2px solid rgba(53, 215, 255, 0.55);
+        "
+      ></div>
+      <div
+        class="ov"
+        style="
+          bottom: 14px;
+          left: 14px;
+          width: 24px;
+          height: 24px;
+          border-left: 2px solid rgba(53, 215, 255, 0.55);
+          border-bottom: 2px solid rgba(53, 215, 255, 0.55);
+        "
+      ></div>
+      <div
+        class="ov"
+        style="
+          bottom: 14px;
+          right: 14px;
+          width: 24px;
+          height: 24px;
+          border-right: 2px solid rgba(53, 215, 255, 0.55);
+          border-bottom: 2px solid rgba(53, 215, 255, 0.55);
+        "
+      ></div>
+
+      <!-- top-left: title + controls -->
+      <div class="ov" style="top: 26px; left: 30px; max-width: 48%">
+        <div
+          style="
+            font-family: 'Rajdhani';
+            font-weight: 600;
+            font-size: 10px;
+            letter-spacing: 5px;
+            color: #5aa9c4;
+            text-transform: uppercase;
+          "
+        >
+          ◇ Neural Architecture Lab
+        </div>
+        <div
+          id="title"
+          style="
+            font-family: 'Rajdhani';
+            font-weight: 700;
+            font-size: 38px;
+            line-height: 1;
+            letter-spacing: 1px;
+            color: #eafaff;
+            margin-top: 7px;
+            text-shadow: 0 0 26px rgba(53, 215, 255, 0.45);
+          "
+        >
+          Hologram
+        </div>
+        <div
+          id="subtitle"
+          style="font-size: 12px; letter-spacing: 0.5px; color: #7fb8cf; margin-top: 6px"
+        ></div>
+        <div style="display: flex; gap: 10px; margin-top: 16px">
+          <div id="overview-controls" style="display: flex; gap: 10px">
+            <button class="hbtn ctl" id="btn-transformer">Transformer</button>
+            <button class="hbtn ctl" id="btn-rnn">RNN</button>
+            <button class="hbtn ctl" id="btn-system">System</button>
+          </div>
+          <button class="hbtn ctl" id="btn-back" style="display: none">← Back to overview</button>
+        </div>
+        <div
+          id="missing-hint"
+          style="
+            display: none;
+            margin-top: 12px;
+            font-size: 11.5px;
+            color: #ffd27a;
+            letter-spacing: 0.4px;
+            max-width: 340px;
+            line-height: 1.6;
+          "
+        ></div>
+      </div>
+
+      <!-- top-right: inspector -->
+      <div
+        id="inspector"
+        class="ov ctl"
+        style="
+          top: 24px;
+          right: 24px;
+          width: 330px;
+          max-height: calc(100% - 120px);
+          background: linear-gradient(160deg, rgba(8, 28, 40, 0.72), rgba(4, 14, 22, 0.62));
+          border: 1px solid rgba(53, 215, 255, 0.28);
+          border-radius: 6px;
+          backdrop-filter: blur(9px);
+          box-shadow:
+            0 0 40px rgba(0, 0, 0, 0.5),
+            inset 0 0 30px rgba(53, 215, 255, 0.05);
+          overflow: hidden;
+          display: flex;
+          flex-direction: column;
+        "
+      >
+        <div
+          style="
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 14px;
+            border-bottom: 1px solid rgba(53, 215, 255, 0.18);
+            background: rgba(53, 215, 255, 0.05);
+            flex-shrink: 0;
+          "
+        >
+          <span
+            style="
+              font-family: 'Rajdhani';
+              font-weight: 600;
+              font-size: 11px;
+              letter-spacing: 3px;
+              color: #6fc4dd;
+            "
+            >INSPECTOR</span
+          >
+          <div style="display: flex; align-items: center; gap: 8px">
+            <button
+              id="insp-max"
+              title="Expand / collapse panel"
+              style="
+                background: none;
+                border: 1px solid rgba(53, 215, 255, 0.3);
+                border-radius: 4px;
+                color: #8fd0e6;
+                cursor: pointer;
+                font-size: 12px;
+                line-height: 1;
+                padding: 2px 6px;
+                font-family: inherit;
+              "
+            >
+              ⤢
+            </button>
+            <span
+              id="insp-dot"
+              style="
+                width: 7px;
+                height: 7px;
+                border-radius: 50%;
+                background: #35d7ff;
+                opacity: 0.35;
+                animation: hpulse 2.6s ease-in-out infinite;
+              "
+            ></span>
+          </div>
+        </div>
+        <div id="insp-body" style="padding: 14px 15px; overflow: auto"></div>
+      </div>
+
+      <!-- bottom-center: hints -->
+      <div
+        class="ov"
+        style="
+          bottom: 22px;
+          left: 0;
+          right: 0;
+          text-align: center;
+          font-size: 11px;
+          letter-spacing: 1px;
+          color: #5f9bb4;
+        "
+      >
+        Drag to orbit &nbsp;·&nbsp; Scroll to zoom &nbsp;·&nbsp; Middle-drag to pan &nbsp;·&nbsp;
+        Click to inspect &nbsp;·&nbsp; Shift-click to add &nbsp;·&nbsp; Double-click to dive in
+      </div>
+
+      <!-- tweaks (bottom-right) -->
+      <div
+        class="ov ctl"
+        style="
+          bottom: 48px;
+          right: 24px;
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          padding: 8px 14px;
+          background: rgba(8, 28, 40, 0.6);
+          border: 1px solid rgba(53, 215, 255, 0.2);
+          border-radius: 5px;
+          backdrop-filter: blur(6px);
+          font-size: 11px;
+          letter-spacing: 0.5px;
+          color: #9fd2e6;
+        "
+      >
+        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer"
+          ><input type="checkbox" id="tw-rotate" checked />auto-rotate</label
+        >
+        <label style="display: flex; align-items: center; gap: 6px"
+          >glow<input
+            type="range"
+            id="tw-glow"
+            min="0"
+            max="2"
+            step="0.05"
+            value="0.9"
+            style="width: 64px"
+        /></label>
+        <select
+          id="tw-palette"
+          style="
+            background: rgba(4, 14, 22, 0.7);
+            color: #cfeefc;
+            border: 1px solid rgba(53, 215, 255, 0.3);
+            border-radius: 3px;
+            padding: 2px 4px;
+            font-family: inherit;
+            font-size: 11px;
+          "
+        >
+          <option>Arc Reactor</option>
+          <option>Mark L Gold</option>
+          <option>Matrix Green</option>
+        </select>
+      </div>
+
+      <!-- loader -->
+      <div
+        id="loader"
+        class="ov"
+        style="
+          inset: 0;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          background: #03070d;
+          z-index: 10;
+        "
+      >
+        <div
+          style="
+            width: 34px;
+            height: 34px;
+            border: 2px solid rgba(53, 215, 255, 0.2);
+            border-top-color: #35d7ff;
+            border-radius: 50%;
+            animation: spin 0.9s linear infinite;
+          "
+        ></div>
+        <div
+          style="
+            margin-top: 16px;
+            font-family: 'Rajdhani';
+            font-weight: 600;
+            font-size: 12px;
+            letter-spacing: 4px;
+            color: #5aa9c4;
+            text-transform: uppercase;
+          "
+        >
+          Initializing Hologram
+        </div>
+      </div>
+    </div>
+
+    <!-- bundled engine + three (classic IIFE → window.Hologram / window.HoloArch) -->
+    <script src="atelier-plugin://hologram/hologram.bundle.js"></script>
+    <script>
+      ;(function () {
+        var $ = function (id) {
+          return document.getElementById(id)
+        }
+        var engine = null
+
+        function esc(s) {
+          return String(s == null ? '' : s).replace(/[&<>]/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]
+          })
+        }
+
+        // ── Inspector: an assortment of descriptive detail panels (decoupled from the glyph) ──
+        function panelTitle(t) {
+          return t
+            ? '<div style="font-family:\'Rajdhani\';font-weight:600;font-size:10px;letter-spacing:2px;color:#6fc4dd;text-transform:uppercase;margin:14px 0 6px;">' +
+                esc(t) +
+                '</div>'
+            : ''
+        }
+        function kvRows(items) {
+          return (items || [])
+            .map(function (s) {
+              return (
+                '<div class="spec"><span class="k">' +
+                esc(s.k) +
+                '</span><span class="v">' +
+                esc(s.v) +
+                '</span></div>'
+              )
+            })
+            .join('')
+        }
+        var PRE =
+          "margin:4px 0 0;padding:8px 10px;background:#04101a;border:1px solid rgba(53,215,255,.15);border-radius:5px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#9fe6ff;overflow:auto;"
+        function renderTable(d) {
+          var cols = d.columns || []
+          var rows = d.rows || []
+          var head =
+            '<tr>' +
+            cols
+              .map(function (c) {
+                return (
+                  '<th style="text-align:left;padding:3px 8px 3px 0;color:#6fb4cc;font-weight:600;border-bottom:1px solid rgba(53,215,255,.2);">' +
+                  esc(c) +
+                  '</th>'
+                )
+              })
+              .join('') +
+            '</tr>'
+          var body = rows
+            .map(function (r) {
+              return (
+                '<tr>' +
+                (r || [])
+                  .map(function (cell) {
+                    return (
+                      '<td style="padding:3px 8px 3px 0;color:#cfeefc;border-bottom:1px solid rgba(53,215,255,.06);">' +
+                      esc(cell) +
+                      '</td>'
+                    )
+                  })
+                  .join('') +
+                '</tr>'
+              )
+            })
+            .join('')
+          return (
+            '<table style="border-collapse:collapse;font-size:11.5px;width:100%;margin-top:4px;">' +
+            head +
+            body +
+            '</table>'
+          )
+        }
+        function renderChart(d) {
+          var vals = d.values || []
+          var labels = d.labels || []
+          var max = Math.max.apply(null, vals.concat([1e-6]))
+          return (
+            '<div style="margin-top:4px;">' +
+            vals
+              .map(function (v, i) {
+                var w = Math.max(2, (v / max) * 100)
+                return (
+                  '<div style="display:flex;align-items:center;gap:6px;margin:2px 0;font-size:10.5px;">' +
+                  '<span style="width:64px;color:#7fb8cf;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' +
+                  esc(labels[i] != null ? labels[i] : i) +
+                  '</span><span style="flex:1;background:rgba(53,215,255,.12);border-radius:2px;">' +
+                  '<span style="display:block;height:7px;width:' +
+                  w +
+                  '%;background:#35d7ff;border-radius:2px;"></span></span></div>'
+                )
+              })
+              .join('') +
+            '</div>'
+          )
+        }
+        function renderDetail(d) {
+          if (!d || !d.type) return ''
+          switch (d.type) {
+            case 'markdown':
+              return (
+                panelTitle(d.title) +
+                '<div style="font-size:12px;line-height:1.7;color:#bcd9e6;white-space:pre-wrap;">' +
+                esc(d.md || '') +
+                '</div>'
+              )
+            case 'keyValue':
+            case 'params':
+              return panelTitle(d.title) + '<div>' + kvRows(d.items) + '</div>'
+            case 'list': {
+              var tag = d.ordered ? 'ol' : 'ul'
+              return (
+                panelTitle(d.title) +
+                '<' +
+                tag +
+                ' style="margin:2px 0 0 16px;font-size:12px;line-height:1.7;color:#bcd9e6;">' +
+                (d.items || [])
+                  .map(function (i) {
+                    return '<li>' + esc(i) + '</li>'
+                  })
+                  .join('') +
+                '</' +
+                tag +
+                '>'
+              )
+            }
+            case 'code':
+              return (
+                panelTitle(d.title) +
+                '<pre style="' +
+                PRE +
+                'white-space:pre;">' +
+                esc(d.source || '') +
+                '</pre>'
+              )
+            case 'json':
+              return (
+                panelTitle(d.title) +
+                '<pre style="' +
+                PRE +
+                'white-space:pre-wrap;">' +
+                esc(JSON.stringify(d.value, null, 2)) +
+                '</pre>'
+              )
+            case 'table':
+              return panelTitle(d.title) + renderTable(d)
+            case 'chart':
+              return panelTitle(d.title) + renderChart(d)
+            default:
+              return (
+                panelTitle(d.title) +
+                '<div style="font-size:12px;color:#bcd9e6;white-space:pre-wrap;">' +
+                esc(JSON.stringify(d)) +
+                '</div>'
+              )
+          }
+        }
+        function renderInspector(nodes) {
+          var body = $('insp-body')
+          var dot = $('insp-dot')
+          var list = Array.isArray(nodes) ? nodes : nodes ? [nodes] : []
+          if (list.length === 0) {
+            dot.style.opacity = '0.35'
+            body.innerHTML =
+              '<div style="color:#6c9fb4;font-size:12px;line-height:1.7;">No component selected.<br/>' +
+              '<span style="color:#4f8398;">Click a node to inspect · Shift-click to add to the selection · Double-click to dive in.</span></div>'
+            return
+          }
+          dot.style.opacity = '0.95'
+          var node = list[list.length - 1] // primary = most recently selected
+          var multi =
+            list.length > 1
+              ? '<div style="margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid rgba(53,215,255,.14);font-size:10.5px;color:#7fb8cf;">' +
+                list.length +
+                ' selected · ' +
+                list
+                  .map(function (n) {
+                    return esc(n.label)
+                  })
+                  .join(', ') +
+                '</div>'
+              : ''
+          var tag = node.type || node.kind || ''
+          var summary = node.summary || node.desc || ''
+          var detailHtml = ''
+          if (node.details && node.details.length)
+            detailHtml = node.details.map(renderDetail).join('')
+          else if (node.specs && node.specs.length)
+            detailHtml = '<div style="margin-top:12px;">' + kvRows(node.specs) + '</div>'
+          body.innerHTML =
+            multi +
+            "<div style=\"font-family:'Rajdhani';font-weight:600;font-size:10px;letter-spacing:2.5px;color:" +
+            esc(node.color || '#6fc4dd') +
+            ';text-transform:uppercase;">' +
+            esc(tag) +
+            '</div>' +
+            '<div style="font-family:\'Rajdhani\';font-weight:600;font-size:21px;color:#eafaff;margin-top:4px;line-height:1.1;">' +
+            esc(node.label || '') +
+            '</div>' +
+            (summary
+              ? '<div style="font-size:12px;line-height:1.72;color:#a9cfde;margin-top:10px;">' +
+                esc(summary) +
+                '</div>'
+              : '') +
+            detailHtml
+        }
+        // Inspector for a picked edge — the data flowing through the model (shape / dtype / role).
+        function renderEdge(info) {
+          var body = $('insp-body')
+          var dot = $('insp-dot')
+          dot.style.opacity = '0.95'
+          var e = info.edge || {}
+          var rows = []
+          if (e.tensor) {
+            if (e.tensor.shape) rows.push({ k: 'shape', v: '[' + e.tensor.shape.join(', ') + ']' })
+            if (e.tensor.dtype) rows.push({ k: 'dtype', v: e.tensor.dtype })
+            if (e.tensor.modality) rows.push({ k: 'modality', v: e.tensor.modality })
+          }
+          if (e.kind) rows.push({ k: 'role', v: e.kind })
+          body.innerHTML =
+            '<div style="font-family:\'Rajdhani\';font-weight:600;font-size:10px;letter-spacing:2.5px;color:#7fb8cf;text-transform:uppercase;">Data flow</div>' +
+            '<div style="font-family:\'Rajdhani\';font-weight:600;font-size:18px;color:#eafaff;margin-top:4px;line-height:1.15;">' +
+            esc(info.aLabel) +
+            ' <span style="color:#6fb4cc;">→</span> ' +
+            esc(info.bLabel) +
+            '</div>' +
+            (e.label
+              ? '<div style="font-size:12px;color:#a9cfde;margin-top:8px;">' +
+                esc(e.label) +
+                '</div>'
+              : '') +
+            (rows.length
+              ? '<div style="margin-top:12px;">' + kvRows(rows) + '</div>'
+              : '<div style="font-size:12px;color:#6c9fb4;margin-top:10px;">No tensor metadata on this edge.</div>')
+        }
+
+        // ── Selection → agent (the read-in channel; pin "Hologram selection" to use it) ──
+        var currentView = 'overview'
+        var currentTitle = 'Hologram'
+        function onSelectionChange(nodes) {
+          var list = Array.isArray(nodes) ? nodes : nodes ? [nodes] : []
+          renderInspector(list)
+          writeSelection(list)
+        }
+        function writeSelection(list) {
+          try {
+            window.atelier.context.set(
+              'selection',
+              JSON.stringify({
+                model: engine ? engine.model : null,
+                view: currentView,
+                title: currentTitle,
+                nodes: list.map(function (n) {
+                  return {
+                    id: n.id,
+                    label: n.label,
+                    kind: n.type || n.kind || '',
+                    summary: n.summary || n.desc || ''
+                  }
+                })
+              })
+            )
+          } catch (e) {
+            /* host not ready / no permission — ignore */
+          }
+        }
+        // Pane → agent: a drill into an un-authored node asks me (the agent) to push that path's scene.
+        function onRequestExpand(req) {
+          try {
+            window.atelier.context.set(
+              'selection',
+              JSON.stringify({
+                model: engine ? engine.model : null,
+                view: currentView,
+                title: currentTitle,
+                nodes: [],
+                request: { action: 'expand', path: req.path, label: req.label }
+              })
+            )
+          } catch (e) {
+            /* host not ready */
+          }
+        }
+
+        // ── View / title / controls ────────────────────────────────
+        function applyView(v) {
+          currentView = v.view || 'overview'
+          currentTitle = v.title || 'Hologram'
+          $('title').textContent = v.title || 'Hologram'
+          // breadcrumb (root › … › current) when nested, else the scene subtitle
+          var crumbs = v.crumbs && v.crumbs.length > 1 ? v.crumbs.join('  ›  ') : ''
+          $('subtitle').textContent = crumbs || v.subtitle || ''
+          var deep = !!v.canBack || v.view === 'detail'
+          $('overview-controls').style.display = deep ? 'none' : 'flex'
+          $('btn-back').style.display = deep ? 'inline-block' : 'none'
+          if (!deep && engine) {
+            $('btn-transformer').classList.toggle('active', engine.model === 'transformer')
+            $('btn-rnn').classList.toggle('active', engine.model === 'rnn')
+            $('btn-system').classList.toggle('active', engine.model === 'system')
+          }
+          var mh = $('missing-hint')
+          var who = v.requesting || v.missing
+          if (who) {
+            mh.style.display = 'block'
+            mh.textContent =
+              '“' +
+              who +
+              '” isn’t detailed yet — ask me in chat to expand it and I’ll push the deeper level here.'
+          } else {
+            mh.style.display = 'none'
+          }
+        }
+
+        // ── Boot / teardown on host lifecycle ──────────────────────
+        function boot() {
+          if (engine) return
+          engine = new window.Hologram($('stage'), {
+            glow: 0.9,
+            autoRotate: true,
+            palette: 'Arc Reactor',
+            model: 'transformer',
+            resolveModel: function (key, P) {
+              return window.HoloArch.getModel(key, P)
+            },
+            resolveDetail: function (node, P) {
+              return window.HoloArch.getDetail(node, P)
+            },
+            onSelect: onSelectionChange,
+            onViewChange: applyView,
+            onRequestExpand: onRequestExpand,
+            onEdge: renderEdge,
+            onReady: function () {
+              $('loader').style.display = 'none'
+            }
+          })
+          renderInspector([])
+          writeSelection([])
+          engine.init()
+        }
+        function teardown() {
+          if (engine) {
+            engine.dispose()
+            engine = null
+          }
+        }
+
+        // ── Controls ───────────────────────────────────────────────
+        $('btn-transformer').addEventListener('click', function () {
+          if (engine) engine.setModel('transformer')
+        })
+        $('btn-rnn').addEventListener('click', function () {
+          if (engine) engine.setModel('rnn')
+        })
+        $('btn-system').addEventListener('click', function () {
+          if (engine) engine.setModel('system')
+        })
+        $('btn-back').addEventListener('click', function () {
+          if (engine) engine.goBack()
+        })
+        $('insp-max').addEventListener('click', function () {
+          $('inspector').classList.toggle('maximized')
+        })
+        $('tw-rotate').addEventListener('change', function (e) {
+          if (engine) engine.setAutoRotate(e.target.checked)
+        })
+        $('tw-glow').addEventListener('input', function (e) {
+          if (engine) engine.setGlow(parseFloat(e.target.value))
+        })
+        $('tw-palette').addEventListener('change', function (e) {
+          if (engine) engine.setPalette(e.target.value)
+        })
+        window.addEventListener('keydown', function (e) {
+          if (e.key !== 'Escape' || !engine) return
+          if (engine.view === 'detail') engine.goBack()
+          else engine.deselect()
+        })
+
+        // ── Live architecture push: poll the `architecture` export; render on change (no reload) ──
+        var lastArch = null
+        async function pollArchitecture() {
+          if (!engine) return
+          try {
+            var raw = await window.atelier.context.get('architecture')
+            var val = typeof raw === 'string' ? raw : ''
+            if (!val || val === lastArch) return
+            var scene
+            try {
+              scene = JSON.parse(val)
+            } catch (e) {
+              return // partial / invalid JSON mid-write — wait for the next tick
+            }
+            lastArch = val
+            engine.loadScene(scene)
+          } catch (e) {
+            /* host not ready yet */
+          }
+        }
+        setInterval(pollArchitecture, 1000)
+
+        window.atelier.on('load', boot)
+        window.atelier.on('unload', teardown)
+        // If the runtime already fired 'load' before this script registered, boot on next tick.
+        if (window.Hologram)
+          setTimeout(function () {
+            if (!engine) boot()
+          }, 0)
+      })()
+    </script>
+  </body>
+</html>

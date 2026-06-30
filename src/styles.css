@@ -1289,6 +1289,144 @@ body {
   overflow-y: auto;
 }
 
+/* ---- Rich tool-call rendering (shell / diff / read / query) ---- */
+.block-tool summary {
+  list-style-position: inside;
+}
+/* One-line target preview (file / command) — truncates instead of wrapping. */
+.tool-detail {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+}
+.tool-detail.mono {
+  font-family: ui-monospace, monospace;
+  font-size: 0.92em;
+}
+.block-tool .tool-status {
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+.tool-body {
+  border-top: 1px solid var(--border);
+}
+.tool-pending {
+  padding: 8px 12px;
+  color: var(--faint);
+  font-size: 0.85em;
+}
+
+/* Bash: shell prompt + terminal output. */
+.shell-cmd {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85em;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.shell-prompt {
+  color: var(--ok);
+  flex: 0 0 auto;
+  user-select: none;
+}
+.shell-text {
+  color: var(--text);
+}
+.shell-desc {
+  padding: 0 12px 6px;
+  font-size: 11px;
+  color: var(--faint);
+}
+.shell-output {
+  margin: 0 12px 10px;
+  padding: 8px 10px;
+  background: var(--bg-2);
+  border-radius: 4px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85em;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow: auto;
+  color: var(--dim);
+}
+.shell-output.err {
+  color: var(--err);
+}
+
+/* Edit / Write: unified diff. */
+.diff {
+  margin: 0;
+  padding: 6px 0;
+  background: var(--bg-2);
+  font-family: ui-monospace, monospace;
+  font-size: 0.85em;
+  max-height: 380px;
+  overflow: auto;
+}
+.diff + .diff {
+  border-top: 1px solid var(--border);
+}
+.diff-line {
+  display: flex;
+  gap: 8px;
+  padding: 0 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.diff-sign {
+  flex: 0 0 auto;
+  width: 1ch;
+  user-select: none;
+  color: var(--faint);
+}
+.diff-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.diff-line.add {
+  background: color-mix(in srgb, var(--ok) 13%, transparent);
+}
+.diff-line.add .diff-sign {
+  color: var(--ok);
+}
+.diff-line.del {
+  background: color-mix(in srgb, var(--err) 13%, transparent);
+}
+.diff-line.del .diff-sign {
+  color: var(--err);
+}
+.diff-line.ctx {
+  color: var(--dim);
+}
+
+/* Grep / Glob: query line + matches. */
+.tool-query {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 0.85em;
+}
+.tool-query .q-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+.tool-query code {
+  font-family: ui-monospace, monospace;
+  color: var(--accent);
+}
+.tool-query .q-path {
+  color: var(--faint);
+}
+
 .error-note {
   color: var(--err);
   background: var(--surface-2);

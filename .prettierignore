@@ -5,3 +5,5 @@ coverage
 package-lock.json
 *.tsbuildinfo
 design_handoff_visual_refresh
+ai architecture visual design handoff
+plugins/hologram/hologram.bundle.js

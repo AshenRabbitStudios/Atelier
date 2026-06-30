@@ -32,7 +32,12 @@ export const ContextExportSchema = z.object({
   key: z.string().min(1),
   label: z.string().min(1),
   format: z.enum(['markdown', 'text', 'json']).default('text'),
-  maxTokens: z.number().int().positive().max(20000).default(1500)
+  maxTokens: z.number().int().positive().max(20000).default(1500),
+  // When false, the host still registers the agent's `set_<plugin>__<key>` write-tool (when pinned)
+  // but does NOT inject the value back into the agent's context each turn — a *push-only* export
+  // (e.g. a large scene the agent sends to a pane but doesn't want re-fed to itself). Default true
+  // preserves the original sync behavior. Injection is thus per-export, not all-or-nothing.
+  inject: z.boolean().default(true)
 })
 export type ContextExport = z.infer<typeof ContextExportSchema>
 

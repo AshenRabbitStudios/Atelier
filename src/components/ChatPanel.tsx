@@ -10,6 +10,7 @@ import {
 } from '@shared/events'
 import { initialState, reduce, type Block, type Message } from '../transcriptModel'
 import { Markdown } from './Markdown'
+import { ToolCallView } from './ToolCall'
 
 // Render only the last N messages by default; older ones load on demand. Keeps a huge
 // transcript from blocking the main thread (markdown + Shiki tokenize synchronously per block).
@@ -528,26 +529,7 @@ function BlockView({ block, live }: { block: Block; live: boolean }) {
     case 'thinking':
       return <ThinkingBlock text={block.text} live={live} />
     case 'tool_use':
-      return (
-        <details className="block-tool">
-          <summary>
-            <span className={`tool-name ${toolKindClass(block.name)}`}>{block.name}</span>
-            {block.result && (
-              <span className={`tool-status ${block.result.ok ? 'ok' : 'err'}`}>
-                {block.result.ok ? '✓' : '✕'}
-              </span>
-            )}
-          </summary>
-          <div className="tool-section-label">input</div>
-          <pre className="tool-io">{pretty(block.input)}</pre>
-          {block.result && (
-            <>
-              <div className="tool-section-label">result</div>
-              <pre className="tool-io">{pretty(block.result.output)}</pre>
-            </>
-          )}
-        </details>
-      )
+      return <ToolCallView block={block} />
   }
 }
 
@@ -695,12 +677,6 @@ function activityLabel(messages: Message[]): string {
 }
 
 // Tint a tool by kind (DESIGN_SYSTEM.md §5): read=accent, edit=warn, bash=ok.
-function toolKindClass(name: string): string {
-  if (/^(read|glob|grep|ls|webfetch|websearch)$/i.test(name)) return 'tool-kind-read'
-  if (/^(edit|write|notebookedit|multiedit)$/i.test(name)) return 'tool-kind-edit'
-  if (/^bash/i.test(name)) return 'tool-kind-bash'
-  return ''
-}
 
 // 'oauth' = subscription login, 'none' = no API key (ambient session). Both are safe.
 function isSubscription(source: string): boolean {

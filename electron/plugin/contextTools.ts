@@ -44,6 +44,7 @@ interface PinnedExport {
   label: string
   format: string
   maxTokens: number
+  inject: boolean
 }
 
 /** Every pinned export of every enabled plugin, resolved against the registry's manifests. */
@@ -62,7 +63,8 @@ function pinnedExports(
         key: ex.key,
         label: ex.label,
         format: ex.format,
-        maxTokens: ex.maxTokens
+        maxTokens: ex.maxTokens,
+        inject: ex.inject !== false
       })
     }
   }
@@ -80,6 +82,7 @@ export function buildContextBlock(
 ): string {
   const sections: string[] = []
   for (const ex of pinnedExports(registry, pluginState)) {
+    if (!ex.inject) continue // push-only export: write-tool is registered, but never injected back
     const cap = ex.maxTokens * APPROX_CHARS_PER_TOKEN
     const value = capValue(
       pluginStorageGet(conversationId, ex.pluginId, contextStorageKey(ex.key)),
@@ -149,8 +152,11 @@ export function buildContextMcpServers(
   const tools = pinnedExports(registry, pluginState).map((ex) =>
     tool(
       `set_${sanitize(ex.pluginId)}__${sanitize(ex.key)}`,
-      `Replace the full contents of your "${ex.label}". It is shown back to you as context ` +
-        `every turn — send the complete new ${ex.format} content (not a diff).`,
+      `Replace the full contents of your "${ex.label}". ` +
+        (ex.inject
+          ? `It is shown back to you as context every turn — `
+          : `It is pushed to its pane but NOT fed back to you — `) +
+        `send the complete new ${ex.format} content (not a diff).`,
       { content: z.string() },
       async (args: { content: string }) => {
         pluginStorageSet(conversationId, ex.pluginId, contextStorageKey(ex.key), args.content)

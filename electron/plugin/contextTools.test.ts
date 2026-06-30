@@ -20,7 +20,13 @@ import type { ConversationPluginState } from '../shared/plugins.js'
 
 let userData: string
 
-type Exports = { key: string; label: string; format: string; maxTokens: number }[]
+type Exports = {
+  key: string
+  label: string
+  format: string
+  maxTokens: number
+  inject?: boolean
+}[]
 function fakeRegistry(byId: Record<string, Exports>): PluginRegistry {
   return {
     get: (id: string) => (byId[id] ? { manifest: { contextExports: byId[id] } } : undefined)
@@ -96,6 +102,22 @@ describe('buildContextMcpServers', () => {
     const servers = buildContextMcpServers(REG, 'c1', { mm: pinned(['model']) }, () => {})
     expect(servers?.atelier_context).toBeDefined()
     expect(servers?.atelier_context.type).toBe('sdk')
+  })
+})
+
+describe('push-only exports (inject:false)', () => {
+  const PUSH = fakeRegistry({
+    viz: [
+      { key: 'architecture', label: 'Architecture', format: 'json', maxTokens: 8000, inject: false }
+    ]
+  })
+  it('registers the write-tool but never injects the value', () => {
+    pluginStorageSet('c1', 'viz', contextStorageKey('architecture'), '{"nodes":[]}')
+    // value is NOT fed back into the per-turn context block …
+    expect(buildContextBlock(PUSH, 'c1', { viz: pinned(['architecture']) })).toBe('')
+    // … but the agent still gets its set_ write-tool
+    const servers = buildContextMcpServers(PUSH, 'c1', { viz: pinned(['architecture']) }, () => {})
+    expect(servers?.atelier_context).toBeDefined()
   })
 })
 

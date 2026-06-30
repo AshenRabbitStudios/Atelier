@@ -1,0 +1,25 @@
+{
+  "id": "hologram",
+  "name": "Hologram",
+  "version": "0.1.0",
+  "icon": "M8 1.4 13.6 4.7v6.6L8 14.6 2.4 11.3V4.7zM2.4 4.7 8 8l5.6-3.3M8 8v6.6",
+  "kind": "panel",
+  "entry": "index.html",
+  "permissions": ["storage", "context"],
+  "defaultDock": "right",
+  "contextExports": [
+    {
+      "key": "selection",
+      "label": "Hologram selection",
+      "format": "json",
+      "maxTokens": 700
+    },
+    {
+      "key": "architecture",
+      "label": "Hologram architecture",
+      "format": "json",
+      "maxTokens": 16000,
+      "inject": false
+    }
+  ]
+}

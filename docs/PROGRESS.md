@@ -190,8 +190,8 @@ migration steps landed, each gate-green (typecheck/lint/format/39 tests/build) a
   re-skinned to tokens-only as the canonical plugin body.
 
 **Needs human spot-check** (GUI): launch `npm run dev` and verify in **all three themes** + both
-densities against the prototype (`design_handoff_visual_refresh/reference/Atelier Workspace.dc.html`)
-— chrome reads native, frameless window controls work, both usage meters show bar+%+reset, the
+densities against the normative spec (`docs/DESIGN_SYSTEM.md`; the interactive handoff prototype
+has been removed now that M1–M6 landed) — chrome reads native, frameless window controls work, both usage meters show bar+%+reset, the
 Panel shell looks right (watch for chat double-header / suppressed Dockview tabs), the plugin pane
 reskins with the theme, and Carbon/Daylight have no missing tokens.
 
@@ -266,3 +266,114 @@ Builds clean; 51 tests pass; prettier/lint clean.
 
 Needs human spot-check: open each pane, expand "Usage instructions", type a note → it persists and
 appears in the agent's context next turn, and the agent's set_ updates never wipe it.
+
+## 2026-06-29 — `hologram` plugin: Neural Hologram viewer port (increment 1 of N)
+
+A new sandboxed panel plugin `plugins/hologram/` that reproduces the handed-off Neural Hologram 3D
+viewer (dark "lab", wireframe glyph nodes, UnrealBloom glow, orbit, single-click inspect,
+double-click fly-in drill, Back). Built as the fidelity-locking first slice; data is still the two
+hardcoded demo architectures (transformer / RNN), NOT yet agent-fed.
+
+Done:
+
+- Vendored three@0.160.0 + OrbitControls/EffectComposer/RenderPass/UnrealBloomPass and Rajdhani +
+  IBM Plex Mono (woff2) offline. Engine bundled to one classic-script IIFE (`hologram.bundle.js`)
+  via `npm run build:hologram` (avoids unproven ES-module loading in the opaque-origin sandbox).
+- Engine ported ~verbatim into framework-free ESM (`hologram.js`): scene/bloom/particles/grid,
+  `renderScene`, all 13 glyph builders, sprite labels, flowing edge packets, raycast picking,
+  `flyTo`/`drillInto`/`goBack` tween. Cleaner disposal than the prototype (materials + sprite
+  textures freed). Data source is a `resolveModel`/`resolveDetail` seam (so the agent can feed it
+  later without touching the renderer); selection/view go out via `onSelect`/`onViewChange` hooks.
+- HUD ported as vanilla DOM (`index.html`): title/subtitle, Transformer/RNN switch, Back, inspector
+  panel, hints, corner brackets/scanline/vignette, loader, and a glow/auto-rotate/palette tweaks bar.
+- prettier clean; `plugins/` is eslint-ignored by design; bundle added to `.prettierignore`.
+
+Needs human spot-check (not verifiable headlessly — WebGL/visual):
+
+- Load `Hologram` from the plugin rail → renders the transformer tower, looks like the design
+  (cyan wireframe, bloom, scanlines, fonts Rajdhani + IBM Plex Mono).
+- Orbit/zoom; single-click a node → inspector fills; double-click → camera flies into internals;
+  Back flies out; Transformer/RNN switch; tweaks (glow/auto-rotate/palette) respond.
+- Confirm the classic-script bundle loads in the sandbox (if blank, check devtools for CSP/module
+  errors) and that the two woff2 families load (else inline as base64 — non-fatal, cosmetic).
+
+Left to finish the plugin (next increments):
+
+1. Generalize the schema for arbitrary AI systems: optional pos/size/color; auto-layout (layered
+   DAG / tower) for nodes without coordinates; a clean neutral default glyph + categorical color.
+2. Recursive N-level drill + breadcrumb; cache pushed levels in `storage` keyed by path; a
+   "not detailed yet" state when a level is missing.
+3. Push wiring: add the optional `inject` flag to `ContextExportSchema` (+ test); declare the
+   `architecture` export `inject:false`; pane reads `ctx:architecture` and renders; agent maintains
+   `docs/architecture/*.json` and pushes snapshots.
+
+## 2026-06-29 — Hologram step 2: archviz/2 schema, open registries, 3D auto-layout
+
+Generalized the viewer from the NN-only prototype to the extensible model in HOLOGRAM_DATA_MODEL.md,
+while keeping the transformer/RNN demos working. New modules in `plugins/hologram/`:
+
+- `glyphs.js` — open GLYPH registry (13 ported builders as pure `(node,gx)=>Group` fns) + a `neutral`
+  fallback slab + `KIND_DEFAULTS` (kind→glyph) + `CATEGORY_COLORS` (categorical palette).
+- `layout.js` — open LAYOUT registry emitting real [x,y,z]: `flow`, `layered` (3D Sugiyama, cycle-robust
+  ranking, fans a rank across two axes), `stack`, `grid`, `radial`, `manual`. Explicit `node.pos` wins.
+- `scene.js` — `normalizeScene(raw)`: fills glyph/color from kind, default sizes, runs the layout,
+  derives a 3/4 default camera + grid from bounds, and adapts the legacy archviz/1 demo (type→kind,
+  desc→summary) so it still renders.
+- `architectures.js` — added a coordinate-less `system` archviz/2 demo (agentic RAG) exercising
+  auto-layout + neutral glyphs + categorical color + detail panels + typed edges.
+
+Engine (`hologram.js`) refactored: glyph building delegates to the registry; `buildModel`/drill
+normalize raw scenes; edges generalized (kind/style → color/packet, dangling-edge tolerance);
+overview title/subtitle can come from the scene. Inspector (`index.html`) now renders descriptive
+**detail panels** (markdown/table/keyValue/list/code/json/chart) decoupled from the glyph, with a
+**System** button. Bundle rebuilt; esbuild + prettier clean.
+
+Needs human spot-check (WebGL/visual): load Hologram → Transformer/RNN unchanged; **System** renders
+an auto-laid-out 3D layered graph (depth used, neutral slabs in category colors, flowing edges);
+clicking a system node shows its detail panels (tables/lists/markdown). Auto-layout/readability of the
+layered view is the main thing to eyeball.
+
+Left: rest of step 3 (edge picking + inspect, expand/maximize big details); step 4 multi-select +
+`selection` export; step 5 recursion (drill+containment, path cache); step 6 `inject` flag + push.
+
+## 2026-06-29 — Hologram step 6: live architecture push + middle-mouse pan
+
+- Host: `ContextExportSchema` gained an optional `inject` flag (default true, backward-compatible).
+  `buildContextBlock` skips exports with `inject:false`; `buildContextMcpServers` still registers
+  their `set_<plugin>__<key>` write-tool. So an export can be **push-only** — the agent writes it and
+  the pane reads it, but its (large) value is never fed back into the agent's context. Test added
+  (`contextTools.test.ts`); full suite 52/52, typecheck clean.
+- Plugin: manifest declares an `architecture` export (`inject:false`, json, 16k). The pane polls
+  `context.get('architecture')` every 1s and calls the new `engine.loadScene(raw)` on change — so an
+  agent push re-renders **live, no reload**. Built-in demos still work (buttons override).
+- Pan: OrbitControls now `enablePan + screenSpacePanning`, **middle-drag = pan** (left=orbit,
+  right=pan, scroll=zoom). Left-button-only selection so middle/right drags don't deselect.
+
+Activation (one-time): restart the dev app (host change is main-process), reload the Hologram plugin
+(new bundle + manifest), and PIN "Hologram architecture" (gives the agent the push tool; inject:false
+keeps it out of context). Then the agent pushes a scene via `set_hologram__architecture` and it
+appears live. needs human spot-check: live push re-renders without reload; middle-drag pans.
+
+## 2026-06-29 — Hologram: recursion, edge inspection, maximize, off-centre pivot, structural glyphs
+
+The plugin is now feature-complete (build OK, typecheck OK, 52/52 tests, prettier clean).
+
+- **Recursion (step 5):** double-click an `expandable` node loads its child scene by `path`. Scenes
+  are cached by path (instant Back, breadcrumb in the subtitle). A drill into an un-authored path
+  shows "not detailed yet" and writes an `{action:'expand', path}` request to the `selection` export,
+  so the agent authors that level and pushes it (then the pane flies in). Built-in demos keep their
+  one-level legacy drill. `loadScene` keeps the camera on a same-id re-push, reframes on a new root.
+- **Edge inspection:** edge lines are now raycast-pickable (nodes take priority). Clicking an edge
+  shows the tensor flowing on it (shape / dtype / modality / role).
+- **Inspector maximize:** ⤢ button pops the panel large for long tables / descriptions.
+- **Off-centre pivot (user request):** OrbitControls' rotate is disabled and replaced with a custom
+  left-drag that tumbles around the **last-selected node's centre** without re-aiming — a panned,
+  off-centre architecture stays exactly where you put it. OrbitControls keeps pan (middle-drag) +
+  zoom; its target is parked on the camera's look-axis each frame so the two never fight.
+- **Structural glyphs:** added `volume` (conv/feature-map), `router`/`moe` (dispatch fan),
+  `cache`/`memory` (stacked slabs), `db`/`index` (drum) so non-NN scenes read structurally, not all
+  as neutral slabs.
+- **Host:** the push-tool description is now conditional on `inject` (push-only vs sync).
+
+needs human spot-check (WebGL): off-centre tumble feel; multi-level drill + breadcrumb + "ask me";
+edge click shows tensor; maximize; the live `transformer-encoder` push (mha1/mha2/ffn1/ffn2 expandable).

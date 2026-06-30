@@ -111,6 +111,20 @@ class InputQueue implements AsyncIterable<SDKUserMessage> {
 
 // Narrow views over the Anthropic streaming/content shapes we actually read.
 // Kept local + defensive so a minor SDK version drift can't crash the pump.
+// Models that accept adaptive thinking (claude-api reference). For these we force summarized
+// display so the chain of reasoning is visible — Opus 4.8/4.7/Fable default `display` to 'omitted'
+// (empty thinking blocks). Older models (Opus 4.1, Sonnet 4.5, Haiku 4.5) only take budget_tokens
+// thinking and would reject `type: 'adaptive'`, so for those we leave `thinking` unset and let the
+// claude_code preset's default stand. 'default'/unset resolves to the recommended (adaptive) model.
+const ADAPTIVE_THINKING_MODELS = new Set([
+  'default',
+  'claude-fable-5',
+  'claude-opus-4-8',
+  'claude-opus-4-7',
+  'claude-opus-4-6',
+  'claude-sonnet-4-6'
+])
+
 interface StreamEvent {
   type: string
   index?: number
@@ -278,7 +292,10 @@ class Session {
       // default `display` to 'omitted' — thinking still happens (and is billed the same), but the
       // blocks arrive empty, so a long reasoning phase shows only a bare "Thinking…" spinner. With
       // 'summarized' the chain of reasoning streams live into the (auto-expanding) thinking block.
-      thinking: { type: 'adaptive', display: 'summarized' },
+      // Only for adaptive-capable models; older models reject `type: 'adaptive'`.
+      ...(ADAPTIVE_THINKING_MODELS.has(this.model || 'default')
+        ? { thinking: { type: 'adaptive' as const, display: 'summarized' as const } }
+        : {}),
       // Load this project's CLAUDE.md (requires the claude_code preset too); append the standing
       // instruction (if any) after it so it shares the same cached system block.
       settingSources: ['project'],

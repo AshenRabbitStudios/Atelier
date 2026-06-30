@@ -27,6 +27,20 @@ export class LayoutService {
     })
   }
 
+  /** Re-open the Claude pane if it was closed (visual-only — the agent keeps running), else focus it. */
+  showClaude(instanceId: string): void {
+    const existing = this.api.getPanel('claude')
+    if (existing) {
+      existing.api.setActive()
+      return
+    }
+    this.addClaude(instanceId)
+  }
+
+  hasClaude(): boolean {
+    return Boolean(this.api.getPanel('claude'))
+  }
+
   /** Point the Claude pane at a different conversation (re-mounts with a fresh transcript). */
   setClaudeInstance(instanceId: string): void {
     const existing = this.api.getPanel('claude')

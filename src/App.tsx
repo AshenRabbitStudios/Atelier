@@ -25,6 +25,9 @@ export function App() {
   const [open, setOpen] = useState<AgentInstance[]>([]) // open conversations (tabs)
   const [all, setAll] = useState<ConversationSummary[]>([]) // every conversation (dropdown)
   const [activeId, setActiveId] = useState<string | null>(null)
+  // Whether the Claude chat pane is currently docked. Closing it is visual-only (the agent keeps
+  // running); the rail's Claude button re-opens it. Tracked off dock layout changes.
+  const [claudeOpen, setClaudeOpen] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [importing, setImporting] = useState<{ cwd: string; sessions: SessionSummary[] } | null>(
     null
@@ -165,7 +168,14 @@ export function App() {
       setTimeout(() => {
         restoringRef.current = false
       }, 0)
+      setClaudeOpen(ls.hasClaude())
     }
+  }
+
+  // Re-open the Claude chat pane (visual-only) if it was closed, else focus it.
+  const showClaude = () => {
+    const id = activeIdRef.current
+    if (id) layout.current?.showClaude(id)
   }
 
   useEffect(() => {
@@ -246,6 +256,7 @@ export function App() {
     // Persist this conversation's layout on any dock change (debounced; ignore the
     // programmatic changes we make while restoring).
     ls.onLayoutChange(() => {
+      setClaudeOpen(ls.hasClaude()) // keep the rail's Claude button in sync (open/closed)
       if (restoringRef.current) return
       const id = activeIdRef.current
       if (!id) return
@@ -363,6 +374,8 @@ export function App() {
           enabled={pluginState}
           onToggle={togglePlugin}
           onReload={reloadPlugin}
+          claudeOpen={claudeOpen}
+          onShowClaude={showClaude}
         />
         <div className="dock-host">
           {activeId ? (

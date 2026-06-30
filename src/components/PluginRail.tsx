@@ -11,7 +11,14 @@ interface Props {
   enabled: Record<string, ConversationPluginState>
   onToggle: (pluginId: string, enabled: boolean) => void
   onReload: (pluginId: string) => void
+  /** Whether the Claude chat pane is currently docked. */
+  claudeOpen: boolean
+  /** Re-open the Claude pane if it was closed (visual-only), else focus it. */
+  onShowClaude: () => void
 }
+
+// 16px speech-bubble glyph for the Claude pane re-open button.
+const CHAT_ICON = 'M2.5 3.5h11v7h-7l-3 2.5v-2.5h-1z'
 
 function PlugIcon({ d, active }: { d?: string; active: boolean }): React.JSX.Element {
   return (
@@ -25,12 +32,33 @@ function PlugIcon({ d, active }: { d?: string; active: boolean }): React.JSX.Ele
   )
 }
 
-export function PluginRail({ plugins, enabled, onToggle, onReload }: Props): React.JSX.Element {
+export function PluginRail({
+  plugins,
+  enabled,
+  onToggle,
+  onReload,
+  claudeOpen,
+  onShowClaude
+}: Props): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const broken = plugins.filter((p) => !p.valid).length
 
   return (
     <div className={`plugin-rail ${open ? 'open' : ''}`}>
+      <button
+        className={`rail-claude ${claudeOpen ? 'is-open' : ''}`}
+        title={claudeOpen ? 'Claude chat — focus' : 'Show Claude chat'}
+        onClick={onShowClaude}
+      >
+        <svg viewBox="0 0 16 16" width={16} height={16} style={{ display: 'block' }}>
+          <path
+            d={CHAT_ICON}
+            className="icon"
+            style={{ stroke: claudeOpen ? 'var(--accent)' : 'var(--faint)' }}
+          />
+        </svg>
+      </button>
+      <div className="rail-sep" />
       <button
         className="rail-toggle"
         title={open ? 'Collapse plugins' : `Plugins${broken ? ` (${broken} with errors)` : ''}`}

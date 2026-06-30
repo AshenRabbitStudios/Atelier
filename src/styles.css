@@ -389,7 +389,8 @@ body {
 .plugin-rail.open {
   width: 240px;
 }
-.rail-toggle {
+.rail-toggle,
+.rail-claude {
   width: 40px;
   height: 40px;
   display: grid;
@@ -399,9 +400,14 @@ body {
   color: var(--faint);
   cursor: pointer;
 }
-.rail-toggle:hover {
+.rail-toggle:hover,
+.rail-claude:hover {
   background: var(--surface-3);
   color: var(--text);
+}
+/* Subtle accent backing when the Claude pane is open. */
+.rail-claude.is-open {
+  background: var(--accent-weak);
 }
 .rail-sep {
   flex: 0 0 auto;

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Tool Plugin</title>
+    <script src="atelier-plugin://__runtime__/atelier.js"></script>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: var(--surface, #14171e);
+        color: var(--text, #e7eaf0);
+        font-family: var(--font, system-ui, sans-serif);
+      }
+
+      #root {
+        height: 100%;
+        overflow: auto;
+        padding: 14px 16px;
+      }
+
+      h1 {
+        margin: 0 0 4px;
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .lede {
+        margin: 0 0 14px;
+        font-size: 11px;
+        color: var(--dim, #8b97ae);
+        line-height: 1.5;
+      }
+
+      .tool {
+        border: 1px solid var(--border, #252b37);
+        border-radius: 6px;
+        padding: 9px 11px;
+        margin-bottom: 8px;
+        background: var(--bg-2, #0f1117);
+      }
+
+      .tool .name {
+        font-family: var(--mono, monospace);
+        font-size: 12px;
+        color: var(--accent, #5b9cff);
+      }
+
+      .tool .desc {
+        margin-top: 3px;
+        font-size: 11px;
+        color: var(--dim, #8b97ae);
+      }
+
+      .tool .args {
+        margin-top: 4px;
+        font-family: var(--mono, monospace);
+        font-size: 10px;
+        color: var(--faint, #5e6677);
+      }
+
+      .hint {
+        margin-top: 10px;
+        font-size: 10px;
+        font-style: italic;
+        color: var(--faint, #5e6677);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <h1>Tool Plugin — contributes agent tools</h1>
+      <p class="lede">
+        This is a <strong>kind: both</strong> plugin: a panel (this view) plus tools the agent can
+        call. The tools run in an isolated backend process, not in this sandbox or the app.
+      </p>
+      <div class="tool">
+        <div class="name">reverse_text(text)</div>
+        <div class="desc">Reverse the characters of a string.</div>
+        <div class="args">text: string</div>
+      </div>
+      <div class="tool">
+        <div class="name">sum_numbers(a, b)</div>
+        <div class="desc">Add two numbers.</div>
+        <div class="args">a: number, b: number</div>
+      </div>
+      <p class="hint">
+        Try: ask the agent to "use the reverse_text tool on 'hologram'". Disable the plugin and the
+        tools disappear on the next turn.
+      </p>
+    </div>
+  </body>
+</html>

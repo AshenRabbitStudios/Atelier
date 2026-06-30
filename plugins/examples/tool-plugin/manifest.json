@@ -1,0 +1,23 @@
+{
+  "id": "tool-plugin",
+  "name": "Tool Plugin",
+  "version": "0.1.0",
+  "icon": "M8 2.5l1.4 3 3.1.3-2.3 2.1.7 3-2.9-1.6-2.9 1.6.7-3-2.3-2.1 3.1-.3z",
+  "kind": "both",
+  "entry": "index.html",
+  "backend": "backend.cjs",
+  "permissions": ["tools"],
+  "defaultDock": "right",
+  "tools": [
+    {
+      "name": "reverse_text",
+      "description": "Reverse the characters of a string. Returns the reversed text.",
+      "inputSchema": { "text": "string" }
+    },
+    {
+      "name": "sum_numbers",
+      "description": "Add two numbers and return the sum.",
+      "inputSchema": { "a": "number", "b": "number" }
+    }
+  ]
+}

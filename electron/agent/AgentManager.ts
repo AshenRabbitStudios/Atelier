@@ -291,11 +291,17 @@ class Session {
   }
 
   /** Enable/disable a plugin for THIS conversation; auto-pin its context exports. Rebinds so the
-   *  SDK query picks up (or drops) the plugin's generated tools. */
-  setPluginEnabled(pluginId: string, enabled: boolean, exportKeys: string[]): void {
+   *  SDK query picks up (or drops) the plugin's generated tools — its context `set_` tools (when it
+   *  has exports) and/or its contributed backend tools (`hasTools`). */
+  setPluginEnabled(
+    pluginId: string,
+    enabled: boolean,
+    exportKeys: string[],
+    hasTools = false
+  ): void {
     this.pluginState[pluginId] = { enabled, pinnedExports: enabled ? exportKeys : [] }
     this.onChange?.()
-    if (exportKeys.length > 0) this.rebind() // tool set changed
+    if (exportKeys.length > 0 || hasTools) this.rebind() // tool set changed
   }
 
   pluginStateFor(): Record<string, ConversationPluginState> {
@@ -1305,9 +1311,10 @@ export class AgentManager {
     instanceId: string,
     pluginId: string,
     enabled: boolean,
-    exportKeys: string[]
+    exportKeys: string[],
+    hasTools = false
   ): void {
-    this.require(instanceId).setPluginEnabled(pluginId, enabled, exportKeys)
+    this.require(instanceId).setPluginEnabled(pluginId, enabled, exportKeys, hasTools)
   }
 
   pluginStateFor(instanceId: string): Record<string, ConversationPluginState> {

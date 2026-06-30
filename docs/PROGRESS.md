@@ -3,11 +3,12 @@
 ## Status
 
 - **Current phase:** P4 — Data channels + tool-contributing plugins + ambient Bash tap.
-  **Slices 1 (DataBus + live file tail) and 2 (ambient Bash tap) landed** (branch
-  `feat/p4-data-channels`, gate-green — see the P4 sections). S3 (tool-contributing plugins) is the
-  last slice. P0/P1/P3 are functionally complete (human spot-checks outstanding); P2 + P5 are
-  declared done by the user (2026-06-30). A renderer crash-recovery fix (ErrorBoundary +
-  render-process-gone auto-reload) landed on main (6774568, CI green) and is merged into this branch.
+  **All three slices landed** on branch `feat/p4-data-channels` (gate-green — see the P4 sections):
+  S1 DataBus + live file tail, S2 ambient Bash tap, S3 tool-contributing plugins. P4 is
+  **code-complete; awaiting the GUI spot-check pass + merge to main.** P0/P1/P3 are functionally
+  complete (human spot-checks outstanding); P2 + P5 are declared done by the user (2026-06-30). A
+  renderer crash-recovery fix (ErrorBoundary + render-process-gone auto-reload) landed on main
+  (6774568, CI green) and is merged into this branch.
 - **Verified headlessly (2026-06-28):** `npm run typecheck` clean (both bundles). Earlier:
   `npm run build` clean; `npm run dev` launches Electron (4 processes, no errors); a one-shot
   SDK probe confirmed subscription auth (apiKeySource `none`, no API key) and token-by-token
@@ -41,6 +42,35 @@
       adds the single Claude pane today).
 - [ ] Font-scale control on the chat panel — not yet.
       _(Full P2 begins after P1's rewind item closes.)_
+
+## P4 — Data channels (slice 3: tool-contributing plugins) — landed 2026-06-30
+
+A `kind:"both"` plugin contributes agent tools backed by an isolated child process. Gate green
+(typecheck node+web, 79 tests, lint, format, build). Branch `feat/p4-data-channels`.
+
+- `electron/plugin/PluginBackendManager.ts` — runs each plugin's `backend` as one Electron
+  `utilityProcess` (lazy on first call, killed on disable/reload/quit; never in-process — CLAUDE.md).
+  Request/response correlation by id, 30s timeout, child-exit rejects pending. **Transport-injected**
+  so the broker is unit-tested without Electron (7 tests); the real `utilityProcess` transport is in
+  main. Protocol: parent posts `{id,tool,input}`, child replies `{id,result|error}` via
+  `process.parentPort`.
+- `electron/plugin/pluginTools.ts` — `jsonSchemaToZodShape` (manifest descriptor → Zod, since
+  manifests can't carry Zod) + `buildPluginTools`/`buildPluginToolServers` (each enabled tool-plugin's
+  tools become SDK MCP tools whose handler forwards to the backend; merged into `mcpServers` as
+  `atelier_plugins`). 6 tests.
+- `AgentManager.setPluginEnabled` now also rebinds when a plugin `hasTools` (not only when it has
+  context exports) — otherwise a tool-only plugin's tools never appeared. main.ts computes `hasTools`,
+  stops the backend on disable, `stopAll` on reload/quit.
+- `plugins/examples/tool-plugin/` — `kind:"both"`: a panel + `reverse_text`/`sum_numbers` tools with a
+  `backend.cjs`.
+
+**Needs human spot-check** (GUI + live agent turn, not headlessly verifiable — this is the
+least-verifiable slice, all of it needs a real Electron run):
+
+- Enable `tool-plugin`, ask the agent to "use the reverse_text tool on 'hologram'" → the tool is
+  called, the backend (child process) returns `margoloh`, the result comes back in the turn.
+- Disable the plugin → on the next turn the tool is gone (and its backend process is killed).
+- Reload the plugin after editing `backend.cjs` → the next call runs the new code (fresh child).
 
 ## P4 — Data channels (slice 2: ambient Bash tap) — landed 2026-06-30
 

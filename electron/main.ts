@@ -1,7 +1,7 @@
 import { join, dirname, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { existsSync } from 'node:fs'
-import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, shell, utilityProcess } from 'electron'
 import { z } from 'zod'
 import { AgentManager } from './agent/AgentManager.js'
 import {
@@ -38,6 +38,8 @@ import {
 import type { DiscoveredPlugin } from './shared/plugins.js'
 import { PluginRegistry } from './plugin/PluginRegistry.js'
 import { DataBus, createFileSource } from './plugin/DataBus.js'
+import { PluginBackendManager, type BackendTransport } from './plugin/PluginBackendManager.js'
+import { buildPluginToolServers } from './plugin/pluginTools.js'
 import { registerPluginScheme, handlePluginProtocol } from './plugin/protocol.js'
 import { pluginStorageSet, pluginStorageKeys } from './plugin/pluginStorage.js'
 import {
@@ -111,18 +113,47 @@ function sendPlugins(list: DiscoveredPlugin[]): void {
 const PLUGINS_DIR = process.env.ATELIER_PLUGINS_DIR ?? join(process.cwd(), 'plugins')
 const plugins = new PluginRegistry(PLUGINS_DIR, sendPlugins)
 
+// P4 S3: plugin-contributed tool backends run as isolated Electron utility processes (never in
+// main — CLAUDE.md). One child per plugin, spawned on first tool call; the in-process MCP tool just
+// forwards to it. `serviceName` must be [a-zA-Z0-9._-]; plugin ids already match.
+function utilityBackendTransport(backendPath: string, pluginId: string): BackendTransport {
+  const child = utilityProcess.fork(backendPath, [], { serviceName: `atelier-plugin-${pluginId}` })
+  return {
+    postMessage: (msg) => child.postMessage(msg),
+    onMessage: (cb) => {
+      child.on('message', (m: unknown) => cb(m))
+    },
+    onExit: (cb) => {
+      child.on('exit', () => cb())
+    },
+    kill: () => {
+      child.kill()
+    }
+  }
+}
+const backends = new PluginBackendManager(utilityBackendTransport)
+
 // Context-document plugins (docs/CONTEXT_SYSTEM.md): inject each conversation's pinned exports as
 // per-turn context, and register one update tool per export. Both resolve against the registry.
 const agents = new AgentManager(
   sendToRenderer,
   (conversationId, pluginState) => buildContextBlock(plugins, conversationId, pluginState),
-  (conversationId, pluginState) =>
-    buildContextMcpServers(plugins, conversationId, pluginState, (pluginId, key) => {
+  // mcpServers: the context update tools + the plugin-contributed backend tools, merged.
+  (conversationId, pluginState) => {
+    const ctx = buildContextMcpServers(plugins, conversationId, pluginState, (pluginId, key) => {
       // The agent rewrote a pinned export — push it so the owning pane refreshes (no polling).
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send(IPC.contextChanged, { conversationId, pluginId, key })
       }
-    }),
+    })
+    const toolServers = buildPluginToolServers(
+      plugins,
+      pluginState,
+      (pluginId, backendPath, t, i) => backends.invoke(pluginId, backendPath, t, i)
+    )
+    if (!ctx && !toolServers) return undefined
+    return { ...(ctx ?? {}), ...(toolServers ?? {}) }
+  },
   (conversationId, pluginState) => buildSystemInstruction(plugins, conversationId, pluginState),
   // Ambient Bash tap → DataBus. Forward-referenced (dataBus is built just below, since it needs
   // agents.cwdFor); the closure only runs later when a Bash hook fires, by which point it's set.
@@ -380,13 +411,22 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.pluginsSetEnabled, (_e, payload) => {
     const { conversationId, pluginId, enabled } = SetPluginEnabledSchema.parse(payload)
+    const manifest = plugins.get(pluginId)?.manifest
     // Auto-pin the plugin's context exports on enable (docs/CONTEXT_SYSTEM.md).
-    const exportKeys = (plugins.get(pluginId)?.manifest?.contextExports ?? []).map((e) => e.key)
-    agents.setPluginEnabled(conversationId, pluginId, enabled, exportKeys)
+    const exportKeys = (manifest?.contextExports ?? []).map((e) => e.key)
+    // A plugin contributes backend tools → enabling/disabling changes the tool set, so rebind.
+    const hasTools = !!(
+      manifest?.backend &&
+      manifest.tools.length > 0 &&
+      manifest.permissions.includes('tools')
+    )
+    if (!enabled && hasTools) backends.stop(pluginId) // free the child process on disable
+    agents.setPluginEnabled(conversationId, pluginId, enabled, exportKeys, hasTools)
   })
 
   ipcMain.handle(IPC.pluginsReload, (_e, payload) => {
     PluginIdSchema.parse(payload)
+    backends.stopAll() // a reloaded plugin's backend must re-spawn from the fresh module, never reuse
     plugins.scan() // re-read manifests; the renderer remounts affected panes
     sendPlugins(plugins.list())
   })
@@ -449,9 +489,11 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   void agents.closeAll()
   plugins.stop()
+  backends.stopAll() // kill any plugin backend child processes
   if (process.platform !== 'darwin') app.quit()
 })
 
 app.on('before-quit', () => {
   void agents.closeAll()
+  backends.stopAll()
 })

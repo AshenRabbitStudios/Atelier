@@ -1,6 +1,7 @@
 import { memo } from 'react'
 import type { Block } from '../transcriptModel'
 import { CodeBlock } from './CodeBlock'
+import { Markdown } from './Markdown'
 
 // Renders a tool_use block the way the underlying action reads: Bash as a shell
 // prompt + terminal output, Edit/Write as a diff, Read as the highlighted file,
@@ -50,6 +51,17 @@ export function toolKindClass(name: string): string {
   return ''
 }
 
+// Context-document write tools auto-registered on the `atelier_context` MCP server
+// (contextTools.ts): set_<plugin>__<key>, surfaced to the model as
+// mcp__atelier_context__set_<plugin>__<key>, with the full new document in { content }.
+function isContextWrite(name: string): boolean {
+  return /atelier_context__set_/i.test(name) || /^set_[a-z0-9_]+__[a-z0-9_]+$/i.test(name)
+}
+function ctxKeyName(name: string): string {
+  const last = name.split('__').pop() ?? name
+  return last.replace(/_/g, ' ')
+}
+
 function baseName(p: string): string {
   const parts = p.replace(/[\\/]+$/, '').split(/[\\/]/)
   return parts[parts.length - 1] || p
@@ -94,6 +106,7 @@ function summary(name: string, input: unknown): { label: string; detail: string;
   if (/^glob$/.test(n)) return { label: 'Glob', detail: str(i.pattern), mono: true }
   if (/^(webfetch|websearch)$/.test(n))
     return { label: name, detail: str(i.url) || str(i.query), mono: false }
+  if (isContextWrite(name)) return { label: 'Context', detail: ctxKeyName(name), mono: false }
   return { label: name, detail: '', mono: false }
 }
 
@@ -225,6 +238,24 @@ function ToolBody({ block }: { block: ToolUse }) {
           {str(i.path) && <span className="q-path">in {str(i.path)}</span>}
         </div>
         {block.result && <pre className="tool-io">{out || '(no matches)'}</pre>}
+      </div>
+    )
+  }
+
+  if (isContextWrite(block.name)) {
+    const c = str(i.content)
+    const looksJson = /^\s*[[{]/.test(c)
+    return (
+      <div className="tool-body">
+        <div className="ctx-write">
+          {looksJson ? (
+            <CodeBlock code={c} lang="json" />
+          ) : (
+            <div className="block-text">
+              <Markdown text={c} />
+            </div>
+          )}
+        </div>
       </div>
     )
   }

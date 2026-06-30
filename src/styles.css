@@ -1319,6 +1319,13 @@ body {
   font-size: 0.85em;
 }
 
+/* Context-document write: render the new doc (markdown, or JSON when pushed). */
+.ctx-write {
+  padding: 4px 12px 8px;
+  max-height: 360px;
+  overflow: auto;
+}
+
 /* Bash: shell prompt + terminal output. */
 .shell-cmd {
   display: flex;

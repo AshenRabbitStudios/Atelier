@@ -876,7 +876,7 @@
             /* host not ready yet */
           }
         }
-        setInterval(pollArchitecture, 1000)
+        setInterval(pollArchitecture, 600)
 
         // Agent → pane control: poll the `command` export (e.g. focus a node). Unhandled commands
         // (scene still loading / mid-animation) stay un-consumed so they retry on the next tick.
@@ -899,7 +899,7 @@
             /* host not ready */
           }
         }
-        setInterval(pollCommand, 700)
+        setInterval(pollCommand, 250)
 
         window.atelier.on('load', boot)
         window.atelier.on('unload', teardown)

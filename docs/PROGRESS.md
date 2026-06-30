@@ -377,3 +377,15 @@ The plugin is now feature-complete (build OK, typecheck OK, 52/52 tests, prettie
 
 needs human spot-check (WebGL): off-centre tumble feel; multi-level drill + breadcrumb + "ask me";
 edge click shows tensor; maximize; the live `transformer-encoder` push (mha1/mha2/ffn1/ffn2 expandable).
+
+## 2026-06-30 — Hologram: agent→pane focus/command channel
+
+Completed the bidirectional loop. A new `command` context export (`inject:false`) lets the agent
+drive the pane: the pane polls it (700ms) and calls `engine.focusNode({ nodeId, path? })`, which
+optionally switches to the node's cached path, highlights/selects the node, and flies the camera to
+frame it. Unhandled commands (mid-tween, or the level not pushed yet) are left un-consumed so they
+retry — so "push a scene, then focus a node in it" works even with the 1s poll. Build + manifest +
+prettier clean. needs human spot-check after reload + pinning "Hologram command".
+
+Bidirectional control now: pane→agent = `selection` (what the user references) + drill `request`;
+agent→pane = `architecture` (the scene) + `command` (focus/highlight a node).

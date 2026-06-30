@@ -274,6 +274,11 @@ class Session {
     return {
       cwd: this.cwd,
       includePartialMessages: true,
+      // Stream a readable summary of the model's reasoning into the thinking block. Opus 4.8/4.7
+      // default `display` to 'omitted' — thinking still happens (and is billed the same), but the
+      // blocks arrive empty, so a long reasoning phase shows only a bare "Thinking…" spinner. With
+      // 'summarized' the chain of reasoning streams live into the (auto-expanding) thinking block.
+      thinking: { type: 'adaptive', display: 'summarized' },
       // Load this project's CLAUDE.md (requires the claude_code preset too); append the standing
       // instruction (if any) after it so it shares the same cached system block.
       settingSources: ['project'],

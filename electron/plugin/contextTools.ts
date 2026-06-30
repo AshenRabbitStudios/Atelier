@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { z } from 'zod'
 import { tool, createSdkMcpServer, type Options } from '@anthropic-ai/claude-agent-sdk'
 import type { PluginRegistry } from './PluginRegistry.js'
@@ -25,6 +27,40 @@ export function contextStorageKey(exportKey: string): string {
  */
 export function guideStorageKey(exportKey: string): string {
   return `guide:${exportKey}`
+}
+
+// Packaged per-plugin defaults: a `defaults.json` (storageKey → value) shipped in the plugin folder
+// seeds a key the conversation has never written. Lets a plugin ship with starter content (its usage
+// guides, a standing instruction, …) that every fresh conversation picks up. Cached per dir.
+const defaultsCache = new Map<string, Record<string, unknown>>()
+function pluginDefaults(dir: string): Record<string, unknown> {
+  let d = defaultsCache.get(dir)
+  if (!d) {
+    try {
+      d = JSON.parse(readFileSync(join(dir, 'defaults.json'), 'utf8')) as Record<string, unknown>
+    } catch {
+      d = {}
+    }
+    defaultsCache.set(dir, d)
+  }
+  return d
+}
+
+/**
+ * The stored value for (conversation, plugin, storageKey), or the plugin's packaged default when the
+ * key has *never* been written (storage returns null). An explicit empty string is left as-is — a
+ * deliberate clear is respected and does not snap back to the default.
+ */
+export function pluginValueOrDefault(
+  registry: PluginRegistry,
+  conversationId: string,
+  pluginId: string,
+  storageKey: string
+): unknown {
+  const stored = pluginStorageGet(conversationId, pluginId, storageKey)
+  if (stored !== null) return stored
+  const dir = registry.get(pluginId)?.dir
+  return dir ? (pluginDefaults(dir)[storageKey] ?? null) : null
 }
 
 /** Trim a stored value and cap it to the export's token budget (chars ≈ tokens × 4). */
@@ -87,13 +123,13 @@ export function buildContextBlock(
     if (!ex.inject) continue // push-only export: write-tool is registered, but never injected back
     const cap = ex.maxTokens * APPROX_CHARS_PER_TOKEN
     const value = capValue(
-      pluginStorageGet(conversationId, ex.pluginId, contextStorageKey(ex.key)),
+      pluginValueOrDefault(registry, conversationId, ex.pluginId, contextStorageKey(ex.key)),
       cap
     )
     // The author's usage guide for this section: injected alongside the value, but the agent
     // never edits it (separate storage key; its set_ tool only writes the `ctx:` value).
     const guide = capValue(
-      pluginStorageGet(conversationId, ex.pluginId, guideStorageKey(ex.key)),
+      pluginValueOrDefault(registry, conversationId, ex.pluginId, guideStorageKey(ex.key)),
       cap
     )
     if (!value && !guide) continue
@@ -131,7 +167,7 @@ export function buildSystemInstruction(
     if (!st.enabled) continue
     const si = registry.get(pluginId)?.manifest?.systemInstruction
     if (!si) continue
-    const raw = pluginStorageGet(conversationId, pluginId, contextStorageKey(si.key))
+    const raw = pluginValueOrDefault(registry, conversationId, pluginId, contextStorageKey(si.key))
     const value = typeof raw === 'string' ? raw.trim() : ''
     if (!value) continue
     const cap = si.maxTokens * APPROX_CHARS_PER_TOKEN

@@ -36,12 +36,13 @@ import {
 import type { DiscoveredPlugin } from './shared/plugins.js'
 import { PluginRegistry } from './plugin/PluginRegistry.js'
 import { registerPluginScheme, handlePluginProtocol } from './plugin/protocol.js'
-import { pluginStorageGet, pluginStorageSet, pluginStorageKeys } from './plugin/pluginStorage.js'
+import { pluginStorageSet, pluginStorageKeys } from './plugin/pluginStorage.js'
 import {
   buildContextBlock,
   buildContextMcpServers,
   buildSystemInstruction,
-  contextStorageKey
+  contextStorageKey,
+  pluginValueOrDefault
 } from './plugin/contextTools.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -344,7 +345,7 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.pluginStorageGet, (_e, payload) => {
     const { conversationId, pluginId, key } = PluginStorageGetSchema.parse(payload)
-    return pluginStorageGet(conversationId, pluginId, key)
+    return pluginValueOrDefault(plugins, conversationId, pluginId, key)
   })
 
   ipcMain.handle(IPC.pluginStorageSet, (_e, payload) => {
@@ -359,7 +360,7 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.pluginContextGet, (_e, payload) => {
     const { conversationId, pluginId, key } = PluginContextGetSchema.parse(payload)
-    const v = pluginStorageGet(conversationId, pluginId, contextStorageKey(key))
+    const v = pluginValueOrDefault(plugins, conversationId, pluginId, contextStorageKey(key))
     return typeof v === 'string' ? v : ''
   })
 

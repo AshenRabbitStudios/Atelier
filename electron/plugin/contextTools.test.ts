@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -12,7 +12,8 @@ import {
   buildContextMcpServers,
   buildSystemInstruction,
   contextStorageKey,
-  guideStorageKey
+  guideStorageKey,
+  pluginValueOrDefault
 } from './contextTools.js'
 import { pluginStorageSet } from './pluginStorage.js'
 import type { PluginRegistry } from './PluginRegistry.js'
@@ -156,5 +157,31 @@ describe('buildSystemInstruction', () => {
     } as unknown as PluginRegistry
     pluginStorageSet('c1', 'instr', contextStorageKey('instruction'), 'x'.repeat(200))
     expect(buildSystemInstruction(big, 'c1', { instr: on() })).toContain('…[truncated]')
+  })
+})
+
+describe('pluginValueOrDefault', () => {
+  const dirRegistry = (id: string, dir: string): PluginRegistry =>
+    ({ get: (x: string) => (x === id ? { dir } : undefined) }) as unknown as PluginRegistry
+
+  it('uses the packaged default only until the key is written; respects an explicit clear', () => {
+    const dir = join(userData, 'plug')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(
+      join(dir, 'defaults.json'),
+      JSON.stringify({ 'ctx:instruction': 'DEFAULT', 'guide:model': 'GUIDE' })
+    )
+    const reg = dirRegistry('p', dir)
+    // Never written → packaged default.
+    expect(pluginValueOrDefault(reg, 'cX', 'p', contextStorageKey('instruction'))).toBe('DEFAULT')
+    expect(pluginValueOrDefault(reg, 'cX', 'p', guideStorageKey('model'))).toBe('GUIDE')
+    // Key absent from defaults → null (no default to apply).
+    expect(pluginValueOrDefault(reg, 'cX', 'p', contextStorageKey('nope'))).toBe(null)
+    // A written value wins over the default.
+    pluginStorageSet('cX', 'p', contextStorageKey('instruction'), 'MINE')
+    expect(pluginValueOrDefault(reg, 'cX', 'p', contextStorageKey('instruction'))).toBe('MINE')
+    // An explicit empty string is respected — it does NOT snap back to the default.
+    pluginStorageSet('cX', 'p', guideStorageKey('model'), '')
+    expect(pluginValueOrDefault(reg, 'cX', 'p', guideStorageKey('model'))).toBe('')
   })
 })

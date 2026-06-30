@@ -467,7 +467,7 @@ export class Hologram {
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     ctx.shadowColor = color
-    ctx.shadowBlur = 14
+    ctx.shadowBlur = 2.8 // label glow only — dialed to ~20%; node/edge glow + bloom untouched
     ctx.fillStyle = color
     ctx.fillText(text, 256, 64)
     const tex = new THREE.CanvasTexture(c)

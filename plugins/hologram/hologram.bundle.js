@@ -33049,7 +33049,7 @@
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.shadowColor = color;
-      ctx.shadowBlur = 14;
+      ctx.shadowBlur = 2.8;
       ctx.fillStyle = color;
       ctx.fillText(text, 256, 64);
       const tex = new CanvasTexture(c);

@@ -1,8 +1,8 @@
 // hologram.js — the framework-free 3D engine, ported from the Neural Hologram prototype. Owns the
 // Three.js scene, picking, and the drill-down camera tween. It knows nothing about the agent or HUD:
-// data comes in through `resolveModel` / `resolveDetail` (raw scenes, normalized here via
-// scene.js), glyphs come from the open registry (glyphs.js), and selection / view changes go out
-// through `onSelect` / `onViewChange` hooks.
+// scenes come in through `loadScene` (raw ArchScenes, normalized here via scene.js) — the one door for
+// both demos (Library picker) and agent-pushed architectures; glyphs come from the open registry
+// (glyphs.js); selection / view / drill-request changes go out through the `on*` hooks.
 //
 // three + addons are bundled into hologram.bundle.js (esbuild, IIFE) so the pane loads them as a
 // single classic <script> — the proven path for this sandboxed/opaque-origin iframe.
@@ -20,22 +20,15 @@ const PALETTES = {
   'Matrix Green': { primary: '#38f5a8', grid: '#0e4d33' }
 }
 
-const OVERVIEW_META = {
-  transformer: {
-    title: 'Transformer Encoder',
-    subtitle: 'Self-attention · stacked encoder blocks · d_model 512'
-  },
-  rnn: { title: 'Recurrent Network', subtitle: 'Unrolled through time · tanh hidden cell' }
-}
-
 export class Hologram {
   /**
    * @param {HTMLElement} container
    * @param {object} opts
-   *   glow, autoRotate, palette, model — initial tweaks/state
-   *   resolveModel(key, primaryHex) -> raw ArchScene
-   *   resolveDetail(node, primaryHex) -> raw ArchScene | null   (null = internals not available)
-   *   onSelect(node|null), onViewChange({view,title,subtitle}), onReady()
+   *   glow, autoRotate, palette — initial tweaks/state
+   *   onSelect(node[]), onViewChange({view,title,subtitle,...}), onRequestExpand({path,label}),
+   *   onEdge(meta), onReady()
+   * Scenes are DATA: every scene — demo or real — enters through `loadScene` (the one door),
+   * driven by the HUD Library picker or the agent's architecture channel. No built-in models.
    */
   constructor(container, opts) {
     this.el = container
@@ -43,20 +36,17 @@ export class Hologram {
     this.glow = opts.glow ?? 0.9
     this.autoRotate = opts.autoRotate !== false
     this.palette = opts.palette || 'Arc Reactor'
-    this.model = opts.model || 'transformer'
+    this.model = null // id of the loaded root scene (null until the first loadScene)
     this.view = 'overview'
     this.packets = []
     this.pickables = []
     this.selected = []
     this.tween = null
     this._lastData = null
-    this._detailMeta = null
-    this._detailData = null
-    this._lastDrillNode = null
-    this._pushed = false // true once an agent-pushed (archviz/2) scene is showing
-    this.scenes = {} // pathKey → { scene, path, label } cache for pushed-scene recursion
+    this._pushed = false // true once a scene is loaded and showing
+    this.scenes = {} // pathKey → { scene, path, label } cache for scene recursion
     this.crumbs = [] // breadcrumb of pathKeys, root → current
-    this._pending = null // a drill awaiting an agent push: { key, path, label }
+    this._pending = null // a drill awaiting a scene load: { key, path, label }
     this._disposed = false
   }
 
@@ -153,8 +143,12 @@ export class Hologram {
     this.grid.material.opacity = 0.5
     scene.add(this.grid)
 
-    this.buildModel(this.model)
-    this.opts.onViewChange?.({ view: 'overview', ...this.overviewMeta() })
+    // Boot empty — scenes arrive through loadScene (the Library picker or the agent's architecture
+    // channel). Park the camera at a sensible default; the first loadScene reframes.
+    this.camera.position.set(0, 3, 30)
+    this.controls.target.set(0, 0, 0)
+    this.controls.update()
+    this.opts.onViewChange?.({ view: 'empty', title: 'Hologram', subtitle: '' })
 
     // interaction: click vs drag, double-click to drill
     const dom = renderer.domElement
@@ -186,7 +180,7 @@ export class Hologram {
       down = null
     }
     this._onDbl = (e) => {
-      if (this.tween) return // multi-level cap is enforced in drillInto (legacy demos only)
+      if (this.tween) return
       const m = this.pickAt(e)
       if (m) this.drillInto(m.userData.node)
     }
@@ -235,14 +229,6 @@ export class Hologram {
     this.opts.onReady?.()
   }
 
-  overviewMeta() {
-    const m = OVERVIEW_META[this.model] || {}
-    return {
-      title: this._lastData?.title || m.title || this.model,
-      subtitle: this._lastData?.subtitle || m.subtitle || ''
-    }
-  }
-
   onResize() {
     const el = this.el
     if (!el || !this.renderer) return
@@ -252,13 +238,6 @@ export class Hologram {
     this.camera.updateProjectionMatrix()
     this.renderer.setSize(W, H)
     this.composer.setSize(W, H)
-  }
-
-  // ---------- build a scene into modelGroup ----------
-  buildModel(key, keepCam) {
-    const d = normalizeScene(this.opts.resolveModel(key, this.primary()))
-    this._lastData = d
-    this.renderScene(d, keepCam)
   }
 
   renderScene(data, keepCam) {
@@ -472,21 +451,9 @@ export class Hologram {
   }
 
   // ---------- public commands (HUD / agent drive these) ----------
-  setModel(key) {
-    if (key === this.model && !this._pushed) return
-    this._detailMeta = null
-    this._lastDrillNode = null
-    this._pushed = false // leaving any pushed scene for a built-in demo
-    this.crumbs = []
-    this._pending = null
-    this.model = key
-    this.view = 'overview'
-    this.deselect()
-    this.buildModel(key)
-    this.opts.onViewChange?.({ view: 'overview', ...this.overviewMeta() })
-  }
-  // Render an agent-pushed scene (archviz/2) — the live `architecture` channel. Scenes are cached by
-  // their `path` so drill/Back navigate locally; pushing a child fulfils a pending drill request.
+  // Load a scene — the ONE door. Same path for a demo from the Library picker and a scene from the
+  // agent's `architecture` channel. Scenes are cached by their `path` so drill/Back navigate locally;
+  // loading a child fulfils a pending drill request.
   loadScene(raw) {
     const path = Array.isArray(raw.path) && raw.path.length ? raw.path : [raw.id || 'architecture']
     const key = path.join('/')
@@ -624,15 +591,6 @@ export class Hologram {
     if (this._pushed) {
       const cur = this.scenes[this.crumbs[this.crumbs.length - 1]]
       if (cur) this.renderScene(cur.scene, true)
-    } else if (this.view === 'detail' && this._lastDrillNode) {
-      const raw = this.opts.resolveDetail(this._lastDrillNode, this.primary())
-      if (raw) {
-        const d = normalizeScene(raw)
-        this._detailData = d
-        this.renderScene(d, true)
-      }
-    } else {
-      this.buildModel(this.model, true)
     }
   }
 
@@ -689,72 +647,15 @@ export class Hologram {
     }
   }
   drillInto(node) {
-    if (this.tween) return
-    if (this._pushed) return this._drillPushed(node)
-    if (this.view === 'detail') return // built-in demos cap drill at one level
-    this.deselect()
-    const np = new THREE.Vector3(node.pos[0], node.pos[1], node.pos[2])
-    const dir = this.camera.position.clone().sub(np).normalize()
-    const close = np.clone().add(dir.multiplyScalar((node.size[0] || 3) * 0.65 + 2.2))
-    this.flyTo(close, np, 620, () => {
-      const raw = this.opts.resolveDetail(node, this.primary())
-      if (!raw) {
-        // No internals available — return to overview framing and let the HUD prompt the user.
-        this.opts.onViewChange?.({ view: 'overview', ...this.overviewMeta(), missing: node.label })
-        this.flyTo(
-          new THREE.Vector3(this._lastData.cam[0], this._lastData.cam[1], this._lastData.cam[2]),
-          new THREE.Vector3(
-            this._lastData.target[0],
-            this._lastData.target[1],
-            this._lastData.target[2]
-          ),
-          520,
-          () => {
-            this.controls.autoRotate = this.autoRotate
-          }
-        )
-        return
-      }
-      const d = normalizeScene(raw)
-      this._lastDrillNode = node
-      this._detailMeta = { title: d.title, subtitle: d.subtitle }
-      this._detailData = d
-      this.renderScene(d, true)
-      this.view = 'detail'
-      this.opts.onSelect?.(null)
-      this.opts.onViewChange?.({ view: 'detail', title: d.title, subtitle: d.subtitle })
-      this.flyTo(
-        new THREE.Vector3(d.cam[0], d.cam[1], d.cam[2]),
-        new THREE.Vector3(d.target[0], d.target[1], d.target[2]),
-        720,
-        () => {
-          this.controls.autoRotate = this.autoRotate
-        }
-      )
-    })
+    if (this.tween || !this._pushed) return
+    this._drillPushed(node)
   }
   goBack() {
     if (this.tween) return
-    if (this._pushed) return this._backPushed()
-    this.deselect()
-    this._detailMeta = null
-    this._lastDrillNode = null
-    this.buildModel(this.model, true)
-    this.view = 'overview'
-    this.opts.onSelect?.(null)
-    this.opts.onViewChange?.({ view: 'overview', ...this.overviewMeta() })
-    const d = this._lastData
-    this.flyTo(
-      new THREE.Vector3(d.cam[0], d.cam[1], d.cam[2]),
-      new THREE.Vector3(d.target[0], d.target[1], d.target[2]),
-      720,
-      () => {
-        this.controls.autoRotate = this.autoRotate
-      }
-    )
+    this._backPushed()
   }
 
-  // ---------- pushed-scene recursion (drill by path, cached, lazy) ----------
+  // ---------- scene recursion (drill by path, cached, lazy) ----------
   _drillPushed(node) {
     if (!node.expandable && !(Array.isArray(node.childrenPath) && node.childrenPath.length)) return
     this.deselect()

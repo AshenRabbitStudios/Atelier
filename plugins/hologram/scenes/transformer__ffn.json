@@ -1,0 +1,87 @@
+{
+  "format": "archviz/1",
+  "id": "transformer-ffn",
+  "path": ["transformer", "ffn"],
+  "title": "Position-wise Feed-Forward",
+  "subtitle": "Expand → activate → contract, per token",
+  "nodes": [
+    {
+      "id": "in",
+      "label": "x · d=512",
+      "type": "INPUT",
+      "glyph": "vec",
+      "pos": [-10, 0, 0],
+      "size": [2.2, 3, 1.6],
+      "color": "#35d7ff",
+      "desc": "One token vector entering the feed-forward block.",
+      "rows": 7
+    },
+    {
+      "id": "w1",
+      "label": "W₁ · 512→2048",
+      "type": "EXPAND",
+      "glyph": "matrix",
+      "pos": [-6, 0, 0],
+      "size": [2.6, 2.6, 1.4],
+      "color": "#bfefff",
+      "desc": "First linear layer projects up to a much wider inner dimension.",
+      "cols": 5,
+      "rows": 5
+    },
+    {
+      "id": "hid",
+      "label": "hidden · 2048",
+      "type": "WIDE LAYER",
+      "glyph": "vec",
+      "pos": [-1.8, 0, 0],
+      "size": [2.6, 4.6, 1.8],
+      "color": "#ffce7a",
+      "desc": "A wide intermediate representation — 4× the model width — giving the block room to compute rich non-linear features.",
+      "rows": 12
+    },
+    {
+      "id": "gelu",
+      "label": "GELU",
+      "type": "ACTIVATION",
+      "glyph": "curve",
+      "pos": [1.8, 0, 0],
+      "size": [2.6, 2.6, 1.4],
+      "color": "#bfefff",
+      "desc": "A smooth non-linearity applied element-wise; lets the network model curved relationships.",
+      "fn": "gelu"
+    },
+    {
+      "id": "w2",
+      "label": "W₂ · 2048→512",
+      "type": "CONTRACT",
+      "glyph": "matrix",
+      "pos": [5.6, 0, 0],
+      "size": [2.6, 2.6, 1.4],
+      "color": "#bfefff",
+      "desc": "Second linear layer projects back down to d_model.",
+      "cols": 5,
+      "rows": 5
+    },
+    {
+      "id": "out",
+      "label": "output · d=512",
+      "type": "RESULT",
+      "glyph": "vec",
+      "pos": [9.4, 0, 0],
+      "size": [2.2, 3, 1.6],
+      "color": "#35d7ff",
+      "desc": "The transformed token vector, same width as the input.",
+      "rows": 7
+    }
+  ],
+  "edges": [
+    { "a": "in", "b": "w1" },
+    { "a": "w1", "b": "hid" },
+    { "a": "hid", "b": "gelu" },
+    { "a": "gelu", "b": "w2" },
+    { "a": "w2", "b": "out" }
+  ],
+  "grid": -7.5,
+  "cam": [0, 1, 26],
+  "target": [0, 0.2, 0]
+}

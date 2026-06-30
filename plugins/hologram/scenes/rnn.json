@@ -1,0 +1,182 @@
+{
+  "format": "archviz/1",
+  "id": "rnn",
+  "path": ["rnn"],
+  "title": "Recurrent Network",
+  "subtitle": "Unrolled through time · tanh hidden cell",
+  "nodes": [
+    {
+      "id": "h0",
+      "label": "h₀",
+      "type": "INIT STATE",
+      "glyph": "vec",
+      "pos": [-12.6, 0, 0],
+      "size": [2.2, 1.9, 1.8],
+      "color": "#35d7ff",
+      "desc": "The initial hidden state — usually all zeros. It seeds the recurrence before any input has been seen.",
+      "specs": [{ "k": "value", "v": "0" }]
+    },
+    {
+      "id": "x1",
+      "label": "x1",
+      "type": "INPUT",
+      "glyph": "vec",
+      "pos": [-7.5, -3.4, 0],
+      "size": [2.2, 1.7, 1.6],
+      "color": "#35d7ff",
+      "desc": "The input vector at this timestep — typically the embedding of the t-th element of the sequence.",
+      "specs": [{ "k": "step", "v": "1" }]
+    },
+    {
+      "id": "h1",
+      "label": "h1",
+      "type": "HIDDEN STATE",
+      "glyph": "cell",
+      "pos": [-7.5, 0, 0],
+      "size": [3.4, 2.5, 2.5],
+      "color": "#36f0e0",
+      "desc": "The cell’s memory at step t:  hₜ = tanh(W·xₜ + U·hₜ₋₁ + b). It blends the current input with everything seen before and is carried forward to the next step. The same weights W, U are reused at every timestep.",
+      "specs": [
+        { "k": "dim", "v": "256" },
+        { "k": "activation", "v": "tanh" }
+      ]
+    },
+    {
+      "id": "y1",
+      "label": "y1",
+      "type": "OUTPUT",
+      "glyph": "vec",
+      "pos": [-7.5, 3.4, 0],
+      "size": [2.2, 1.7, 1.6],
+      "color": "#ffce7a",
+      "desc": "The prediction at step t, read out from the hidden state:  yₜ = softmax(V·hₜ).",
+      "specs": [{ "k": "step", "v": "1" }]
+    },
+    {
+      "id": "x2",
+      "label": "x2",
+      "type": "INPUT",
+      "glyph": "vec",
+      "pos": [-2.5, -3.4, 0],
+      "size": [2.2, 1.7, 1.6],
+      "color": "#35d7ff",
+      "desc": "The input vector at this timestep — typically the embedding of the t-th element of the sequence.",
+      "specs": [{ "k": "step", "v": "2" }]
+    },
+    {
+      "id": "h2",
+      "label": "h2",
+      "type": "HIDDEN STATE",
+      "glyph": "cell",
+      "pos": [-2.5, 0, 0],
+      "size": [3.4, 2.5, 2.5],
+      "color": "#36f0e0",
+      "desc": "The cell’s memory at step t:  hₜ = tanh(W·xₜ + U·hₜ₋₁ + b). It blends the current input with everything seen before and is carried forward to the next step. The same weights W, U are reused at every timestep.",
+      "specs": [
+        { "k": "dim", "v": "256" },
+        { "k": "activation", "v": "tanh" }
+      ]
+    },
+    {
+      "id": "y2",
+      "label": "y2",
+      "type": "OUTPUT",
+      "glyph": "vec",
+      "pos": [-2.5, 3.4, 0],
+      "size": [2.2, 1.7, 1.6],
+      "color": "#ffce7a",
+      "desc": "The prediction at step t, read out from the hidden state:  yₜ = softmax(V·hₜ).",
+      "specs": [{ "k": "step", "v": "2" }]
+    },
+    {
+      "id": "x3",
+      "label": "x3",
+      "type": "INPUT",
+      "glyph": "vec",
+      "pos": [2.5, -3.4, 0],
+      "size": [2.2, 1.7, 1.6],
+      "color": "#35d7ff",
+      "desc": "The input vector at this timestep — typically the embedding of the t-th element of the sequence.",
+      "specs": [{ "k": "step", "v": "3" }]
+    },
+    {
+      "id": "h3",
+      "label": "h3",
+      "type": "HIDDEN STATE",
+      "glyph": "cell",
+      "pos": [2.5, 0, 0],
+      "size": [3.4, 2.5, 2.5],
+      "color": "#36f0e0",
+      "desc": "The cell’s memory at step t:  hₜ = tanh(W·xₜ + U·hₜ₋₁ + b). It blends the current input with everything seen before and is carried forward to the next step. The same weights W, U are reused at every timestep.",
+      "specs": [
+        { "k": "dim", "v": "256" },
+        { "k": "activation", "v": "tanh" }
+      ]
+    },
+    {
+      "id": "y3",
+      "label": "y3",
+      "type": "OUTPUT",
+      "glyph": "vec",
+      "pos": [2.5, 3.4, 0],
+      "size": [2.2, 1.7, 1.6],
+      "color": "#ffce7a",
+      "desc": "The prediction at step t, read out from the hidden state:  yₜ = softmax(V·hₜ).",
+      "specs": [{ "k": "step", "v": "3" }]
+    },
+    {
+      "id": "x4",
+      "label": "x4",
+      "type": "INPUT",
+      "glyph": "vec",
+      "pos": [7.5, -3.4, 0],
+      "size": [2.2, 1.7, 1.6],
+      "color": "#35d7ff",
+      "desc": "The input vector at this timestep — typically the embedding of the t-th element of the sequence.",
+      "specs": [{ "k": "step", "v": "4" }]
+    },
+    {
+      "id": "h4",
+      "label": "h4",
+      "type": "HIDDEN STATE",
+      "glyph": "cell",
+      "pos": [7.5, 0, 0],
+      "size": [3.4, 2.5, 2.5],
+      "color": "#36f0e0",
+      "desc": "The cell’s memory at step t:  hₜ = tanh(W·xₜ + U·hₜ₋₁ + b). It blends the current input with everything seen before and is carried forward to the next step. The same weights W, U are reused at every timestep.",
+      "specs": [
+        { "k": "dim", "v": "256" },
+        { "k": "activation", "v": "tanh" }
+      ]
+    },
+    {
+      "id": "y4",
+      "label": "y4",
+      "type": "OUTPUT",
+      "glyph": "vec",
+      "pos": [7.5, 3.4, 0],
+      "size": [2.2, 1.7, 1.6],
+      "color": "#ffce7a",
+      "desc": "The prediction at step t, read out from the hidden state:  yₜ = softmax(V·hₜ).",
+      "specs": [{ "k": "step", "v": "4" }]
+    }
+  ],
+  "edges": [
+    { "a": "x1", "b": "h1" },
+    { "a": "h1", "b": "y1" },
+    { "a": "h0", "b": "h1", "recur": true },
+    { "a": "x2", "b": "h2" },
+    { "a": "h2", "b": "y2" },
+    { "a": "h1", "b": "h2", "recur": true },
+    { "a": "x3", "b": "h3" },
+    { "a": "h3", "b": "y3" },
+    { "a": "h2", "b": "h3", "recur": true },
+    { "a": "x4", "b": "h4" },
+    { "a": "h4", "b": "y4" },
+    { "a": "h3", "b": "h4", "recur": true }
+  ],
+  "floats": [{ "t": "TIME  →", "pos": [0, -4.6, 0] }],
+  "grid": -5,
+  "cam": [0, 3, 30],
+  "target": [0, 0, 0]
+}

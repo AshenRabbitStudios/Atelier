@@ -1,0 +1,225 @@
+{
+  "format": "archviz/1",
+  "id": "transformer",
+  "path": ["transformer"],
+  "title": "Transformer Encoder",
+  "subtitle": "Self-attention · stacked encoder blocks · d_model 512",
+  "nodes": [
+    {
+      "id": "tok",
+      "label": "Input Tokens",
+      "type": "INPUT",
+      "glyph": "tokens",
+      "pos": [0, -12.6, 0],
+      "size": [6.6, 1.1, 2],
+      "color": "#35d7ff",
+      "desc": "The raw input sequence split into tokens (sub-words). Each token is mapped to an integer ID drawn from the model’s vocabulary.",
+      "specs": [
+        { "k": "seq len", "v": "n" },
+        { "k": "vocab", "v": "~50k" }
+      ]
+    },
+    {
+      "id": "emb",
+      "label": "Token Embedding",
+      "type": "EMBEDDING",
+      "glyph": "embedding",
+      "pos": [0, -9.9, 0],
+      "size": [5.4, 2.2, 2.4],
+      "color": "#35d7ff",
+      "desc": "A learned lookup table converts every token ID into a dense vector of dimension d_model. Tokens with related meaning end up close together in this space.",
+      "specs": [{ "k": "d_model", "v": "512" }]
+    },
+    {
+      "id": "pos",
+      "label": "Positional Encoding",
+      "type": "POSITION",
+      "glyph": "wave",
+      "pos": [6.1, -9.9, 0],
+      "size": [3.3, 2.2, 1.8],
+      "color": "#bfefff",
+      "desc": "Adds order information. Sinusoidal (or learned) vectors are summed onto the embeddings so the model knows where each token sits — attention itself is order-agnostic.",
+      "specs": [{ "k": "type", "v": "sinusoidal" }]
+    },
+    {
+      "id": "mha1",
+      "label": "Multi-Head Attention",
+      "type": "ATTENTION",
+      "glyph": "attention",
+      "pos": [0, -6.4, 0],
+      "size": [6.8, 2.8, 3],
+      "color": "#36f0e0",
+      "desc": "Self-attention lets every token look at every other token. The input is projected into Queries, Keys and Values and split across h parallel heads. Each head computes softmax(QKᵀ/√dₖ)·V; the heads are concatenated and projected back.",
+      "specs": [
+        { "k": "heads", "v": "8" },
+        { "k": "d_k", "v": "64" }
+      ],
+      "heads": 6,
+      "expandable": true,
+      "childrenPath": ["transformer", "attention"]
+    },
+    {
+      "id": "n1",
+      "label": "Add & Norm",
+      "type": "RESIDUAL + NORM",
+      "glyph": "addnorm",
+      "pos": [0, -3.9, 0],
+      "size": [5.2, 1, 2],
+      "color": "#bfefff",
+      "desc": "A residual connection adds the sub-layer's input back to its output, then Layer Normalization rescales the activations. This keeps gradients stable through a deep stack of layers.",
+      "specs": [{ "k": "op", "v": "x + Sublayer(x)" }]
+    },
+    {
+      "id": "ffn1",
+      "label": "Feed Forward",
+      "type": "FEED-FORWARD",
+      "glyph": "ffn",
+      "pos": [0, -1.4, 0],
+      "size": [5.8, 2.4, 2.4],
+      "color": "#ffce7a",
+      "desc": "A position-wise MLP applied to each token independently: two linear layers with a GELU between them. It expands to a wide inner dimension and back, adding non-linear capacity.",
+      "specs": [{ "k": "d_ff", "v": "2048" }],
+      "expandable": true,
+      "childrenPath": ["transformer", "ffn"]
+    },
+    {
+      "id": "n2",
+      "label": "Add & Norm",
+      "type": "RESIDUAL + NORM",
+      "glyph": "addnorm",
+      "pos": [0, 1, 0],
+      "size": [5.2, 1, 2],
+      "color": "#bfefff",
+      "desc": "A residual connection adds the sub-layer's input back to its output, then Layer Normalization rescales the activations. This keeps gradients stable through a deep stack of layers.",
+      "specs": [{ "k": "op", "v": "x + Sublayer(x)" }]
+    },
+    {
+      "id": "mha2",
+      "label": "Multi-Head Attention",
+      "type": "ATTENTION",
+      "glyph": "attention",
+      "pos": [0, 4, 0],
+      "size": [6.8, 2.8, 3],
+      "color": "#36f0e0",
+      "desc": "The second encoder layer’s self-attention. Stacking layers lets the model compose simple relations from lower layers into richer, more abstract ones.",
+      "specs": [
+        { "k": "heads", "v": "8" },
+        { "k": "d_k", "v": "64" }
+      ],
+      "heads": 6,
+      "expandable": true,
+      "childrenPath": ["transformer", "attention"],
+      "details": [
+        {
+          "type": "markdown",
+          "title": "How it works",
+          "md": "Self-attention lets every position attend to every other position in the sequence. The input X (n × d_model) is linearly projected into Queries, Keys and Values, then split into h independent heads that each attend in a d_k-dimensional subspace. Per head: scores = QKᵀ/√d_k, weights = softmax(scores) row-wise, output = weights · V. The h head outputs are concatenated and mixed back to d_model by an output projection Wₒ. As the *second* encoder layer, mha2 attends over representations already contextualised by layer 1, so it composes lower-level relations into higher-level structure."
+        },
+        {
+          "type": "code",
+          "title": "Computation",
+          "language": "text",
+          "source": "Q = X·W_Q   K = X·W_K   V = X·W_V        # (n×d_model) · (d_model×d_model)\nsplit into h heads → Qᵢ, Kᵢ, Vᵢ           # each (n × d_k),  d_k = d_model/h = 64\nheadᵢ = softmax(Qᵢ·Kᵢᵀ / √d_k) · Vᵢ      # (n×n) weights → (n × d_k)\nMHA(X) = Concat(head₁ … head_h) · W_O    # back to (n × d_model)"
+        },
+        {
+          "type": "keyValue",
+          "title": "Shapes & parameters",
+          "items": [
+            { "k": "d_model", "v": "512" },
+            { "k": "heads (h)", "v": "8" },
+            { "k": "d_k = d_v", "v": "64  (= d_model / h)" },
+            { "k": "W_Q / W_K / W_V", "v": "3 × (512 × 512)" },
+            { "k": "output W_O", "v": "512 × 512" },
+            { "k": "params", "v": "≈ 4·d_model² ≈ 1.05M" },
+            { "k": "compute", "v": "O(n²·d_model) — quadratic in sequence length" }
+          ]
+        },
+        {
+          "type": "list",
+          "title": "Pipeline",
+          "ordered": true,
+          "items": [
+            "Project X → Q, K, V",
+            "Split into 8 heads (d_k = 64 each)",
+            "Scores QKᵀ/√d_k, then softmax per row",
+            "Weighted sum of V",
+            "Concatenate the 8 heads",
+            "Mix with Wₒ → output (n × 512)"
+          ]
+        },
+        {
+          "type": "markdown",
+          "title": "Why divide by √d_k",
+          "md": "Scaling the dot products by 1/√d_k keeps their variance ≈ 1 before the softmax. Without it, large d_k makes the logits big, the softmax saturates, and gradients through it vanish. (mha1 is structurally identical — same shapes, separate weights.)"
+        }
+      ]
+    },
+    {
+      "id": "n3",
+      "label": "Add & Norm",
+      "type": "RESIDUAL + NORM",
+      "glyph": "addnorm",
+      "pos": [0, 6.5, 0],
+      "size": [5.2, 1, 2],
+      "color": "#bfefff",
+      "desc": "A residual connection adds the sub-layer's input back to its output, then Layer Normalization rescales the activations. This keeps gradients stable through a deep stack of layers.",
+      "specs": [{ "k": "op", "v": "x + Sublayer(x)" }]
+    },
+    {
+      "id": "ffn2",
+      "label": "Feed Forward",
+      "type": "FEED-FORWARD",
+      "glyph": "ffn",
+      "pos": [0, 9, 0],
+      "size": [5.8, 2.4, 2.4],
+      "color": "#ffce7a",
+      "desc": "The second layer’s feed-forward block. Identical structure, separate weights — every layer learns its own transformation of the sequence.",
+      "specs": [{ "k": "d_ff", "v": "2048" }],
+      "expandable": true,
+      "childrenPath": ["transformer", "ffn"]
+    },
+    {
+      "id": "n4",
+      "label": "Add & Norm",
+      "type": "RESIDUAL + NORM",
+      "glyph": "addnorm",
+      "pos": [0, 11.4, 0],
+      "size": [5.2, 1, 2],
+      "color": "#bfefff",
+      "desc": "A residual connection adds the sub-layer's input back to its output, then Layer Normalization rescales the activations. This keeps gradients stable through a deep stack of layers.",
+      "specs": [{ "k": "op", "v": "x + Sublayer(x)" }]
+    },
+    {
+      "id": "out",
+      "label": "Linear + Softmax",
+      "type": "OUTPUT",
+      "glyph": "dist",
+      "pos": [0, 14, 0],
+      "size": [5.6, 2.4, 2.2],
+      "color": "#ff8fb0",
+      "desc": "A final linear layer projects the top-layer vectors onto vocabulary logits; softmax turns them into a probability distribution over the next token.",
+      "specs": [{ "k": "output", "v": "vocab logits" }]
+    }
+  ],
+  "edges": [
+    { "a": "tok", "b": "emb" },
+    { "a": "pos", "b": "emb", "speed": 0.7 },
+    { "a": "emb", "b": "mha1" },
+    { "a": "mha1", "b": "n1" },
+    { "a": "n1", "b": "ffn1" },
+    { "a": "ffn1", "b": "n2" },
+    { "a": "n2", "b": "mha2" },
+    { "a": "mha2", "b": "n3" },
+    { "a": "n3", "b": "ffn2" },
+    { "a": "ffn2", "b": "n4" },
+    { "a": "n4", "b": "out" },
+    { "a": "emb", "b": "n1", "residual": true },
+    { "a": "n1", "b": "n2", "residual": true },
+    { "a": "n2", "b": "n3", "residual": true },
+    { "a": "n3", "b": "n4", "residual": true }
+  ],
+  "floats": [{ "t": "ENCODER  BLOCK  × 6", "pos": [6.6, 2, 0] }],
+  "grid": -13.8,
+  "cam": [17, 3, 34],
+  "target": [0, 0.6, 0]
+}

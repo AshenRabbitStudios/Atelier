@@ -25,8 +25,24 @@ function pretty(value: unknown): string {
   }
 }
 
+// Strip terminal control bytes so command output reads as clean text. Built from char codes so the
+// source carries no control bytes (architecture invariant #1: chat renders clean text; ANSI lives
+// only in xterm panes). npm / vitest / PowerShell emit SGR colour codes and carriage returns that
+// would otherwise show as literal gibberish in a <pre>.
+const ESC = String.fromCharCode(27)
+const ANSI_CSI = new RegExp(ESC + '[[][0-9;?]*[ -/]*[@-~]', 'g')
+function cleanOutput(s: string): string {
+  const noCsi = s.replace(ANSI_CSI, '').replace(/\r\n?/g, '\n')
+  let out = ''
+  for (let k = 0; k < noCsi.length; k++) {
+    const c = noCsi.charCodeAt(k)
+    if (c === 9 || c === 10 || c >= 32) out += noCsi[k]
+  }
+  return out
+}
+
 /** A tool result's output may be a string, an array of content blocks, or an object. */
-function resultText(output: unknown): string {
+function rawResult(output: unknown): string {
   if (typeof output === 'string') return output
   if (Array.isArray(output)) {
     return output
@@ -41,6 +57,9 @@ function resultText(output: unknown): string {
   if (typeof r.text === 'string') return r.text
   if (typeof r.stdout === 'string') return r.stdout
   return pretty(output)
+}
+function resultText(output: unknown): string {
+  return cleanOutput(rawResult(output))
 }
 
 /** Sidebar tint shared with the rest of the chrome (DESIGN_SYSTEM §5). */

@@ -1,0 +1,161 @@
+{
+  "format": "archviz/1",
+  "id": "transformer-attention",
+  "path": ["transformer", "attention"],
+  "title": "Multi-Head Self-Attention",
+  "subtitle": "Q, K, V → scores → softmax → weighted blend",
+  "nodes": [
+    {
+      "id": "x",
+      "label": "X · token vectors",
+      "type": "INPUT",
+      "glyph": "vec",
+      "pos": [-11, 0, 0],
+      "size": [2.2, 3, 1.6],
+      "color": "#35d7ff",
+      "desc": "The layer input: one vector per token (n × d_model). Every token will be compared against every other.",
+      "rows": 7
+    },
+    {
+      "id": "wq",
+      "label": "Wq",
+      "type": "PROJECTION",
+      "glyph": "matrix",
+      "pos": [-7.4, 3, 0],
+      "size": [2.4, 2.2, 1.4],
+      "color": "#bfefff",
+      "desc": "Learned query projection. Multiplying each token vector by Wq produces its Query.",
+      "cols": 5,
+      "rows": 5
+    },
+    {
+      "id": "wk",
+      "label": "Wk",
+      "type": "PROJECTION",
+      "glyph": "matrix",
+      "pos": [-7.4, 0, 0],
+      "size": [2.4, 2.2, 1.4],
+      "color": "#bfefff",
+      "desc": "Learned key projection — produces each token’s Key.",
+      "cols": 5,
+      "rows": 5
+    },
+    {
+      "id": "wv",
+      "label": "Wv",
+      "type": "PROJECTION",
+      "glyph": "matrix",
+      "pos": [-7.4, -3, 0],
+      "size": [2.4, 2.2, 1.4],
+      "color": "#bfefff",
+      "desc": "Learned value projection — produces each token’s Value.",
+      "cols": 5,
+      "rows": 5
+    },
+    {
+      "id": "q",
+      "label": "Q",
+      "type": "QUERIES",
+      "glyph": "vec",
+      "pos": [-4, 3, 0],
+      "size": [2, 2.6, 1.6],
+      "color": "#36f0e0",
+      "desc": "Queries — what each token is looking for."
+    },
+    {
+      "id": "k",
+      "label": "K",
+      "type": "KEYS",
+      "glyph": "vec",
+      "pos": [-4, 0, 0],
+      "size": [2, 2.6, 1.6],
+      "color": "#36f0e0",
+      "desc": "Keys — what each token offers to be matched against."
+    },
+    {
+      "id": "v",
+      "label": "V",
+      "type": "VALUES",
+      "glyph": "vec",
+      "pos": [-4, -3, 0],
+      "size": [2, 2.6, 1.6],
+      "color": "#36f0e0",
+      "desc": "Values — the content each token will contribute."
+    },
+    {
+      "id": "qk",
+      "label": "QKᵀ",
+      "type": "SCORES",
+      "glyph": "matrix",
+      "pos": [0, 1.5, 0],
+      "size": [3.4, 3.4, 1],
+      "color": "#36f0e0",
+      "desc": "Every Query dotted with every Key → an n×n score matrix: how strongly each token should attend to each other token.",
+      "cols": 6,
+      "rows": 6
+    },
+    {
+      "id": "soft",
+      "label": "Softmax ÷√dₖ",
+      "type": "WEIGHTS",
+      "glyph": "dist",
+      "pos": [3.6, 1.5, 0],
+      "size": [3, 2.6, 1.6],
+      "color": "#ffce7a",
+      "desc": "Scores are scaled by 1/√dₖ for stability, then each row is softmaxed into attention weights that sum to 1."
+    },
+    {
+      "id": "av",
+      "label": "A · V",
+      "type": "BLEND",
+      "glyph": "matrix",
+      "pos": [6.8, -0.6, 0],
+      "size": [3.4, 3.4, 1],
+      "color": "#ff8fb0",
+      "desc": "Attention weights multiply the Values: each token’s output becomes a weighted blend of all Values.",
+      "cols": 6,
+      "rows": 6
+    },
+    {
+      "id": "wo",
+      "label": "Concat · Wₒ",
+      "type": "MIX HEADS",
+      "glyph": "matrix",
+      "pos": [10, -0.6, 0],
+      "size": [2.4, 2.2, 1.4],
+      "color": "#bfefff",
+      "desc": "The h heads ran in parallel on different sub-spaces; their outputs are concatenated and mixed back to d_model by Wₒ.",
+      "cols": 5,
+      "rows": 5
+    },
+    {
+      "id": "out",
+      "label": "Output",
+      "type": "RESULT",
+      "glyph": "vec",
+      "pos": [12.8, -0.6, 0],
+      "size": [2.2, 3, 1.6],
+      "color": "#35d7ff",
+      "desc": "A context-enriched vector for every token, ready for the next sub-layer.",
+      "rows": 7
+    }
+  ],
+  "edges": [
+    { "a": "x", "b": "wq" },
+    { "a": "x", "b": "wk" },
+    { "a": "x", "b": "wv" },
+    { "a": "wq", "b": "q" },
+    { "a": "wk", "b": "k" },
+    { "a": "wv", "b": "v" },
+    { "a": "q", "b": "qk" },
+    { "a": "k", "b": "qk" },
+    { "a": "qk", "b": "soft" },
+    { "a": "soft", "b": "av" },
+    { "a": "v", "b": "av" },
+    { "a": "av", "b": "wo" },
+    { "a": "wo", "b": "out" }
+  ],
+  "grid": -7.5,
+  "cam": [0.8, 1, 31],
+  "target": [0.8, 0.3, 0]
+}

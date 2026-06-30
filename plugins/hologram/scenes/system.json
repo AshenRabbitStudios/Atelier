@@ -1,0 +1,120 @@
+{
+  "format": "archviz/2",
+  "id": "system",
+  "path": ["system"],
+  "title": "Agentic RAG System",
+  "subtitle": "Planner · retrieval · tools · responder — auto-laid-out, no coordinates",
+  "layout": { "type": "layered", "rankAxis": "y", "spread": ["x", "z"] },
+  "axes": {
+    "y": { "label": "data flow", "kind": "flow" },
+    "x": { "label": "parallel", "kind": "space" },
+    "z": { "label": "parallel", "kind": "space" }
+  },
+  "nodes": [
+    {
+      "id": "query",
+      "label": "User Query",
+      "kind": "input",
+      "summary": "The incoming user request in natural language.",
+      "details": [
+        {
+          "type": "keyValue",
+          "title": "I/O",
+          "items": [
+            { "k": "modality", "v": "text" },
+            { "k": "budget", "v": "≤ 8k tokens" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "planner",
+      "label": "Planner",
+      "kind": "control",
+      "summary": "A controller LLM that decomposes the request and routes to tools or the responder.",
+      "details": [
+        {
+          "type": "markdown",
+          "md": "Emits a step plan, then dispatches: retrieve context, call tools, or answer directly."
+        }
+      ],
+      "expandable": true
+    },
+    {
+      "id": "retriever",
+      "label": "Retriever",
+      "kind": "retrieval",
+      "summary": "Embeds the query and searches the vector store for relevant chunks.",
+      "details": []
+    },
+    {
+      "id": "vstore",
+      "label": "Vector DB",
+      "kind": "db",
+      "summary": "Approximate-nearest-neighbour index over the document corpus.",
+      "details": [
+        {
+          "type": "keyValue",
+          "title": "index",
+          "items": [
+            { "k": "metric", "v": "cosine" },
+            { "k": "dim", "v": "1536" },
+            { "k": "vectors", "v": "2.4M" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tools",
+      "label": "Tools",
+      "kind": "tool",
+      "summary": "External functions the agent can invoke.",
+      "details": [
+        { "type": "list", "title": "available", "items": ["web.search", "python.run", "sql.query"] }
+      ]
+    },
+    {
+      "id": "memory",
+      "label": "Memory",
+      "kind": "memory",
+      "summary": "Conversation + scratchpad state carried across turns.",
+      "details": []
+    },
+    {
+      "id": "llm",
+      "label": "Responder LLM",
+      "kind": "attention",
+      "summary": "Generates the final answer from the query, retrieved context and tool results.",
+      "details": [
+        {
+          "type": "keyValue",
+          "title": "model",
+          "items": [
+            { "k": "family", "v": "transformer" },
+            { "k": "context", "v": "128k" }
+          ]
+        }
+      ],
+      "expandable": true
+    },
+    {
+      "id": "out",
+      "label": "Answer",
+      "kind": "output",
+      "summary": "The response returned to the user.",
+      "details": []
+    }
+  ],
+  "edges": [
+    { "a": "query", "b": "planner" },
+    { "a": "planner", "b": "retriever" },
+    { "a": "retriever", "b": "vstore" },
+    { "a": "vstore", "b": "retriever", "kind": "retrieval" },
+    { "a": "planner", "b": "tools", "kind": "control" },
+    { "a": "retriever", "b": "llm" },
+    { "a": "tools", "b": "llm" },
+    { "a": "memory", "b": "llm", "kind": "recurrent" },
+    { "a": "planner", "b": "llm" },
+    { "a": "llm", "b": "out" }
+  ]
+}

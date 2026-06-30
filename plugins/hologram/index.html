@@ -272,9 +272,27 @@
         ></div>
         <div style="display: flex; gap: 10px; margin-top: 16px">
           <div id="overview-controls" style="display: flex; gap: 10px">
-            <button class="hbtn ctl" id="btn-transformer">Transformer</button>
-            <button class="hbtn ctl" id="btn-rnn">RNN</button>
-            <button class="hbtn ctl" id="btn-system">System</button>
+            <select
+              id="lib-select"
+              class="ctl"
+              style="
+                pointer-events: auto;
+                cursor: pointer;
+                padding: 8px 12px;
+                font-family: 'Rajdhani', sans-serif;
+                font-weight: 600;
+                font-size: 13px;
+                letter-spacing: 1.5px;
+                text-transform: uppercase;
+                color: #7fd6f0;
+                background: rgba(20, 44, 60, 0.45);
+                border: 1px solid rgba(53, 215, 255, 0.35);
+                border-radius: 3px;
+                outline: none;
+              "
+            >
+              <option value="">Library…</option>
+            </select>
           </div>
           <button class="hbtn ctl" id="btn-back" style="display: none">← Back to overview</button>
         </div>
@@ -498,7 +516,7 @@
       </div>
     </div>
 
-    <!-- bundled engine + three (classic IIFE → window.Hologram / window.HoloArch) -->
+    <!-- bundled engine + three (classic IIFE → window.Hologram) -->
     <script src="atelier-plugin://hologram/hologram.bundle.js"></script>
     <script>
       ;(function () {
@@ -779,8 +797,25 @@
             /* host not ready / no permission — ignore */
           }
         }
-        // Pane → agent: a drill into an un-authored node asks me (the agent) to push that path's scene.
+        // A drill into a node whose child level isn't loaded yet. First try an authored child scene
+        // file (scenes/<path joined by __>.json) so demo internals Just Work; if there's none, ask the
+        // agent in chat to push that level. Both routes end at the same door — engine.loadScene.
         function onRequestExpand(req) {
+          var file = 'scenes/' + req.path.join('__') + '.json'
+          fetch(file)
+            .then(function (r) {
+              if (!r.ok) throw new Error('no local scene')
+              return r.json()
+            })
+            .then(function (scene) {
+              if (engine) engine.loadScene(scene)
+            })
+            .catch(function () {
+              writeExpandRequest(req)
+            })
+        }
+        // Pane → agent: no authored child → ask me to push that path's scene.
+        function writeExpandRequest(req) {
           try {
             window.atelier.context.set(
               'selection',
@@ -807,16 +842,14 @@
           var crumbs = v.crumbs && v.crumbs.length > 1 ? v.crumbs.join('  ›  ') : ''
           $('subtitle').textContent = crumbs || v.subtitle || ''
           var deep = !!v.canBack || v.view === 'detail'
-          $('overview-controls').style.display = deep ? 'none' : 'flex'
           $('btn-back').style.display = deep ? 'inline-block' : 'none'
-          if (!deep && engine) {
-            $('btn-transformer').classList.toggle('active', engine.model === 'transformer')
-            $('btn-rnn').classList.toggle('active', engine.model === 'rnn')
-            $('btn-system').classList.toggle('active', engine.model === 'system')
-          }
           var mh = $('missing-hint')
           var who = v.requesting || v.missing
-          if (who) {
+          if (v.view === 'empty') {
+            mh.style.display = 'block'
+            mh.textContent =
+              'No architecture loaded — pick one from the Library, or ask me in chat to load or build one.'
+          } else if (who) {
             mh.style.display = 'block'
             mh.textContent =
               '“' +
@@ -836,13 +869,6 @@
             glow: 0.9,
             autoRotate: true,
             palette: 'Arc Reactor',
-            model: 'transformer',
-            resolveModel: function (key, P) {
-              return window.HoloArch.getModel(key, P)
-            },
-            resolveDetail: function (node, P) {
-              return window.HoloArch.getDetail(node, P)
-            },
             onSelect: onSelectionChange,
             onViewChange: applyView,
             onRequestExpand: onRequestExpand,
@@ -854,6 +880,7 @@
           renderInspector([])
           writeSelection([])
           engine.init()
+          populateLibrary()
         }
         function teardown() {
           if (engine) {
@@ -863,14 +890,41 @@
         }
 
         // ── Controls ───────────────────────────────────────────────
-        $('btn-transformer').addEventListener('click', function () {
-          if (engine) engine.setModel('transformer')
-        })
-        $('btn-rnn').addEventListener('click', function () {
-          if (engine) engine.setModel('rnn')
-        })
-        $('btn-system').addEventListener('click', function () {
-          if (engine) engine.setModel('system')
+        // Library: the saved scene set (scenes/index.json). Picking one loads it through the one door.
+        function populateLibrary() {
+          fetch('scenes/index.json')
+            .then(function (r) {
+              if (!r.ok) throw new Error('no library')
+              return r.json()
+            })
+            .then(function (list) {
+              var sel = $('lib-select')
+              list.forEach(function (item) {
+                var o = document.createElement('option')
+                o.value = item.file
+                o.textContent = item.title || item.id
+                sel.appendChild(o)
+              })
+            })
+            .catch(function () {
+              /* no library manifest — Library stays empty; the agent can still push scenes */
+            })
+        }
+        $('lib-select').addEventListener('change', function (e) {
+          var file = e.target.value
+          if (!file || !engine) return
+          fetch('scenes/' + file)
+            .then(function (r) {
+              if (!r.ok) throw new Error('scene not found')
+              return r.json()
+            })
+            .then(function (scene) {
+              engine.loadScene(scene)
+            })
+            .catch(function () {
+              /* ignore a missing/invalid scene file */
+            })
+          e.target.value = '' // reset to the "Library…" label
         })
         $('btn-back').addEventListener('click', function () {
           if (engine) engine.goBack()

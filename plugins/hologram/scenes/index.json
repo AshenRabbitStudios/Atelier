@@ -1,0 +1,5 @@
+[
+  { "id": "transformer", "file": "transformer.json", "title": "Transformer Encoder" },
+  { "id": "rnn", "file": "rnn.json", "title": "Recurrent Network" },
+  { "id": "system", "file": "system.json", "title": "Agentic RAG System" }
+]

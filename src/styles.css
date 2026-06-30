@@ -1503,11 +1503,13 @@ body {
 .tool-query {
   display: flex;
   align-items: baseline;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 8px 12px;
   font-size: 0.85em;
 }
 .tool-query .q-label {
+  flex: 0 0 auto;
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -1516,6 +1518,9 @@ body {
 .tool-query code {
   font-family: ui-monospace, monospace;
   color: var(--accent);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .tool-query .q-path {
   color: var(--faint);

@@ -165,8 +165,29 @@ function createWindow(): void {
     void mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
 
+  installCrashRecovery(mainWindow)
+
   mainWindow.on('closed', () => {
     mainWindow = null
+  })
+}
+
+// Auto-recover from a renderer that dies outright (OOM, a native/WebGL fault, etc.) by reloading
+// the window — but cap reloads so a load that crashes on sight can't spin a reload loop forever.
+// (React render exceptions, which leave the process alive, are caught by the renderer's
+// ErrorBoundary instead; this is only for the process actually going away.)
+const CRASH_WINDOW_MS = 10_000
+const CRASH_LIMIT = 3
+function installCrashRecovery(win: BrowserWindow): void {
+  let crashes: number[] = []
+  win.webContents.on('render-process-gone', (_e, details) => {
+    if (details.reason === 'clean-exit' || win.isDestroyed()) return
+    const now = Date.now()
+    crashes = crashes.filter((t) => now - t < CRASH_WINDOW_MS)
+    crashes.push(now)
+    // Too many crashes in a row → stop reloading and leave the failed state visible to debug.
+    if (crashes.length > CRASH_LIMIT) return
+    win.reload()
   })
 }
 

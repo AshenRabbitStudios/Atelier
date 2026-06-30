@@ -64,7 +64,11 @@ function resultText(output: unknown): string {
 
 /** Sidebar tint shared with the rest of the chrome (DESIGN_SYSTEM §5). */
 export function toolKindClass(name: string): string {
-  if (/^(read|glob|grep|ls|webfetch|websearch|toolsearch|agent|task|skill)$/i.test(name))
+  if (
+    /^(read|glob|grep|ls|webfetch|websearch|toolsearch|agent|task|skill|askuserquestion)$/i.test(
+      name
+    )
+  )
     return 'tool-kind-read'
   if (/^(edit|write|notebookedit|multiedit)$/i.test(name)) return 'tool-kind-edit'
   if (/^(bash|powershell|pwsh|sh|zsh|cmd|shell)$/i.test(name)) return 'tool-kind-bash'
@@ -152,8 +156,42 @@ function summary(name: string, input: unknown): { label: string; detail: string;
   if (/^skill$/.test(n)) return { label: 'Skill', detail: str(i.skill), mono: true }
   if (/^webfetch$/.test(n)) return { label: 'Web fetch', detail: str(i.url), mono: true }
   if (/^websearch$/.test(n)) return { label: 'Web search', detail: str(i.query), mono: false }
+  if (/^askuserquestion$/.test(n)) {
+    const first = asRecord((Array.isArray(i.questions) ? i.questions : [])[0])
+    return { label: 'Question', detail: str(first.header) || str(first.question), mono: false }
+  }
   if (isContextWrite(name)) return { label: 'Context', detail: ctxKeyName(name), mono: false }
   return { label: name, detail: '', mono: false }
+}
+
+// A readable value for the generic field view: short scalars inline, long/multiline strings and
+// nested objects in their own monospace block (control bytes stripped) instead of escaped JSON.
+function FieldValue({ v }: { v: unknown }): React.JSX.Element {
+  if (typeof v === 'string') {
+    if (v.includes('\n') || v.length > 80) return <pre className="tool-io">{cleanOutput(v)}</pre>
+    return <span className="field-scalar">{v}</span>
+  }
+  if (v === null || typeof v === 'number' || typeof v === 'boolean') {
+    return <span className="field-scalar">{String(v)}</span>
+  }
+  return <pre className="tool-io">{pretty(v)}</pre>
+}
+
+// Generic fallback for any tool without a dedicated view: render the input object as a key→value
+// list (proactively legible for every tool, including custom/MCP ones) rather than one JSON blob.
+function GenericFields({ obj }: { obj: Record<string, unknown> }): React.JSX.Element {
+  return (
+    <dl className="tool-fields">
+      {Object.entries(obj).map(([k, v]) => (
+        <div key={k} className="tool-field">
+          <dt>{k}</dt>
+          <dd>
+            <FieldValue v={v} />
+          </dd>
+        </div>
+      ))}
+    </dl>
+  )
 }
 
 type DiffLine = { sign: ' ' | '+' | '-'; text: string }
@@ -400,6 +438,47 @@ function ToolBody({ block }: { block: ToolUse }) {
     )
   }
 
+  if (/^askuserquestion$/.test(n)) {
+    const questions = Array.isArray(i.questions) ? i.questions : []
+    return (
+      <div className="tool-body">
+        {questions.map((q, k) => {
+          const qr = asRecord(q)
+          const opts = Array.isArray(qr.options) ? qr.options : []
+          return (
+            <div key={k} className="ask-q">
+              {str(qr.header) && <div className="ask-header">{str(qr.header)}</div>}
+              <div className="ask-question">{str(qr.question)}</div>
+              <ul className="ask-options">
+                {opts.map((o, j) => {
+                  const or = asRecord(o)
+                  const label = str(or.label)
+                  const chosen = Boolean(label) && out.includes(label)
+                  return (
+                    <li key={j} className={`ask-option ${chosen ? 'chosen' : ''}`}>
+                      <span className="ask-mark">{chosen ? '●' : '○'}</span>
+                      <div className="ask-option-text">
+                        <span className="ask-label">{label}</span>
+                        {str(or.description) && (
+                          <span className="ask-desc">{str(or.description)}</span>
+                        )}
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          )
+        })}
+        {block.result && out && (
+          <div className="ask-answer">
+            <span className="q-label">answer</span> {out}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   if (isContextWrite(block.name)) {
     const c = str(i.content)
     const looksJson = /^\s*[[{]/.test(c)
@@ -418,10 +497,17 @@ function ToolBody({ block }: { block: ToolUse }) {
     )
   }
 
+  // Generic fallback — readable for any tool the agent might call (built-in, custom, or MCP).
+  const isPlainObj =
+    block.input !== null && typeof block.input === 'object' && !Array.isArray(block.input)
   return (
     <div className="tool-body">
       <div className="tool-section-label">input</div>
-      <pre className="tool-io">{pretty(block.input)}</pre>
+      {isPlainObj ? (
+        <GenericFields obj={block.input as Record<string, unknown>} />
+      ) : (
+        <pre className="tool-io">{pretty(block.input)}</pre>
+      )}
       {block.result && (
         <>
           <div className="tool-section-label">result</div>

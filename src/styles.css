@@ -1438,6 +1438,102 @@ body {
   text-decoration: line-through;
 }
 
+/* Generic field view (default fallback for any tool): key → value rows. */
+.tool-fields {
+  margin: 4px 0 8px;
+}
+.tool-field {
+  display: flex;
+  gap: 10px;
+  padding: 3px 12px;
+  font-size: 0.85em;
+}
+.tool-field dt {
+  flex: 0 0 auto;
+  min-width: 84px;
+  color: var(--text-dim);
+  font-family: ui-monospace, monospace;
+}
+.tool-field dd {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+}
+.tool-field dd .tool-io {
+  margin: 2px 0 0;
+}
+.field-scalar {
+  word-break: break-word;
+}
+
+/* AskUserQuestion: each question + its options, with the chosen one(s) lit. */
+.ask-q {
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+}
+.ask-q:first-child {
+  border-top: none;
+}
+.ask-header {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  margin-bottom: 2px;
+}
+.ask-question {
+  font-size: 0.9em;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+.ask-options {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.ask-option {
+  display: flex;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 0.85em;
+}
+.ask-mark {
+  flex: 0 0 auto;
+  color: var(--faint);
+}
+.ask-option.chosen .ask-mark {
+  color: var(--ok);
+}
+.ask-option-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.ask-label {
+  color: var(--dim);
+}
+.ask-option.chosen .ask-label {
+  color: var(--text);
+  font-weight: 600;
+}
+.ask-desc {
+  color: var(--faint);
+  font-size: 0.92em;
+}
+.ask-answer {
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  font-size: 0.85em;
+  color: var(--text);
+}
+.ask-answer .q-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  margin-right: 6px;
+}
+
 /* Bash: shell prompt + terminal output. */
 .shell-cmd {
   display: flex;

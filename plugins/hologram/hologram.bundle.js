@@ -32893,42 +32893,34 @@
       });
       data.edges.forEach((e) => {
         if (!byId[e.a] || !byId[e.b]) return;
-        const a = byId[e.a].pos;
-        const b = byId[e.b].pos;
-        const A = new Vector3(a[0], a[1], a[2]);
-        const B = new Vector3(b[0], b[1], b[2]);
+        const aNode = byId[e.a];
+        const bNode = byId[e.b];
         const recur = e.recur || e.kind === "recurrent";
         const residual = e.residual || e.kind === "residual" || e.kind === "skip";
         const col = e.style?.color || (recur ? "#36f0e0" : this.primary());
-        const meta = { edge: e, aLabel: byId[e.a].label, bLabel: byId[e.b].label };
-        if (residual) {
-          const ctrl = new Vector3((a[0] + b[0]) / 2 + 3.6, (a[1] + b[1]) / 2, 0);
-          const curve2 = new QuadraticBezierCurve3(A, ctrl, B);
-          const line2 = new Line(
-            new BufferGeometry().setFromPoints(curve2.getPoints(26)),
-            new LineBasicMaterial({ color: col, transparent: true, opacity: 0.16 })
-          );
-          line2.userData = meta;
-          g.add(line2);
-          this.edgePickables.push(line2);
-          return;
-        }
+        const meta = { edge: e, aLabel: aNode.label, bLabel: bNode.label };
+        const pts = this._routeOrthogonal(aNode, bNode, data.nodes, residual);
         const line = new Line(
-          new BufferGeometry().setFromPoints([A, B]),
-          new LineBasicMaterial({ color: col, transparent: true, opacity: recur ? 0.5 : 0.32 })
+          new BufferGeometry().setFromPoints(pts),
+          new LineBasicMaterial({
+            color: col,
+            transparent: true,
+            opacity: residual ? 0.16 : recur ? 0.5 : 0.32
+          })
         );
         line.userData = meta;
         g.add(line);
         this.edgePickables.push(line);
-        if (e.style?.packet === false) return;
-        const curve = new LineCurve3(A, B);
+        if (residual || e.style?.packet === false) return;
+        const path = new CurvePath();
+        for (let i = 0; i < pts.length - 1; i++) path.add(new LineCurve3(pts[i], pts[i + 1]));
         const pm = new Mesh(
           new SphereGeometry(0.085, 8, 8),
           new MeshBasicMaterial({ color: col })
         );
         g.add(pm);
         this.packets.push({
-          curve,
+          curve: path,
           m: pm,
           phase: Math.random(),
           speed: e.speed || e.style?.speed || 1
@@ -32944,6 +32936,102 @@
       } else {
         this.frameCamera(data);
       }
+    }
+    // Compute an axis-aligned (orthogonal) route from node A to node B that leaves/enters on the
+    // node faces and detours around any *other* node it would pass through. Returns Vector3[] (the
+    // polyline corners). Pure geometry over resolved positions — no scene coordinates involved.
+    _routeOrthogonal(aNode, bNode, nodes, residual) {
+      const V = Vector3;
+      const ac = aNode.pos;
+      const bc = bNode.pos;
+      const ah = aNode.size.map((s) => s / 2);
+      const bh = bNode.size.map((s) => s / 2);
+      const d = [bc[0] - ac[0], bc[1] - ac[1], bc[2] - ac[2]];
+      let m = 0;
+      for (let k = 1; k < 3; k++) if (Math.abs(d[k]) > Math.abs(d[m])) m = k;
+      const [p, q] = [
+        [1, 2],
+        [0, 2],
+        [0, 1]
+      ][m];
+      const sgn = d[m] >= 0 ? 1 : -1;
+      const stub = 0.9;
+      const margin = 0.9;
+      const aFace = ac.slice();
+      aFace[m] = ac[m] + sgn * ah[m];
+      const bFace = bc.slice();
+      bFace[m] = bc[m] - sgn * bh[m];
+      const aOutM = ac[m] + sgn * (ah[m] + stub);
+      const bInM = bc[m] - sgn * (bh[m] + stub);
+      const obstacles = nodes.filter((n) => n !== aNode && n !== bNode).map((n) => ({
+        lo: [
+          n.pos[0] - n.size[0] / 2 - margin,
+          n.pos[1] - n.size[1] / 2 - margin,
+          n.pos[2] - n.size[2] / 2 - margin
+        ],
+        hi: [
+          n.pos[0] + n.size[0] / 2 + margin,
+          n.pos[1] + n.size[1] / 2 + margin,
+          n.pos[2] + n.size[2] / 2 + margin
+        ]
+      }));
+      const segHits = (s, e) => {
+        const lo = [Math.min(s[0], e[0]), Math.min(s[1], e[1]), Math.min(s[2], e[2])];
+        const hi = [Math.max(s[0], e[0]), Math.max(s[1], e[1]), Math.max(s[2], e[2])];
+        return obstacles.some(
+          (o) => lo[0] <= o.hi[0] && hi[0] >= o.lo[0] && lo[1] <= o.hi[1] && hi[1] >= o.lo[1] && lo[2] <= o.hi[2] && hi[2] >= o.lo[2]
+        );
+      };
+      const build = (lp, lq) => {
+        const pts = [];
+        const cur = aFace.slice();
+        const push = () => pts.push(new V(cur[0], cur[1], cur[2]));
+        push();
+        cur[m] = aOutM;
+        push();
+        if (cur[p] !== lp) {
+          cur[p] = lp;
+          push();
+        }
+        if (cur[q] !== lq) {
+          cur[q] = lq;
+          push();
+        }
+        cur[m] = bInM;
+        push();
+        if (cur[p] !== bFace[p]) {
+          cur[p] = bFace[p];
+          push();
+        }
+        if (cur[q] !== bFace[q]) {
+          cur[q] = bFace[q];
+          push();
+        }
+        cur[m] = bFace[m];
+        push();
+        return pts;
+      };
+      const clear = (pts) => {
+        for (let i = 0; i < pts.length - 1; i++)
+          if (segHits([pts[i].x, pts[i].y, pts[i].z], [pts[i + 1].x, pts[i + 1].y, pts[i + 1].z]))
+            return false;
+        return true;
+      };
+      const cands = [];
+      if (!residual) {
+        cands.push([bc[p], bc[q]]);
+        cands.push([ac[p], ac[q]]);
+      }
+      const offs = residual ? [3.2, 4.6, 6, -3.2, -4.6, -6] : [3, 4.4, 5.8, 7.2, -3, -4.4, -5.8, -7.2];
+      const baseP = (ac[p] + bc[p]) / 2;
+      const baseQ = (ac[q] + bc[q]) / 2;
+      for (const o of offs) cands.push([baseP + o, bc[q]]);
+      for (const o of offs) cands.push([bc[p], baseQ + o]);
+      for (const [lp, lq] of cands) {
+        const pts = build(lp, lq);
+        if (clear(pts)) return pts;
+      }
+      return [new V(aFace[0], aFace[1], aFace[2]), new V(bFace[0], bFace[1], bFace[2])];
     }
     frameCamera(data) {
       if (!this.camera) return;

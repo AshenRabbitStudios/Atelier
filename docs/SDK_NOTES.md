@@ -92,14 +92,38 @@ query({ options: { mcpServers: { my: { type:'sdk', name, instance: server } } } 
 
 Plugin-contributed tools (PLUGIN_API §5) register here; unload unregisters.
 
-## Hooks (P4 ambient Bash tap)
+## Hooks (P4 ambient Bash tap) — CONFIRMED against installed sdk.d.ts (v0.3.195), 2026-06-30
 
-`options.hooks` keyed by hook event with matcher + handler. (verify) event identifiers —
-docs rendered them as `pre_tool_use` / `post_tool_use`; CLAUDE.md/SPEC call them
-PreToolUse / PostToolUse. **Confirm exact casing in the installed `.d.ts` before coding
-P4.** Handler gets `{ toolName, input, toolUseId, agentId? }`; returns allow/deny
-(and `modifiedInput`). For the Bash tap we tail stdout/stderr into a `bash:<toolUseId>:stdout`
-DataBus channel.
+`options.hooks?: Partial<Record<HookEvent, HookCallbackMatcher[]>>`. Event names are **PascalCase**
+(`HOOK_EVENTS` includes `'PreToolUse'`, `'PostToolUse'`, `'PostToolUseFailure'`, …).
+
+```ts
+HookCallbackMatcher = { matcher?: string; hooks: HookCallback[]; timeout?: number }
+HookCallback = (input: HookInput, toolUseID: string | undefined,
+                opts: { signal: AbortSignal }) => Promise<HookJSONOutput>
+```
+
+- `matcher` is matched against the **tool name** for Pre/PostToolUse (e.g. `'Bash'`); still
+  defensively check `input.tool_name` in the handler.
+- `PreToolUseHookInput = BaseHookInput & { hook_event_name:'PreToolUse'; tool_name; tool_input:
+unknown; tool_use_id: string }`. (`tool_input` for Bash carries `.command`.)
+- `PostToolUseHookInput = BaseHookInput & { hook_event_name:'PostToolUse'; tool_name; tool_input;
+tool_response: unknown; tool_use_id; duration_ms? }`. `PostToolUseFailureHookInput` is the same
+  with `error: string` instead of `tool_response`.
+- `BaseHookInput`: `{ session_id; transcript_path; cwd; permission_mode?; agent_id?; agent_type?; … }`.
+- Return for a non-blocking observer: a `SyncHookJSONOutput` — `{ continue: true }` (all fields
+  optional; `{}` also works). Pre/PostToolUse can block via `{ decision:'block' }` / a
+  `*HookSpecificOutput` with `permissionDecision` — we do NOT; the tap is read-only.
+
+**CRITICAL — no streaming-stdout hook.** Pre/PostToolUse are discrete: PreToolUse fires _before_
+the Bash command runs (we get the command + tool_use_id); PostToolUse fires _after it completes_
+(we get `tool_response` = the **final, full** output). There is no event carrying partial stdout
+mid-command, and a hook cannot supply a tool result (only allow/deny/modify input — execution stays
+inside the SDK). So the Bash tap is **command-granular**, not sub-second live: announce the command
+on PreToolUse, publish its full ANSI-intact output on PostToolUse. Channel is **conversation-scoped
+`bash:stdout`** (not per-`toolUseId`) so the xterm pane can subscribe once before any command runs;
+each message is tagged with `toolUseId` so a future per-command view can demultiplex. (Deviation
+from ROADMAP's literal `bash:<toolUseId>:stdout` — logged in DECISIONS.md.)
 
 ## Loading project CLAUDE.md (per-instance) — refinement of CLAUDE.md
 
@@ -166,9 +190,10 @@ rendering option `preview` fields as HTML if we later want rich previews.
 
 ## Still to confirm before the phase that needs them
 
-- [ ] Hook event identifier casing in `Options.hooks` (P4 Bash tap).
+- [x] Hook event identifier casing in `Options.hooks` (P4 Bash tap) — **PascalCase, confirmed above.**
 - [ ] What enables file checkpointing so `rewindFiles` has snapshots to revert to (P1).
-- [ ] `mcpServers` config discriminant for in-process tools (`type:'sdk'`) (P4).
+- [ ] `mcpServers` config discriminant for in-process tools (`type:'sdk'`) (P4 S3) — SDK_NOTES shows
+      `{ type:'sdk', name, instance: server }`; re-confirm when wiring plugin backend tools.
 
 ## Input is user-messages-only — system prompt is the only system-role lever (confirmed v0.3.195)
 

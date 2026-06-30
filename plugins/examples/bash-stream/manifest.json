@@ -1,0 +1,10 @@
+{
+  "id": "bash-stream",
+  "name": "Bash Stream",
+  "version": "0.1.0",
+  "icon": "M2.5 3h11v10h-11zM4.5 6l2 2-2 2M8.5 10.5h3",
+  "kind": "panel",
+  "entry": "index.html",
+  "permissions": ["data:subscribe"],
+  "defaultDock": "bottom"
+}

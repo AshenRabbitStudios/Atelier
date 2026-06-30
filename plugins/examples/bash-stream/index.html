@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Bash Stream</title>
+    <link rel="stylesheet" href="atelier-plugin://bash-stream/vendor/xterm.css" />
+    <script src="atelier-plugin://bash-stream/vendor/xterm.js"></script>
+    <script src="atelier-plugin://bash-stream/vendor/addon-fit.js"></script>
+    <script src="atelier-plugin://__runtime__/atelier.js"></script>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: var(--bg-2, #0f1117);
+        color: var(--text, #e7eaf0);
+        font-family: var(--font, system-ui, sans-serif);
+      }
+
+      #root {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+
+      /* Ambient/reality marker — this is the agent's ACTUAL shell I/O, not anything it authored. */
+      #banner {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 5px 12px;
+        border-bottom: 1px solid var(--border, #252b37);
+        background: var(--surface, #14171e);
+        font-size: 10px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--warn, #d6a14a);
+        user-select: none;
+      }
+
+      #banner .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--warn, #d6a14a);
+        box-shadow: 0 0 6px var(--warn, #d6a14a);
+      }
+
+      #banner .sub {
+        color: var(--faint, #5e6677);
+        text-transform: none;
+        letter-spacing: 0;
+        font-size: 10px;
+      }
+
+      #term-wrap {
+        flex: 1 1 0;
+        min-height: 0;
+        padding: 6px 8px;
+      }
+
+      .xterm {
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div id="banner">
+        <span class="dot"></span>
+        <span>Reality · ambient bash</span>
+        <span class="sub" id="status"
+          >— the agent's real shell output, observed (not authored)</span
+        >
+      </div>
+      <div id="term-wrap"></div>
+    </div>
+
+    <script>
+      const wrap = document.getElementById('term-wrap')
+      const status = document.getElementById('status')
+
+      function tokenColor(name, fallback) {
+        const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+        return v || fallback
+      }
+
+      let term = null
+      let fit = null
+      let lastToolUseId = null
+
+      // xterm expects CRLF; captured command output uses bare LF. Normalize so lines don't stair-step.
+      function normalize(text) {
+        return String(text).replace(/\r?\n/g, '\r\n')
+      }
+
+      function onMessage(msg) {
+        if (!term || !msg || typeof msg !== 'object') return
+        if (msg.phase === 'start') {
+          // Blank line between commands, then a cyan prompt line.
+          if (lastToolUseId !== null) term.write('\r\n')
+          lastToolUseId = msg.toolUseId
+          term.write('\x1b[1;36m$ ' + normalize(msg.command || '') + '\x1b[0m\r\n')
+        } else if (msg.phase === 'error') {
+          term.write('\x1b[31m' + normalize(msg.text || '') + '\x1b[0m\r\n')
+        } else {
+          term.write(normalize(msg.text || ''))
+          if (msg.text && !/\n$/.test(msg.text)) term.write('\r\n')
+        }
+      }
+
+      window.atelier.on('load', async () => {
+        if (typeof Terminal === 'undefined') {
+          status.textContent = '— xterm failed to load (check vendor assets)'
+          return
+        }
+        term = new Terminal({
+          convertEol: false,
+          fontFamily: tokenColor('--mono', 'monospace'),
+          fontSize: 12,
+          scrollback: 5000,
+          theme: {
+            background: tokenColor('--bg-2', '#0f1117'),
+            foreground: tokenColor('--text', '#e7eaf0'),
+            cursor: tokenColor('--accent', '#5b9cff')
+          },
+          disableStdin: true
+        })
+        try {
+          fit = new FitAddon.FitAddon()
+          term.loadAddon(fit)
+        } catch (_) {
+          /* fit addon optional */
+        }
+        term.open(wrap)
+        const doFit = () => {
+          try {
+            fit && fit.fit()
+          } catch (_) {
+            /* ignore */
+          }
+        }
+        doFit()
+        new ResizeObserver(doFit).observe(wrap)
+        term.write('\x1b[2m(waiting for the agent to run a shell command…)\x1b[0m\r\n')
+
+        try {
+          await window.atelier.data.subscribe('bash:stdout', onMessage)
+        } catch (e) {
+          status.textContent = '— ' + (e && e.message ? e.message : String(e))
+        }
+      })
+    </script>
+  </body>
+</html>

@@ -3,10 +3,11 @@
 ## Status
 
 - **Current phase:** P4 — Data channels + tool-contributing plugins + ambient Bash tap.
-  **Slice 1 (DataBus + live file tail) landed** (branch `feat/p4-data-channels`, gate-green — see
-  the P4 section). P0/P1/P3 are functionally complete (human spot-checks outstanding); P2 + P5 are
-  declared done by the user (2026-06-30). The cleanup/context-push refactor (poll loops → event
-  push) was merged to main (49a49e3, CI green) first, so the DataBus reuses that one push path.
+  **Slices 1 (DataBus + live file tail) and 2 (ambient Bash tap) landed** (branch
+  `feat/p4-data-channels`, gate-green — see the P4 sections). S3 (tool-contributing plugins) is the
+  last slice. P0/P1/P3 are functionally complete (human spot-checks outstanding); P2 + P5 are
+  declared done by the user (2026-06-30). A renderer crash-recovery fix (ErrorBoundary +
+  render-process-gone auto-reload) landed on main (6774568, CI green) and is merged into this branch.
 - **Verified headlessly (2026-06-28):** `npm run typecheck` clean (both bundles). Earlier:
   `npm run build` clean; `npm run dev` launches Electron (4 processes, no errors); a one-shot
   SDK probe confirmed subscription auth (apiKeySource `none`, no API key) and token-by-token
@@ -40,6 +41,33 @@
       adds the single Claude pane today).
 - [ ] Font-scale control on the chat panel — not yet.
       _(Full P2 begins after P1's rewind item closes.)_
+
+## P4 — Data channels (slice 2: ambient Bash tap) — landed 2026-06-30
+
+Read-only Pre/PostToolUse hooks tap the agent's Bash tool onto the DataBus; an xterm.js pane renders
+it. Gate green (typecheck node+web, 68 tests, lint, format, build). Branch `feat/p4-data-channels`.
+
+- SDK verification first (CLAUDE.md): confirmed hook surface against sdk.d.ts v0.3.195 — events are
+  PascalCase, and **no streaming-stdout hook exists** (Pre = before/command, Post = after/full output).
+  Recorded in docs/SDK_NOTES.md. So the tap is command-granular (announce → full output), not live
+  token-by-token.
+- `electron/agent/bashTap.ts` — `BashPublish` type + `bashResponseText` (faithful, ANSI-preserved
+  extraction across the `tool_response` shapes). 6 unit tests (`bashTap.test.ts`).
+- `AgentManager` — `buildBashHooks` adds PreToolUse/PostToolUse/PostToolUseFailure matchers scoped to
+  `Bash`, publishing `{toolUseId, phase, command|text}` to the conversation-scoped `bash:stdout`
+  channel; threaded as a `bash` provider (Session ctor + AgentManager ctor + `hooks()`); wired in
+  main.ts to `dataBus.publish` (forward-ref). Hooks return `{continue:true}` — never block.
+- `plugins/examples/bash-stream/` — an **xterm.js** pane (xterm + addon-fit vendored under `vendor/`,
+  added to `.prettierignore`; xterm is a devDep), subscribes to `bash:stdout`, writes each frame
+  (CRLF-normalized, ANSI intact), with a visible "Reality · ambient bash" banner (acceptance: marked
+  ambient, not agent-authored).
+
+**Needs human spot-check** (GUI, not headlessly verifiable):
+
+- Enable `bash-stream`, ask the agent to run a shell command (e.g. `ls` / `echo`), confirm the
+  command + its real output appear in the xterm pane, ANSI/colors intact, banner visibly marks it
+  ambient. (Appears when the command completes — command-granular, by SDK limitation.)
+- A failing command (e.g. `ls /nope`) shows its stderr as an error frame.
 
 ## P4 — Data channels (slice 1: DataBus + live file tail) — landed 2026-06-30
 

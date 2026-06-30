@@ -4,6 +4,7 @@ import {
   query,
   listSessions,
   deleteSession,
+  type HookInput,
   type Options,
   type PermissionMode,
   type PermissionResult,
@@ -12,23 +13,26 @@ import {
   type SDKMessage,
   type SDKUserMessage
 } from '@anthropic-ai/claude-agent-sdk'
-import type {
-  AgentEvent,
-  AgentInstance,
-  AgentStatus,
-  BranchInfo,
-  CreateOpts,
-  EffortLevel,
-  ForkPoints,
-  ModelOption,
-  Question,
-  SessionSummary,
-  TranscriptMessage,
-  UsageInfo,
-  UsageWindow
+import {
+  BASH_STREAM_CHANNEL,
+  type AgentEvent,
+  type AgentInstance,
+  type AgentStatus,
+  type BashStreamMessage,
+  type BranchInfo,
+  type CreateOpts,
+  type EffortLevel,
+  type ForkPoints,
+  type ModelOption,
+  type Question,
+  type SessionSummary,
+  type TranscriptMessage,
+  type UsageInfo,
+  type UsageWindow
 } from '../shared/events.js'
 import type { ConversationPluginState } from '../shared/plugins.js'
 import { readTranscript, editMessageText, parentUuidOf, childUuidOf } from './sessionStore.js'
+import { bashResponseText, type BashPublish } from './bashTap.js'
 import {
   listConversations,
   saveConversation,
@@ -185,6 +189,8 @@ class Session {
   contextProvider?: ContextProvider
   mcpProvider?: McpProvider
   instructionProvider?: InstructionProvider
+  /** Ambient Bash tap: publishes the agent's real shell I/O onto the bash-stream DataBus channel. */
+  bashProvider?: BashPublish
 
   private input = new InputQueue()
   // Auto-resume: when on, a usage-limit interrupt schedules a one-shot wake-up at the reported reset
@@ -238,12 +244,18 @@ class Session {
     opts: CreateOpts,
     private emit: (e: AgentEvent) => void,
     restore?: RestoreData,
-    hooks?: { context?: ContextProvider; mcp?: McpProvider; instruction?: InstructionProvider }
+    hooks?: {
+      context?: ContextProvider
+      mcp?: McpProvider
+      instruction?: InstructionProvider
+      bash?: BashPublish
+    }
   ) {
     // Set before start() so a restored conversation's context tools are present on the first query.
     this.contextProvider = hooks?.context
     this.mcpProvider = hooks?.mcp
     this.instructionProvider = hooks?.instruction
+    this.bashProvider = hooks?.bash
     this.id = restore?.id ?? randomUUID()
     this.cwd = opts.cwd
     this.title = opts.title ?? (basename(opts.cwd) || opts.cwd)
@@ -326,10 +338,72 @@ class Session {
         const servers = this.mcpProvider?.(this.id, this.pluginState)
         return servers ? { mcpServers: servers } : {}
       })(),
+      // Ambient Bash tap: observe (never block) Bash tool calls and stream their I/O to the pane.
+      ...(this.bashProvider ? { hooks: this.buildBashHooks(this.bashProvider) } : {}),
       // Resume the active branch's session so history is preserved.
       ...(this.sessionId ? { resume: this.sessionId } : {}),
       ...(opts?.resumeAt ? { resumeSessionAt: opts.resumeAt } : {}),
       ...(opts?.fork ? { forkSession: true } : {})
+    }
+  }
+
+  /**
+   * Read-only Pre/PostToolUse hooks scoped to the Bash tool. PreToolUse announces the command;
+   * PostToolUse(/Failure) publishes its full output (ANSI intact) — there is no streaming-stdout
+   * hook, so this is command-granular (see docs/SDK_NOTES.md). Hooks return `{ continue: true }`
+   * so the tap never blocks execution; permission still flows through `canUseTool`.
+   */
+  private buildBashHooks(publish: BashPublish): Options['hooks'] {
+    const tap = (msg: BashStreamMessage): void => publish(this.id, BASH_STREAM_CHANNEL, msg)
+    return {
+      PreToolUse: [
+        {
+          matcher: 'Bash',
+          hooks: [
+            async (input: HookInput) => {
+              if (input.hook_event_name === 'PreToolUse' && input.tool_name === 'Bash') {
+                const cmd = (input.tool_input as { command?: unknown })?.command
+                tap({
+                  toolUseId: input.tool_use_id,
+                  phase: 'start',
+                  command: typeof cmd === 'string' ? cmd : ''
+                })
+              }
+              return { continue: true }
+            }
+          ]
+        }
+      ],
+      PostToolUse: [
+        {
+          matcher: 'Bash',
+          hooks: [
+            async (input: HookInput) => {
+              if (input.hook_event_name === 'PostToolUse' && input.tool_name === 'Bash') {
+                tap({
+                  toolUseId: input.tool_use_id,
+                  phase: 'output',
+                  text: bashResponseText(input.tool_response)
+                })
+              }
+              return { continue: true }
+            }
+          ]
+        }
+      ],
+      PostToolUseFailure: [
+        {
+          matcher: 'Bash',
+          hooks: [
+            async (input: HookInput) => {
+              if (input.hook_event_name === 'PostToolUseFailure' && input.tool_name === 'Bash') {
+                tap({ toolUseId: input.tool_use_id, phase: 'error', text: input.error })
+              }
+              return { continue: true }
+            }
+          ]
+        }
+      ]
     }
   }
 
@@ -1002,19 +1076,22 @@ export class AgentManager {
     private emit: (e: AgentEvent) => void,
     private contextProvider?: ContextProvider,
     private mcpProvider?: McpProvider,
-    private instructionProvider?: InstructionProvider
+    private instructionProvider?: InstructionProvider,
+    private bashPublish?: BashPublish
   ) {}
 
-  /** The context-plugin hooks passed into every new/restored Session constructor. */
+  /** The plugin hooks passed into every new/restored Session constructor. */
   private hooks(): {
     context?: ContextProvider
     mcp?: McpProvider
     instruction?: InstructionProvider
+    bash?: BashPublish
   } {
     return {
       context: this.contextProvider,
       mcp: this.mcpProvider,
-      instruction: this.instructionProvider
+      instruction: this.instructionProvider,
+      bash: this.bashPublish
     }
   }
 

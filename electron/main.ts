@@ -123,7 +123,10 @@ const agents = new AgentManager(
         mainWindow.webContents.send(IPC.contextChanged, { conversationId, pluginId, key })
       }
     }),
-  (conversationId, pluginState) => buildSystemInstruction(plugins, conversationId, pluginState)
+  (conversationId, pluginState) => buildSystemInstruction(plugins, conversationId, pluginState),
+  // Ambient Bash tap → DataBus. Forward-referenced (dataBus is built just below, since it needs
+  // agents.cwdFor); the closure only runs later when a Bash hook fires, by which point it's set.
+  (conversationId, channel, data) => dataBus.publish(conversationId, channel, data)
 )
 
 // DataBus (P4): pub/sub between plugins and ambient sources. The file source maps a `file:<rel>`

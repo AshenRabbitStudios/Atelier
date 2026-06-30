@@ -7,3 +7,4 @@ package-lock.json
 design_handoff_visual_refresh
 ai architecture visual design handoff
 plugins/hologram/hologram.bundle.js
+plugins/examples/bash-stream/vendor

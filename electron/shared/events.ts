@@ -454,6 +454,23 @@ export interface DataMessageEvent {
   data: unknown
 }
 
+// ---- Ambient Bash tap (P4 S2) ----
+
+/**
+ * The DataBus channel the Bash tap publishes to. Conversation-scoped (one per conversation, not per
+ * command) so the bash-stream pane can subscribe once before any command runs. Each message is
+ * tagged with `toolUseId`. This is "reality" (the agent's real shell I/O), not agent-authored.
+ */
+export const BASH_STREAM_CHANNEL = 'bash:stdout'
+
+/** One frame on the bash-stream channel. `start` = a command began; `output`/`error` = its result. */
+export interface BashStreamMessage {
+  toolUseId: string
+  phase: 'start' | 'output' | 'error'
+  command?: string // present on 'start'
+  text?: string // present on 'output'/'error' — raw, ANSI intact
+}
+
 /** The typed surface exposed on `window.atelier` by the preload bridge. */
 export interface AtelierAPI {
   agent: {

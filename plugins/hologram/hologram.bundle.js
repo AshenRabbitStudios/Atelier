@@ -33142,6 +33142,40 @@
         ...extra || {}
       });
     }
+    // Agent → pane control: focus/highlight a node by id (optionally first switching to its cached
+    // path), then fly the camera to frame it. Returns false when it can't yet (mid-tween, or the level
+    // isn't loaded) so the pane can retry on its next poll — e.g. right after the agent pushes a scene.
+    focusNode(cmd) {
+      if (!cmd || !cmd.nodeId) return true;
+      if (this.tween) return false;
+      if (this._pushed && Array.isArray(cmd.path) && cmd.path.length) {
+        const key = cmd.path.join("/");
+        const cur = this.crumbs[this.crumbs.length - 1];
+        if (key !== cur) {
+          if (!this.scenes[key]) return false;
+          const idx = this.crumbs.indexOf(key);
+          this.crumbs = idx >= 0 ? this.crumbs.slice(0, idx + 1) : [key];
+          this.renderScene(this.scenes[key].scene, true);
+          this._emitView();
+        }
+      }
+      const mesh = this.pickables.find((m) => m.userData.node.id === cmd.nodeId);
+      if (!mesh) return false;
+      this.selected.forEach((m) => this.restore(m));
+      this.selected = [mesh];
+      this.highlight(mesh);
+      this.opts.onSelect?.([mesh.userData.node]);
+      const np = mesh.position.clone();
+      const dir = this.camera.position.clone().sub(np);
+      if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1);
+      dir.normalize();
+      const s = mesh.userData.node.size || [3, 3, 3];
+      const dist = Math.max(s[0], s[1], s[2]) * 2.2 + 6;
+      this.flyTo(np.clone().add(dir.multiplyScalar(dist)), np, 700, () => {
+        this.controls.autoRotate = this.autoRotate;
+      });
+      return true;
+    }
     setGlow(n) {
       this.glow = n;
       if (this.bloom) this.bloom.strength = n;

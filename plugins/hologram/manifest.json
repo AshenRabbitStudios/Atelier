@@ -20,6 +20,13 @@
       "format": "json",
       "maxTokens": 16000,
       "inject": false
+    },
+    {
+      "key": "command",
+      "label": "Hologram command",
+      "format": "json",
+      "maxTokens": 400,
+      "inject": false
     }
   ]
 }

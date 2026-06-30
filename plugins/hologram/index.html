@@ -878,6 +878,29 @@
         }
         setInterval(pollArchitecture, 1000)
 
+        // Agent → pane control: poll the `command` export (e.g. focus a node). Unhandled commands
+        // (scene still loading / mid-animation) stay un-consumed so they retry on the next tick.
+        var lastCmd = null
+        async function pollCommand() {
+          if (!engine) return
+          try {
+            var raw = await window.atelier.context.get('command')
+            var val = typeof raw === 'string' ? raw : ''
+            if (!val || val === lastCmd) return
+            var cmd
+            try {
+              cmd = JSON.parse(val)
+            } catch (e) {
+              lastCmd = val
+              return
+            }
+            if (engine.focusNode(cmd)) lastCmd = val
+          } catch (e) {
+            /* host not ready */
+          }
+        }
+        setInterval(pollCommand, 700)
+
         window.atelier.on('load', boot)
         window.atelier.on('unload', teardown)
         // If the runtime already fired 'load' before this script registered, boot on next tick.

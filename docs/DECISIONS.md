@@ -66,3 +66,13 @@
   the agent to push the child level via an `{action:'expand', path}` request on the `selection` export.
   The single `architecture` export always holds the scene to display; the pane caches each level it
   receives for instant Back. (docs/HOLOGRAM_DATA_MODEL.md §5)
+
+- 2026-06-30 **Multi-agent workflow = git worktrees, one branch each** (docs/MULTI_AGENT.md). The repo
+  is edited by several concurrent Claude sessions; sharing one working tree + `main` causes commit
+  races (a concurrent session moving `HEAD` produced a near-empty `git diff HEAD` mid-task). Fix is
+  _filesystem_ isolation: `scripts/worktree.mjs add <topic>` creates a sibling worktree + `feat/<topic>`
+  branch and symlinks `node_modules` (junction on Windows) so it runs without reinstall; merge back
+  through `main` + `ci:status`. Sub-agents use the harness `Agent(isolation:"worktree")`. The generated
+  `plugins/hologram/hologram.bundle.js` is kept **tracked** (so the app runs from a clean checkout —
+  `build:hologram` is standalone, not wired into `dev`/`build`) but marked `-diff linguist-generated`
+  in `.gitattributes` and is **never hand-merged**: on conflict, rebuild and take the regenerated file.

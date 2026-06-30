@@ -70,6 +70,23 @@ If a confirmed API contradicts SPEC.md, follow the API and note the deviation in
 - When something is genuinely ambiguous and not answered by SPEC.md, write the question in
   `docs/PROGRESS.md`, pick the most reversible option, proceed, and flag it. Don't stall.
 
+## Working in parallel (worktrees & sub-agents)
+
+This repo is often edited by **more than one Claude session at once** (the user runs several
+Claude CLI terminals; you may also spawn sub-agents). **docs/MULTI_AGENT.md** is the normative
+guide — read it before starting if another session might be active. Non-negotiables:
+
+- **One git worktree + one branch per parallel task.** Never let two sessions edit the same
+  directory. Create one with `node scripts/worktree.mjs add <topic>` (own dir, own branch,
+  `node_modules` linked). Branch isolation alone is not enough — the shared _filesystem_ is what
+  races.
+- **Merge back through `main`, then run `npm run ci:status` yourself.**
+- **Never hand-merge `plugins/hologram/hologram.bundle.js`** — it is generated; on conflict
+  rebuild with `npm run build:hologram` and take the rebuilt version.
+- A wrong-looking `git diff HEAD` (near-empty after a big edit, or a commit that "already has"
+  your change) usually means a concurrent session moved `main`. Check `git reflog` /
+  `git log origin/main..HEAD` before assuming anything exotic.
+
 ## Definition of done (per phase)
 
 A phase is done when: it builds with no type errors; `npm run dev` launches; the phase's

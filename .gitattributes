@@ -1,6 +1,11 @@
 # Normalize line endings: store text as LF in the repo, check out native.
 * text=auto eol=lf
 
+# Generated esbuild artifact — committed so the app runs from a clean checkout, but never
+# hand-merged or reviewed as a diff. On conflict, rebuild it (`npm run build:hologram`) and take
+# the rebuilt version. See docs/MULTI_AGENT.md "The bundle rule".
+plugins/hologram/hologram.bundle.js -diff linguist-generated
+
 # Binary assets — never normalize.
 *.png binary
 *.jpg binary

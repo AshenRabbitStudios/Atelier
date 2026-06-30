@@ -20,6 +20,7 @@
     "test:watch": "vitest",
     "ci:status": "node scripts/ci-status.mjs",
     "ci:check": "node scripts/ci-status.mjs --no-wait",
+    "wt": "node scripts/worktree.mjs",
     "build:hologram": "esbuild plugins/hologram/entry.js --bundle --format=iife --outfile=plugins/hologram/hologram.bundle.js --platform=browser --legal-comments=none"
   },
   "dependencies": {

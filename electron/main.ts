@@ -1,4 +1,4 @@
-import { join, dirname } from 'node:path'
+import { join, dirname, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { existsSync } from 'node:fs'
 import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
@@ -30,11 +30,14 @@ import {
   PluginStorageKeysSchema,
   PluginContextGetSchema,
   PluginContextSetSchema,
+  PluginDataChannelSchema,
+  PluginDataPublishSchema,
   type AgentEvent,
   type AuthStatus
 } from './shared/events.js'
 import type { DiscoveredPlugin } from './shared/plugins.js'
 import { PluginRegistry } from './plugin/PluginRegistry.js'
+import { DataBus, createFileSource } from './plugin/DataBus.js'
 import { registerPluginScheme, handlePluginProtocol } from './plugin/protocol.js'
 import { pluginStorageSet, pluginStorageKeys } from './plugin/pluginStorage.js'
 import {
@@ -123,6 +126,23 @@ const agents = new AgentManager(
   (conversationId, pluginState) => buildSystemInstruction(plugins, conversationId, pluginState)
 )
 
+// DataBus (P4): pub/sub between plugins and ambient sources. The file source maps a `file:<rel>`
+// channel to a path scoped within the owning conversation's cwd (never outside — invariant #3).
+function resolveWithinCwd(conversationId: string, rel: string): string | null {
+  const cwd = agents.cwdFor(conversationId)
+  if (!cwd) return null
+  const base = resolve(cwd)
+  const full = resolve(base, rel)
+  if (full !== base && !full.startsWith(base + sep)) return null
+  return full
+}
+const dataBus = new DataBus(
+  (msg) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.dataMessage, msg)
+  },
+  [createFileSource(resolveWithinCwd)]
+)
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -168,6 +188,7 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.agentClose, async (_e, payload) => {
     const { instanceId } = InstanceRefSchema.parse(payload)
+    dataBus.dropConversation(instanceId) // release any file watchers this conversation opened
     await agents.close(instanceId)
   })
 
@@ -370,6 +391,21 @@ function registerIpc(): void {
   ipcMain.handle(IPC.pluginContextSet, (_e, payload) => {
     const { conversationId, pluginId, key, value } = PluginContextSetSchema.parse(payload)
     pluginStorageSet(conversationId, pluginId, contextStorageKey(key), value)
+  })
+
+  ipcMain.handle(IPC.pluginDataSubscribe, async (_e, payload) => {
+    const { conversationId, pluginId, channel } = PluginDataChannelSchema.parse(payload)
+    await dataBus.subscribe(conversationId, pluginId, channel)
+  })
+
+  ipcMain.handle(IPC.pluginDataUnsubscribe, (_e, payload) => {
+    const { conversationId, pluginId, channel } = PluginDataChannelSchema.parse(payload)
+    dataBus.unsubscribe(conversationId, pluginId, channel)
+  })
+
+  ipcMain.handle(IPC.pluginDataPublish, (_e, payload) => {
+    const { conversationId, channel, data } = PluginDataPublishSchema.parse(payload)
+    dataBus.publish(conversationId, channel, data)
   })
 }
 

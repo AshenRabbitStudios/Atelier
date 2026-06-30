@@ -347,6 +347,20 @@ export const PluginContextSetSchema = z.object({
   value: z.string()
 })
 
+// DataBus (P4): subscribe/unsubscribe a plugin to a channel, or publish onto one.
+export const PluginDataChannelSchema = z.object({
+  conversationId: z.string().min(1),
+  pluginId: z.string().min(1),
+  channel: z.string().min(1)
+})
+
+export const PluginDataPublishSchema = z.object({
+  conversationId: z.string().min(1),
+  pluginId: z.string().min(1),
+  channel: z.string().min(1),
+  data: z.unknown()
+})
+
 // ---- Auth safety (billing) ----
 
 export interface AuthStatus {
@@ -400,6 +414,9 @@ export const IPC = {
   pluginStorageKeys: 'plugin:storage-keys',
   pluginContextGet: 'plugin:context-get',
   pluginContextSet: 'plugin:context-set',
+  pluginDataSubscribe: 'plugin:data-subscribe',
+  pluginDataUnsubscribe: 'plugin:data-unsubscribe',
+  pluginDataPublish: 'plugin:data-publish',
   authStatus: 'auth:status',
   appDefaultCwd: 'app:default-cwd',
   appPickFolder: 'app:pick-folder',
@@ -410,7 +427,8 @@ export const IPC = {
   // push (main → renderer)
   agentEvent: 'agent:event',
   pluginsChanged: 'plugins:changed',
-  contextChanged: 'context:changed'
+  contextChanged: 'context:changed',
+  dataMessage: 'data:message'
 } as const
 
 /**
@@ -422,6 +440,18 @@ export interface ContextChangedEvent {
   conversationId: string
   pluginId: string
   key: string
+}
+
+/**
+ * Pushed (main → renderer) when a value is published on a DataBus channel the plugin subscribes to.
+ * Tagged with the target pluginId + conversation so the relay routes it to the right mounted pane
+ * (mirrors ContextChangedEvent routing).
+ */
+export interface DataMessageEvent {
+  conversationId: string
+  pluginId: string
+  channel: string
+  data: unknown
 }
 
 /** The typed surface exposed on `window.atelier` by the preload bridge. */
@@ -482,8 +512,17 @@ export interface AtelierAPI {
     storageKeys(conversationId: string, pluginId: string): Promise<string[]>
     contextGet(conversationId: string, pluginId: string, key: string): Promise<string>
     contextSet(conversationId: string, pluginId: string, key: string, value: string): Promise<void>
+    dataSubscribe(conversationId: string, pluginId: string, channel: string): Promise<void>
+    dataUnsubscribe(conversationId: string, pluginId: string, channel: string): Promise<void>
+    dataPublish(
+      conversationId: string,
+      pluginId: string,
+      channel: string,
+      data: unknown
+    ): Promise<void>
     onChanged(cb: (plugins: DiscoveredPlugin[]) => void): () => void
     onContextChanged(cb: (e: ContextChangedEvent) => void): () => void
+    onDataMessage(cb: (e: DataMessageEvent) => void): () => void
   }
   auth: {
     status(): Promise<AuthStatus>

@@ -1,5 +1,11 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
-import { IPC, type AgentEvent, type AtelierAPI, type ContextChangedEvent } from './shared/events.js'
+import {
+  IPC,
+  type AgentEvent,
+  type AtelierAPI,
+  type ContextChangedEvent,
+  type DataMessageEvent
+} from './shared/events.js'
 import type { DiscoveredPlugin } from './shared/plugins.js'
 
 // The ONLY bridge between the sandboxed renderer and the privileged main process.
@@ -69,6 +75,12 @@ const api: AtelierAPI = {
       ipcRenderer.invoke(IPC.pluginContextGet, { conversationId, pluginId, key }),
     contextSet: (conversationId, pluginId, key, value) =>
       ipcRenderer.invoke(IPC.pluginContextSet, { conversationId, pluginId, key, value }),
+    dataSubscribe: (conversationId, pluginId, channel) =>
+      ipcRenderer.invoke(IPC.pluginDataSubscribe, { conversationId, pluginId, channel }),
+    dataUnsubscribe: (conversationId, pluginId, channel) =>
+      ipcRenderer.invoke(IPC.pluginDataUnsubscribe, { conversationId, pluginId, channel }),
+    dataPublish: (conversationId, pluginId, channel, data) =>
+      ipcRenderer.invoke(IPC.pluginDataPublish, { conversationId, pluginId, channel, data }),
     onChanged: (cb) => {
       const listener = (_e: IpcRendererEvent, plugins: DiscoveredPlugin[]) => cb(plugins)
       ipcRenderer.on(IPC.pluginsChanged, listener)
@@ -81,6 +93,13 @@ const api: AtelierAPI = {
       ipcRenderer.on(IPC.contextChanged, listener)
       return () => {
         ipcRenderer.removeListener(IPC.contextChanged, listener)
+      }
+    },
+    onDataMessage: (cb) => {
+      const listener = (_e: IpcRendererEvent, evt: DataMessageEvent) => cb(evt)
+      ipcRenderer.on(IPC.dataMessage, listener)
+      return () => {
+        ipcRenderer.removeListener(IPC.dataMessage, listener)
       }
     }
   },

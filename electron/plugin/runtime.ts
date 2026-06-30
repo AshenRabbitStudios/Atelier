@@ -11,6 +11,7 @@ export const RUNTIME_JS = String.raw`
   var pending = new Map()
   var seq = 0
   var listeners = { load: [], unload: [], reload: [], context: [] }
+  var dataListeners = {} // channel -> [cb] for atelier.data.subscribe
 
   function call(ns, method, args) {
     return new Promise(function (resolve, reject) {
@@ -35,6 +36,17 @@ export const RUNTIME_JS = String.raw`
       // var(--surface)/var(--text)/… and read as native across the iframe boundary.
       var root = document.documentElement
       for (var k in d.payload) root.style.setProperty(k, d.payload[k])
+      return
+    }
+    if (d.__atelierEvent && d.event === 'data' && d.payload) {
+      // A value arrived on a subscribed DataBus channel — dispatch to that channel's callbacks only.
+      var dcbs = dataListeners[d.payload.channel]
+      if (dcbs) {
+        dcbs = dcbs.slice()
+        for (var j = 0; j < dcbs.length; j++) {
+          try { dcbs[j](d.payload.data) } catch (err) { /* isolate a plugin handler that threw */ }
+        }
+      }
       return
     }
     if (d.__atelierEvent && listeners[d.event]) {
@@ -62,6 +74,21 @@ export const RUNTIME_JS = String.raw`
       // sees it as context every turn and updates it via its tool. Needs permission "context".
       get: function (key) { return call('context', 'get', [key]) },
       set: function (key, value) { return call('context', 'set', [key, value]) }
+    },
+    data: {
+      // Subscribe to a DataBus channel (e.g. "file:docs/STATUS.md"); cb fires with each value,
+      // including the current one on subscribe. Needs permission "data:subscribe".
+      subscribe: function (channel, cb) {
+        if (!dataListeners[channel]) dataListeners[channel] = []
+        dataListeners[channel].push(cb)
+        return call('data', 'subscribe', [channel])
+      },
+      unsubscribe: function (channel) {
+        delete dataListeners[channel]
+        return call('data', 'unsubscribe', [channel])
+      },
+      // Publish a value onto a channel for other subscribers. Needs permission "data:publish".
+      publish: function (channel, value) { return call('data', 'publish', [channel, value]) }
     },
     on: function (event, cb) {
       if (listeners[event]) listeners[event].push(cb)

@@ -2,10 +2,11 @@
 
 ## Status
 
-- **Current phase:** P3 — Plugin host. **Backend slice landed** (registry/watcher/schema,
-  per-conversation enablement, storage, `atelier-plugin://` sandbox protocol + runtime, IPC,
-  hello-panel, 11 tests — see P3 section). Renderer rail/pane is next. P1 is functionally
-  complete (rewind descoped); P2 partially started early (per-conversation layout persistence).
+- **Current phase:** P4 — Data channels + tool-contributing plugins + ambient Bash tap.
+  **Slice 1 (DataBus + live file tail) landed** (branch `feat/p4-data-channels`, gate-green — see
+  the P4 section). P0/P1/P3 are functionally complete (human spot-checks outstanding); P2 + P5 are
+  declared done by the user (2026-06-30). The cleanup/context-push refactor (poll loops → event
+  push) was merged to main (49a49e3, CI green) first, so the DataBus reuses that one push path.
 - **Verified headlessly (2026-06-28):** `npm run typecheck` clean (both bundles). Earlier:
   `npm run build` clean; `npm run dev` launches Electron (4 processes, no errors); a one-shot
   SDK probe confirmed subscription auth (apiKeySource `none`, no API key) and token-by-token
@@ -39,6 +40,37 @@
       adds the single Claude pane today).
 - [ ] Font-scale control on the chat panel — not yet.
       _(Full P2 begins after P1's rewind item closes.)_
+
+## P4 — Data channels (slice 1: DataBus + live file tail) — landed 2026-06-30
+
+The `DataBus` + `data` host API, with a built-in file source and a `living-doc` example. Gate green
+(typecheck node+web, 62 tests, lint, format, build). Branch `feat/p4-data-channels`.
+
+- `electron/plugin/DataBus.ts` — per-conversation pub/sub. `subscribe/unsubscribe/publish`; sources
+  open lazily on a channel's first subscriber and close on its last; the last value is cached and
+  replayed to late joiners; `dropConversation` releases a conversation's channels on close. The
+  `createFileSource` source tails `file:<rel>` (full contents on subscribe + on every change,
+  debounced 50ms; read failures emit `{error}`).
+- Path scoping: `resolveWithinCwd` (main.ts) maps a `file:` channel to a path **inside the owning
+  conversation's cwd** and rejects escapes — a plugin can only tail files within its project.
+- Wiring mirrors `context:changed`: `data` namespace in `runtime.ts` (a per-channel listener map),
+  `data` branch in the `PluginPane` relay (perm-checked: `data:subscribe`/`data:publish`),
+  `onDataMessage` routed to the owning pane by `pluginId`+`conversationId`, IPC + Zod schemas
+  (`PluginDataChannelSchema`/`PluginDataPublishSchema`) + preload bridge. `AgentManager.cwdFor`.
+- `plugins/examples/living-doc/` — a panel that live-tails a project file (default `docs/PROGRESS.md`),
+  path persisted via `storage`.
+
+**Needs human spot-check** (GUI, not headlessly verifiable):
+
+- Enable `living-doc` in a conversation whose cwd is this repo → it renders `docs/PROGRESS.md`; have
+  the agent (or you) edit that file → the pane updates live with **no reload and no polling**.
+- Point it at a path outside the cwd (e.g. `../secret`) → it shows the "outside the conversation
+  folder" error rather than reading the file.
+
+**Remaining P4 slices:** S2 — ambient Bash tap (Pre/PostToolUse hook → `bash:<toolUseId>:stdout`
+channel + `bash-stream` xterm.js example, marked ambient); first do the CLAUDE.md SDK hook
+verification. S3 — tool-contributing plugins (`tools` perm + child-process backend worker +
+`kind:"both"` example; unload removes the tool).
 
 ## P3 — Plugin host + first panel plugin (in progress)
 

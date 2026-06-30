@@ -87,6 +87,20 @@ export function PluginPane({
       )
     })
 
+    // DataBus: a value arrived on a channel this plugin subscribes to (main routes it to us by
+    // pluginId). Forward it into the frame; the runtime dispatches to that channel's callbacks.
+    const offData = window.atelier.plugins.onDataMessage((evt) => {
+      if (evt.pluginId !== pluginId || evt.conversationId !== getConversationId()) return
+      frame.contentWindow?.postMessage(
+        { __atelierEvent: true, event: 'data', payload: { channel: evt.channel, data: evt.data } },
+        '*'
+      )
+    })
+
+    // Channels this pane subscribed to (channel -> the conversation it was scoped to), so we can
+    // release them in cleanup even after the active conversation has changed.
+    const subscribedChannels = new Map<string, string>()
+
     const onMessage = async (e: MessageEvent): Promise<void> => {
       if (e.source !== frame.contentWindow) return // only this plugin's own frame
       const d = e.data as RpcMessage
@@ -156,6 +170,32 @@ export function PluginPane({
           }
           return reply(d.id, false, undefined, `unknown context method "${d.method}"`)
         }
+        if (d.ns === 'data') {
+          const conv = getConversationId()
+          if (!conv) return reply(d.id, false, undefined, 'no active conversation')
+          if (d.method === 'subscribe' || d.method === 'unsubscribe') {
+            if (!permissions.includes('data:subscribe')) {
+              return reply(d.id, false, undefined, 'permission "data:subscribe" not granted')
+            }
+            const channel = String(args[0])
+            if (d.method === 'subscribe') {
+              await window.atelier.plugins.dataSubscribe(conv, pluginId, channel)
+              subscribedChannels.set(channel, conv)
+            } else {
+              subscribedChannels.delete(channel)
+              await window.atelier.plugins.dataUnsubscribe(conv, pluginId, channel)
+            }
+            return reply(d.id, true)
+          }
+          if (d.method === 'publish') {
+            if (!permissions.includes('data:publish')) {
+              return reply(d.id, false, undefined, 'permission "data:publish" not granted')
+            }
+            await window.atelier.plugins.dataPublish(conv, pluginId, String(args[0]), args[1])
+            return reply(d.id, true)
+          }
+          return reply(d.id, false, undefined, `unknown data method "${d.method}"`)
+        }
         reply(d.id, false, undefined, `unknown namespace "${d.ns}"`)
       } catch (err) {
         reply(d.id, false, undefined, err instanceof Error ? err.message : String(err))
@@ -167,6 +207,11 @@ export function PluginPane({
       window.removeEventListener('message', onMessage)
       window.removeEventListener('atelier-theme', pushTheme)
       offContext()
+      offData()
+      // Release this pane's channel subscriptions (pane unmount / conversation switch).
+      for (const [channel, conv] of subscribedChannels) {
+        void window.atelier.plugins.dataUnsubscribe(conv, pluginId, channel)
+      }
     }
   }, [pluginId, permissions, getConversationId, onDock, onSetTitle])
 

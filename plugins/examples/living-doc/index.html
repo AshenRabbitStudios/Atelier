@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Living Doc</title>
+    <script src="atelier-plugin://__runtime__/atelier.js"></script>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: var(--surface, #14171e);
+        color: var(--text, #e7eaf0);
+        font-family: var(--font, system-ui, sans-serif);
+      }
+
+      #root {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+
+      #header {
+        flex: 0 0 auto;
+        padding: 8px 12px 6px;
+        border-bottom: 1px solid var(--border, #252b37);
+        font-size: 11px;
+        color: var(--dim, #8b97ae);
+        letter-spacing: 0.02em;
+        user-select: none;
+      }
+
+      #header strong {
+        color: var(--text, #e7eaf0);
+        font-weight: 600;
+      }
+
+      #live {
+        float: right;
+        font-size: 10px;
+        color: var(--faint, #5e6677);
+      }
+
+      #live.on {
+        color: var(--ok, #4caf82);
+      }
+
+      #path-row {
+        display: flex;
+        gap: 6px;
+        padding: 6px 12px;
+        border-bottom: 1px solid var(--border, #252b37);
+      }
+
+      #path {
+        flex: 1 1 auto;
+        min-width: 0;
+        padding: 4px 8px;
+        border: 1px solid var(--border, #252b37);
+        border-radius: 4px;
+        background: var(--input, #0f1117);
+        color: var(--text, #e7eaf0);
+        font-family: var(--mono, monospace);
+        font-size: 12px;
+        outline: none;
+      }
+
+      #path:focus {
+        border-color: var(--accent, #5b9cff);
+      }
+
+      #tail {
+        flex: 0 0 auto;
+        padding: 4px 12px;
+        border: none;
+        border-radius: 4px;
+        background: var(--accent, #5b9cff);
+        color: var(--on-accent, #fff);
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      #doc-wrap {
+        flex: 1 1 0;
+        min-height: 0;
+        overflow: auto;
+      }
+
+      #doc {
+        margin: 0;
+        padding: 12px;
+        color: var(--text, #e7eaf0);
+        font-family: var(--mono, monospace);
+        font-size: 12px;
+        line-height: 1.55;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+      }
+
+      #doc.error {
+        color: var(--err, #e06c75);
+        font-style: italic;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div id="header">
+        <strong>Living Doc</strong> — tails a project file in real time
+        <span id="live">idle</span>
+      </div>
+      <div id="path-row">
+        <input
+          id="path"
+          spellcheck="false"
+          placeholder="docs/PROGRESS.md"
+          value="docs/PROGRESS.md"
+        />
+        <button id="tail" type="button">Tail</button>
+      </div>
+      <div id="doc-wrap"><pre id="doc">No file tailed yet.</pre></div>
+    </div>
+
+    <script>
+      const pathInput = document.getElementById('path')
+      const tailBtn = document.getElementById('tail')
+      const doc = document.getElementById('doc')
+      const live = document.getElementById('live')
+
+      let current = null // the channel we're currently subscribed to
+
+      function channelFor(rel) {
+        return 'file:' + rel
+      }
+
+      function render(data) {
+        if (data && typeof data === 'object' && 'error' in data) {
+          doc.className = 'error'
+          doc.textContent = String(data.error)
+        } else {
+          doc.className = ''
+          doc.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2)
+        }
+        live.textContent = 'live'
+        live.className = 'on'
+      }
+
+      async function tail(rel) {
+        if (!rel) return
+        // Drop the previous channel before subscribing to the new one.
+        if (current) {
+          try {
+            await window.atelier.data.unsubscribe(current)
+          } catch (_) {
+            /* ignore */
+          }
+        }
+        const channel = channelFor(rel)
+        current = channel
+        // The cb fires with the current contents on subscribe and on every change after.
+        try {
+          await window.atelier.data.subscribe(channel, render)
+          await window.atelier.storage.set('path', rel)
+        } catch (e) {
+          current = null
+          doc.className = 'error'
+          doc.textContent = e && e.message ? e.message : String(e)
+          live.textContent = 'idle'
+          live.className = ''
+        }
+      }
+
+      tailBtn.addEventListener('click', () => tail(pathInput.value.trim()))
+      pathInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') tail(pathInput.value.trim())
+      })
+
+      window.atelier.on('load', async () => {
+        let rel = 'docs/PROGRESS.md'
+        try {
+          const saved = await window.atelier.storage.get('path')
+          if (typeof saved === 'string' && saved) rel = saved
+        } catch (_) {
+          /* first run — use the default */
+        }
+        pathInput.value = rel
+        await tail(rel)
+      })
+    </script>
+  </body>
+</html>

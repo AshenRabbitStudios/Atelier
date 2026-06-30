@@ -1237,6 +1237,11 @@ export class AgentManager {
     return this.sessions.get(instanceId)?.pluginStateFor() ?? {}
   }
 
+  /** The working directory of a live conversation (used to scope DataBus file channels). */
+  cwdFor(instanceId: string): string | null {
+    return this.sessions.get(instanceId)?.cwd ?? null
+  }
+
   async usage(instanceId: string): Promise<UsageInfo> {
     const u = await this.require(instanceId).usage()
     if (u.windows.length > 0) {

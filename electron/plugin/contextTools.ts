@@ -45,6 +45,7 @@ interface PinnedExport {
   format: string
   maxTokens: number
   inject: boolean
+  description?: string
 }
 
 /** Every pinned export of every enabled plugin, resolved against the registry's manifests. */
@@ -64,7 +65,8 @@ function pinnedExports(
         label: ex.label,
         format: ex.format,
         maxTokens: ex.maxTokens,
-        inject: ex.inject !== false
+        inject: ex.inject !== false,
+        description: ex.description
       })
     }
   }
@@ -156,7 +158,8 @@ export function buildContextMcpServers(
         (ex.inject
           ? `It is shown back to you as context every turn — `
           : `It is pushed to its pane but NOT fed back to you — `) +
-        `send the complete new ${ex.format} content (not a diff).`,
+        `send the complete new ${ex.format} content (not a diff).` +
+        (ex.description ? ` ${ex.description}` : ''),
       { content: z.string() },
       async (args: { content: string }) => {
         pluginStorageSet(conversationId, ex.pluginId, contextStorageKey(ex.key), args.content)

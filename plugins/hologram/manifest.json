@@ -26,7 +26,8 @@
       "label": "Hologram command",
       "format": "json",
       "maxTokens": 400,
-      "inject": false
+      "inject": false,
+      "description": "Shape: {\"action\":\"focus\"|\"select\",\"target\":[\"sceneId\",\"childId\",\"nodeId\"]}. target is a full path — last segment is the node, earlier segments are the cached scene path (omit for the current level, e.g. target:[\"mha1\"]). 'focus' highlights and flies the camera in; 'select' only highlights. Read the loaded scene's valid targets from the 'index' field of the Hologram selection channel. A path whose level isn't loaded retries until you push it via the architecture channel. Legacy {\"nodeId\",\"path\"} still works."
     }
   ]
 }

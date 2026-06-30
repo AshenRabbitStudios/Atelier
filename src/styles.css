@@ -1326,6 +1326,93 @@ body {
   overflow: auto;
 }
 
+/* Markdown body shared by sub-agent / web-fetch results — capped + scrollable. */
+.tool-md {
+  max-height: 360px;
+  overflow: auto;
+  padding: 2px 12px 8px;
+}
+
+/* ToolSearch: the matched tool names as chips. */
+.tool-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px 10px;
+}
+.tool-chip {
+  font-family: ui-monospace, monospace;
+  font-size: 0.8em;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--bg-2);
+  color: var(--accent);
+  border: 1px solid var(--border);
+}
+
+/* Agent (sub-agent) call. */
+.task-meta {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px 4px;
+}
+.task-type {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+.task-model {
+  font-size: 10px;
+  color: var(--faint);
+  font-family: ui-monospace, monospace;
+}
+.task-desc {
+  font-size: 0.85em;
+  color: var(--dim);
+}
+.task-prompt > summary {
+  cursor: pointer;
+  padding: 4px 12px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* TodoWrite: a checklist. */
+.todo-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px 12px 10px;
+}
+.todo {
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 0.9em;
+  line-height: 1.45;
+}
+.todo-mark {
+  flex: 0 0 auto;
+  width: 1.2em;
+  text-align: center;
+  user-select: none;
+}
+.todo.pending .todo-mark {
+  color: var(--faint);
+}
+.todo.in_progress .todo-mark {
+  color: var(--accent);
+}
+.todo.completed .todo-mark {
+  color: var(--ok);
+}
+.todo.completed .todo-text {
+  color: var(--faint);
+  text-decoration: line-through;
+}
+
 /* Bash: shell prompt + terminal output. */
 .shell-cmd {
   display: flex;

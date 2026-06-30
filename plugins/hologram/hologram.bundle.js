@@ -33142,14 +33142,45 @@
         ...extra || {}
       });
     }
-    // Agent → pane control: focus/highlight a node by id (optionally first switching to its cached
-    // path), then fly the camera to frame it. Returns false when it can't yet (mid-tween, or the level
-    // isn't loaded) so the pane can retry on its next poll — e.g. right after the agent pushes a scene.
+    // The current level's addressable nodes — the pane publishes this on the `selection` channel so the
+    // agent always knows what scene is loaded and which node ids/paths are valid targets (no guessing).
+    currentIndex() {
+      const nodes = (this.pickables || []).filter((m) => m.userData && m.userData.node).map((m) => {
+        const n = m.userData.node;
+        return {
+          id: n.id,
+          label: n.label,
+          kind: n.type || n.kind || "",
+          expandable: !!(n.expandable || Array.isArray(n.childrenPath) && n.childrenPath.length)
+        };
+      });
+      return {
+        model: this.model,
+        view: this.view,
+        path: this.crumbs.slice(),
+        crumbs: this.crumbs.map((k) => this.scenes[k]?.label || k),
+        nodes
+      };
+    }
+    // Agent → pane control: highlight a node and (for 'focus') fly the camera to frame it. The target may
+    // be given as a fully-qualified path array (`target:['scene','child','nodeId']` — last segment is the
+    // node, the rest is the cached scene path) or the legacy `{path, nodeId}` pair. `action:'select'`
+    // highlights without moving the camera; 'focus' (default) also flies in. Returns false when it can't
+    // yet (mid-tween, or the level isn't loaded) so the pane can retry on its next poll — e.g. right
+    // after the agent pushes a scene.
     focusNode(cmd) {
-      if (!cmd || !cmd.nodeId) return true;
+      if (!cmd) return true;
+      let nodeId = cmd.nodeId;
+      let path = cmd.path;
+      if (Array.isArray(cmd.target) && cmd.target.length) {
+        const t = cmd.target.filter((s2) => s2 != null && s2 !== "");
+        nodeId = t[t.length - 1];
+        path = t.slice(0, -1);
+      }
+      if (!nodeId) return true;
       if (this.tween) return false;
-      if (this._pushed && Array.isArray(cmd.path) && cmd.path.length) {
-        const key = cmd.path.join("/");
+      if (this._pushed && Array.isArray(path) && path.length) {
+        const key = path.join("/");
         const cur = this.crumbs[this.crumbs.length - 1];
         if (key !== cur) {
           if (!this.scenes[key]) return false;
@@ -33159,12 +33190,13 @@
           this._emitView();
         }
       }
-      const mesh = this.pickables.find((m) => m.userData.node.id === cmd.nodeId);
+      const mesh = this.pickables.find((m) => m.userData.node && m.userData.node.id === nodeId);
       if (!mesh) return false;
       this.selected.forEach((m) => this.restore(m));
       this.selected = [mesh];
       this.highlight(mesh);
       this.opts.onSelect?.([mesh.userData.node]);
+      if (cmd.action === "select") return true;
       const np = mesh.position.clone();
       const dir = this.camera.position.clone().sub(np);
       if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1);

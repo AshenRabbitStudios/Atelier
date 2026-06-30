@@ -37,7 +37,11 @@ export const ContextExportSchema = z.object({
   // but does NOT inject the value back into the agent's context each turn — a *push-only* export
   // (e.g. a large scene the agent sends to a pane but doesn't want re-fed to itself). Default true
   // preserves the original sync behavior. Injection is thus per-export, not all-or-nothing.
-  inject: z.boolean().default(true)
+  inject: z.boolean().default(true),
+  // Optional extra guidance appended to the agent's `set_<plugin>__<key>` write-tool description —
+  // e.g. the exact JSON shape a command export expects. Lets a push-only channel be self-documenting
+  // so the agent doesn't have to infer the payload format.
+  description: z.string().optional()
 })
 export type ContextExport = z.infer<typeof ContextExportSchema>
 

@@ -45,10 +45,29 @@ function resultText(output: unknown): string {
 
 /** Sidebar tint shared with the rest of the chrome (DESIGN_SYSTEM §5). */
 export function toolKindClass(name: string): string {
-  if (/^(read|glob|grep|ls|webfetch|websearch)$/i.test(name)) return 'tool-kind-read'
+  if (/^(read|glob|grep|ls|webfetch|websearch|toolsearch|agent|task|skill)$/i.test(name))
+    return 'tool-kind-read'
   if (/^(edit|write|notebookedit|multiedit)$/i.test(name)) return 'tool-kind-edit'
-  if (/^bash/i.test(name)) return 'tool-kind-bash'
+  if (/^(bash|powershell|pwsh|sh|zsh|cmd|shell)$/i.test(name)) return 'tool-kind-bash'
   return ''
+}
+
+// Shell-command tools share Bash's { command, description } shape (Bash, PowerShell, …).
+const SHELL_RE = /^(bash|powershell|pwsh|sh|zsh|cmd|shell)$/
+function shellLabel(n: string): string {
+  return /^(powershell|pwsh)$/.test(n) ? 'PowerShell' : 'Terminal'
+}
+function shellPrompt(n: string): string {
+  return /^(powershell|pwsh)$/.test(n) ? 'PS>' : '$'
+}
+// Pull the matched tool names from a ToolSearch result: <function>{…,"name":"X",…}</function>.
+function parseToolNames(text: string): string[] {
+  const names: string[] = []
+  for (const chunk of text.split('<function>').slice(1)) {
+    const m = /"name"\s*:\s*"([^"]+)"/.exec(chunk)
+    if (m) names.push(m[1])
+  }
+  return names
 }
 
 // Context-document write tools auto-registered on the `atelier_context` MCP server
@@ -98,14 +117,22 @@ function extLang(p: string): string {
 function summary(name: string, input: unknown): { label: string; detail: string; mono: boolean } {
   const i = asRecord(input)
   const n = name.toLowerCase()
-  if (/^bash/.test(n)) return { label: 'Terminal', detail: str(i.command), mono: true }
+  if (SHELL_RE.test(n)) return { label: shellLabel(n), detail: str(i.command), mono: true }
   if (/^(edit|write|multiedit|notebookedit)$/.test(n))
     return { label: name, detail: baseName(str(i.file_path)), mono: true }
   if (/^read$/.test(n)) return { label: 'Read', detail: baseName(str(i.file_path)), mono: true }
   if (/^grep$/.test(n)) return { label: 'Grep', detail: str(i.pattern), mono: true }
   if (/^glob$/.test(n)) return { label: 'Glob', detail: str(i.pattern), mono: true }
-  if (/^(webfetch|websearch)$/.test(n))
-    return { label: name, detail: str(i.url) || str(i.query), mono: false }
+  if (/^toolsearch$/.test(n)) return { label: 'Tool search', detail: str(i.query), mono: true }
+  if (/^(agent|task)$/.test(n))
+    return { label: 'Sub-agent', detail: str(i.subagent_type) || str(i.description), mono: false }
+  if (/^todowrite$/.test(n)) {
+    const c = Array.isArray(i.todos) ? i.todos.length : 0
+    return { label: 'To-dos', detail: c ? `${c} items` : '', mono: false }
+  }
+  if (/^skill$/.test(n)) return { label: 'Skill', detail: str(i.skill), mono: true }
+  if (/^webfetch$/.test(n)) return { label: 'Web fetch', detail: str(i.url), mono: true }
+  if (/^websearch$/.test(n)) return { label: 'Web search', detail: str(i.query), mono: false }
   if (isContextWrite(name)) return { label: 'Context', detail: ctxKeyName(name), mono: false }
   return { label: name, detail: '', mono: false }
 }
@@ -174,11 +201,11 @@ function ToolBody({ block }: { block: ToolUse }) {
   const i = asRecord(block.input)
   const out = block.result ? resultText(block.result.output) : ''
 
-  if (/^bash/.test(n)) {
+  if (SHELL_RE.test(n)) {
     return (
       <div className="tool-body">
         <div className="shell-cmd">
-          <span className="shell-prompt">$</span>{' '}
+          <span className="shell-prompt">{shellPrompt(n)}</span>{' '}
           <span className="shell-text">{str(i.command)}</span>
         </div>
         {str(i.description) && <div className="shell-desc">{str(i.description)}</div>}
@@ -238,6 +265,118 @@ function ToolBody({ block }: { block: ToolUse }) {
           {str(i.path) && <span className="q-path">in {str(i.path)}</span>}
         </div>
         {block.result && <pre className="tool-io">{out || '(no matches)'}</pre>}
+      </div>
+    )
+  }
+
+  if (/^toolsearch$/.test(n)) {
+    const names = block.result ? parseToolNames(out) : []
+    return (
+      <div className="tool-body">
+        <div className="tool-query">
+          <span className="q-label">query</span>
+          <code>{str(i.query)}</code>
+        </div>
+        {block.result &&
+          (names.length ? (
+            <div className="tool-chips">
+              {names.map((nm, k) => (
+                <span key={k} className="tool-chip">
+                  {nm}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <pre className="tool-io">{out || '(no tools)'}</pre>
+          ))}
+      </div>
+    )
+  }
+
+  if (/^(agent|task)$/.test(n)) {
+    return (
+      <div className="tool-body">
+        <div className="task-meta">
+          <span className="task-type">{str(i.subagent_type) || 'agent'}</span>
+          {str(i.model) && <span className="task-model">{str(i.model)}</span>}
+          {str(i.description) && <span className="task-desc">{str(i.description)}</span>}
+        </div>
+        {str(i.prompt) && (
+          <details className="task-prompt">
+            <summary>prompt</summary>
+            <div className="block-text tool-md">
+              <Markdown text={str(i.prompt)} />
+            </div>
+          </details>
+        )}
+        {block.result && (
+          <div className="block-text tool-md">
+            <Markdown text={out} />
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  if (/^todowrite$/.test(n)) {
+    const todos = Array.isArray(i.todos) ? i.todos : []
+    return (
+      <div className="tool-body">
+        <ul className="todo-list">
+          {todos.map((t, k) => {
+            const r = asRecord(t)
+            const st = str(r.status)
+            const mark = st === 'completed' ? '✓' : st === 'in_progress' ? '◐' : '○'
+            return (
+              <li key={k} className={`todo ${st}`}>
+                <span className="todo-mark">{mark}</span>
+                <span className="todo-text">{str(r.content)}</span>
+              </li>
+            )
+          })}
+        </ul>
+      </div>
+    )
+  }
+
+  if (/^webfetch$/.test(n)) {
+    return (
+      <div className="tool-body">
+        <div className="tool-query">
+          <span className="q-label">url</span>
+          <code>{str(i.url)}</code>
+        </div>
+        {str(i.prompt) && <div className="shell-desc">{str(i.prompt)}</div>}
+        {block.result && (
+          <div className="block-text tool-md">
+            <Markdown text={out} />
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  if (/^websearch$/.test(n)) {
+    return (
+      <div className="tool-body">
+        <div className="tool-query">
+          <span className="q-label">search</span>
+          <code>{str(i.query)}</code>
+        </div>
+        {block.result && <pre className="tool-io">{out}</pre>}
+      </div>
+    )
+  }
+
+  if (/^skill$/.test(n)) {
+    return (
+      <div className="tool-body">
+        <div className="tool-query">
+          <span className="q-label">skill</span>
+          <code>{str(i.skill)}</code>
+        </div>
+        {str(i.args) && <div className="shell-desc">{str(i.args)}</div>}
+        {block.result && <pre className="tool-io">{out}</pre>}
       </div>
     )
   }

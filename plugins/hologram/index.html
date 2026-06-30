@@ -278,6 +278,29 @@
           </div>
           <button class="hbtn ctl" id="btn-back" style="display: none">← Back to overview</button>
         </div>
+        <div id="goto-row" style="display: flex; gap: 8px; margin-top: 12px; align-items: center">
+          <input
+            id="goto-input"
+            placeholder="node id  ·  or  path/to/node"
+            spellcheck="false"
+            style="
+              flex: 1;
+              min-width: 0;
+              background: rgba(10, 26, 34, 0.6);
+              border: 1px solid rgba(127, 184, 207, 0.35);
+              border-radius: 6px;
+              color: #cdeafc;
+              font:
+                12px/1.4 ui-monospace,
+                monospace;
+              letter-spacing: 0.3px;
+              padding: 6px 9px;
+              outline: none;
+            "
+          />
+          <button class="hbtn ctl" id="btn-goto-focus">Focus</button>
+          <button class="hbtn ctl" id="btn-goto-select">Select</button>
+        </div>
         <div
           id="missing-hint"
           style="
@@ -718,10 +741,19 @@
         // ── Selection → agent (the read-in channel; pin "Hologram selection" to use it) ──
         var currentView = 'overview'
         var currentTitle = 'Hologram'
+        var lastSelection = []
         function onSelectionChange(nodes) {
           var list = Array.isArray(nodes) ? nodes : nodes ? [nodes] : []
+          lastSelection = list
           renderInspector(list)
           writeSelection(list)
+        }
+        function sceneIndex() {
+          try {
+            return engine ? engine.currentIndex() : null
+          } catch (e) {
+            return null
+          }
         }
         function writeSelection(list) {
           try {
@@ -738,7 +770,9 @@
                     kind: n.type || n.kind || '',
                     summary: n.summary || n.desc || ''
                   }
-                })
+                }),
+                // The addressable index of the loaded level — valid focus/select targets, no guessing.
+                index: sceneIndex()
               })
             )
           } catch (e) {
@@ -755,6 +789,7 @@
                 view: currentView,
                 title: currentTitle,
                 nodes: [],
+                index: sceneIndex(),
                 request: { action: 'expand', path: req.path, label: req.label }
               })
             )
@@ -790,6 +825,8 @@
           } else {
             mh.style.display = 'none'
           }
+          // Re-publish the addressable index whenever the loaded level changes (push / drill / back / focus).
+          writeSelection(lastSelection)
         }
 
         // ── Boot / teardown on host lifecycle ──────────────────────
@@ -837,6 +874,29 @@
         })
         $('btn-back').addEventListener('click', function () {
           if (engine) engine.goBack()
+        })
+        // Go-to control: type a node id ("mha1") or full path ("transformer-encoder/mha1") to drive
+        // focus (highlight + fly) or select (highlight only) — same addressing the agent uses.
+        function gotoFrom(action) {
+          if (!engine) return
+          var v = $('goto-input').value.trim()
+          if (!v) return
+          var target = v
+            .split('/')
+            .map(function (s) {
+              return s.trim()
+            })
+            .filter(Boolean)
+          engine.focusNode({ action: action, target: target })
+        }
+        $('btn-goto-focus').addEventListener('click', function () {
+          gotoFrom('focus')
+        })
+        $('btn-goto-select').addEventListener('click', function () {
+          gotoFrom('select')
+        })
+        $('goto-input').addEventListener('keydown', function (e) {
+          if (e.key === 'Enter') gotoFrom('focus')
         })
         $('insp-max').addEventListener('click', function () {
           $('inspector').classList.toggle('maximized')

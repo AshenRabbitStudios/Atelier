@@ -40,6 +40,7 @@ export interface TranscriptState {
   forkPoints: ForkPoints
   lastResult?: { costUsd?: number; durationMs?: number; isError: boolean }
   liveTokens?: { output: number; input?: number } // running usage for the in-flight turn
+  autoResumeAt?: number | null // epoch-ms a usage limit resets when auto-resume is armed (else null)
   errors: AgentError[]
 }
 
@@ -147,6 +148,8 @@ function applyEvent(state: TranscriptState, e: AgentEvent): TranscriptState {
       return { ...state, status: e.status }
     case 'tokens':
       return { ...state, liveTokens: { output: e.output, input: e.input } }
+    case 'auto_resume':
+      return { ...state, autoResumeAt: e.resetsAt }
     case 'permission_request':
       if (state.pending.some((p) => p.requestId === e.requestId)) return state
       return {

@@ -1243,6 +1243,25 @@ body {
   color: var(--faint);
   font-variant-numeric: tabular-nums;
 }
+
+/* Waiting for a usage limit to reset (auto-resume armed). */
+.resume-banner {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  max-width: 760px;
+  margin: 6px 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--dim);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--warn);
+  border-radius: 6px;
+}
+.resume-banner strong {
+  color: var(--text);
+}
 @keyframes spin {
   to {
     transform: rotate(360deg);

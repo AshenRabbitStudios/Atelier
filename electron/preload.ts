@@ -34,6 +34,8 @@ const api: AtelierAPI = {
     setModel: (instanceId, model) => ipcRenderer.invoke(IPC.agentSetModel, { instanceId, model }),
     setEffort: (instanceId, effort) =>
       ipcRenderer.invoke(IPC.agentSetEffort, { instanceId, effort }),
+    setAutoResume: (instanceId, enabled) =>
+      ipcRenderer.invoke(IPC.agentSetAutoResume, { instanceId, enabled }),
     usage: (instanceId) => ipcRenderer.invoke(IPC.agentUsage, { instanceId }),
     transcript: (instanceId) => ipcRenderer.invoke(IPC.agentTranscript, { instanceId }),
     editSave: (instanceId, uuid, newText) =>

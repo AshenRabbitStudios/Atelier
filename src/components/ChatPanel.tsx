@@ -192,6 +192,13 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
     )
   }
 
+  const [autoResume, setAutoResume] = useState(false)
+  const toggleAutoResume = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const on = e.target.checked
+    setAutoResume(on)
+    void window.atelier.agent.setAutoResume(instanceId, on)
+  }
+
   const startEdit = (m: Message) => setEditing({ id: m.id, draft: messageText(m) })
   const cancelEdit = () => setEditing(null)
   const changeDraft = (draft: string) => setEditing((e) => (e ? { ...e, draft } : e))
@@ -282,6 +289,16 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
           </span>
           <span className="switch-text">bypass approvals</span>
         </label>
+        <label
+          className={`switch ${autoResume ? 'on' : ''}`}
+          title="When a usage limit interrupts the chat, wait for it to reset and resume automatically — no polling, no requests while limited"
+        >
+          <input type="checkbox" checked={autoResume} onChange={toggleAutoResume} />
+          <span className="switch-track">
+            <span className="switch-thumb" />
+          </span>
+          <span className="switch-text">auto-resume</span>
+        </label>
         <span className={`status status-${state.status}`}>{state.status}</span>
       </header>
 
@@ -328,6 +345,14 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
                 ? `${fmtTokens(state.liveTokens.output)} tokens · `
                 : ''}
               {fmtElapsed(elapsedSec)}
+            </span>
+          </div>
+        )}
+        {!busy && typeof state.autoResumeAt === 'number' && (
+          <div className="resume-banner">
+            <span className="spinner" />
+            <span>
+              Usage limit reached — auto-resuming at <strong>{fmtClock(state.autoResumeAt)}</strong>
             </span>
           </div>
         )}
@@ -663,6 +688,9 @@ function fmtTokens(n: number): string {
 }
 function fmtElapsed(s: number): string {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`
+}
+function fmtClock(ms: number): string {
+  return new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 }
 
 // A short description of what the agent is doing right now (for the working spinner row).

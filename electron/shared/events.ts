@@ -212,6 +212,9 @@ export type AgentEvent =
   | { instanceId: string; kind: 'question_resolved'; requestId: string }
   | { instanceId: string; kind: 'permission_mode'; mode: PermissionMode }
   | { instanceId: string; kind: 'error'; message: string; detail?: unknown }
+  // Auto-resume status: when a usage-limit interrupt is caught and auto-resume is enabled, `resetsAt`
+  // is the epoch-ms the limit resets (a wake-up is scheduled for then); null clears it (fired/cancelled).
+  | { instanceId: string; kind: 'auto_resume'; resetsAt: number | null }
 
 // ---- Request payloads (renderer → main), Zod-validated in main ----
 
@@ -277,6 +280,11 @@ export const SetModelSchema = z.object({
 export const SetEffortSchema = z.object({
   instanceId: z.string().min(1),
   effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max'])
+})
+
+export const SetAutoResumeSchema = z.object({
+  instanceId: z.string().min(1),
+  enabled: z.boolean()
 })
 
 export const EditSaveSchema = z.object({
@@ -375,6 +383,7 @@ export const IPC = {
   agentModels: 'agent:models',
   agentSetModel: 'agent:set-model',
   agentSetEffort: 'agent:set-effort',
+  agentSetAutoResume: 'agent:set-auto-resume',
   agentUsage: 'agent:usage',
   agentTranscript: 'agent:transcript',
   agentEditSave: 'agent:edit-save',
@@ -439,6 +448,7 @@ export interface AtelierAPI {
     models(instanceId: string): Promise<ModelOption[]>
     setModel(instanceId: string, model: string): Promise<void>
     setEffort(instanceId: string, effort: EffortLevel): Promise<void>
+    setAutoResume(instanceId: string, enabled: boolean): Promise<void>
     usage(instanceId: string): Promise<UsageInfo>
     transcript(instanceId: string): Promise<TranscriptMessage[]>
     editSave(instanceId: string, uuid: string, newText: string): Promise<TranscriptMessage[]>

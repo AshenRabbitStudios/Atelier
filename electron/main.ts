@@ -18,6 +18,7 @@ import {
   SetPermissionModeSchema,
   SetModelSchema,
   SetEffortSchema,
+  SetAutoResumeSchema,
   EditSaveSchema,
   ForkSchema,
   SwitchBranchSchema,
@@ -194,6 +195,11 @@ function registerIpc(): void {
   ipcMain.handle(IPC.agentSetEffort, (_e, payload) => {
     const { instanceId, effort } = SetEffortSchema.parse(payload)
     agents.setEffort(instanceId, effort)
+  })
+
+  ipcMain.handle(IPC.agentSetAutoResume, (_e, payload) => {
+    const { instanceId, enabled } = SetAutoResumeSchema.parse(payload)
+    agents.setAutoResume(instanceId, enabled)
   })
 
   ipcMain.handle(IPC.agentUsage, (_e, payload) => {

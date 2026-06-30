@@ -125,6 +125,13 @@ const ADAPTIVE_THINKING_MODELS = new Set([
   'claude-sonnet-4-6'
 ])
 
+// Sent automatically (no user action) when a usage-limit interrupt clears and auto-resume is on.
+const AUTO_RESUME_PROMPT = 'Tokens are back — resume where you left off.'
+// Never schedule a wake-up further out than this (guards against a bogus/huge resetsAt).
+const AUTO_RESUME_MAX_MS = 8 * 24 * 60 * 60 * 1000
+// Small cushion past the reported reset so a little clock skew doesn't trigger an instant re-reject.
+const AUTO_RESUME_BUFFER_MS = 8000
+
 interface StreamEvent {
   type: string
   index?: number
@@ -180,6 +187,10 @@ class Session {
   instructionProvider?: InstructionProvider
 
   private input = new InputQueue()
+  // Auto-resume: when on, a usage-limit interrupt schedules a one-shot wake-up at the reported reset
+  // time that re-sends the resume prompt — no polling, no queries to Claude while limited.
+  private autoResume = false
+  private resumeTimer: ReturnType<typeof setTimeout> | null = null
   // The instruction string baked into the live query's systemPrompt. Compared on each send so we
   // only rebind (and pay the one-time history cache invalidation) when it actually changes.
   private appliedInstruction = ''
@@ -373,6 +384,7 @@ class Session {
 
   /** Clear chat context: abandon the current branches and start a fresh SDK session. */
   clearChat(): void {
+    this.clearResumeTimer() // a pending limit wake-up belongs to the old session
     this.sessionId = undefined
     this.branches = []
     this.currentMessageId = ''
@@ -545,6 +557,42 @@ class Session {
     this.emit({ instanceId: this.id, kind: 'permission_mode', mode })
   }
 
+  /** Toggle auto-resume. Turning it off cancels any pending wake-up. */
+  setAutoResume(enabled: boolean): void {
+    this.autoResume = enabled
+    if (!enabled) this.clearResumeTimer()
+  }
+
+  private clearResumeTimer(): void {
+    if (!this.resumeTimer) return
+    clearTimeout(this.resumeTimer)
+    this.resumeTimer = null
+    this.emit({ instanceId: this.id, kind: 'auto_resume', resetsAt: null })
+  }
+
+  /**
+   * Schedule a single wake-up at the usage-limit reset time, then auto-send the resume prompt.
+   * `resetsAt` is the SDK's rate-limit reset (seconds or ms epoch). We wait it out with one timer —
+   * no polling and no queries to Claude while limited; the only request is the resume itself, after
+   * the limit has cleared. If the limit is somehow still active then, that turn rejects again and
+   * reschedules to the next reset, so it self-corrects without ever spamming.
+   */
+  private scheduleAutoResume(resetsAt: number): void {
+    const resetMs = resetsAt < 1e12 ? resetsAt * 1000 : resetsAt
+    const delay = Math.min(
+      AUTO_RESUME_MAX_MS,
+      Math.max(0, resetMs - Date.now()) + AUTO_RESUME_BUFFER_MS
+    )
+    this.clearResumeTimer()
+    this.emit({ instanceId: this.id, kind: 'auto_resume', resetsAt: resetMs })
+    this.resumeTimer = setTimeout(() => {
+      this.resumeTimer = null
+      if (this.closed || !this.autoResume) return
+      this.emit({ instanceId: this.id, kind: 'auto_resume', resetsAt: null })
+      this.send(AUTO_RESUME_PROMPT)
+    }, delay)
+  }
+
   async models(): Promise<ModelOption[]> {
     const list = await this.q.supportedModels()
     return list.map((m) => ({
@@ -668,6 +716,7 @@ class Session {
 
   async close(): Promise<void> {
     this.closed = true
+    this.clearResumeTimer()
     this.input.end()
     try {
       this.q.close()
@@ -837,6 +886,10 @@ class Session {
             detail: info
           })
           this.setStatus('idle')
+          // If the user opted in, wake up at the reset time and resume — no polling meanwhile.
+          if (this.autoResume && typeof info.resetsAt === 'number') {
+            this.scheduleAutoResume(info.resetsAt)
+          }
         }
         break
       }
@@ -1145,6 +1198,10 @@ export class AgentManager {
 
   async setPermissionMode(instanceId: string, mode: PermissionMode): Promise<void> {
     await this.require(instanceId).setPermissionMode(mode)
+  }
+
+  setAutoResume(instanceId: string, enabled: boolean): void {
+    this.require(instanceId).setAutoResume(enabled)
   }
 
   async models(instanceId: string): Promise<{ value: string; displayName: string }[]> {

@@ -183,6 +183,7 @@ function createWindow(): void {
     height: 820,
     backgroundColor: '#0e1014',
     title: 'Atelier',
+    icon: join(app.getAppPath(), 'resources/atelier.ico'),
     frame: false, // custom 36px title bar (DESIGN_SYSTEM.md M3); controls via window:* IPC
     webPreferences: {
       preload: join(__dirname, '../preload/preload.mjs'),

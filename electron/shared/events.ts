@@ -30,12 +30,7 @@ const FULL_EFFORT: EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max']
 const NO_XHIGH: EffortLevel[] = ['low', 'medium', 'high', 'max']
 export const KNOWN_MODELS: ModelOption[] = [
   { value: 'default', displayName: 'Default (recommended)', supportedEffortLevels: FULL_EFFORT },
-  {
-    value: 'claude-fable-5',
-    displayName: 'Fable 5 (unavailable)',
-    disabled: true,
-    supportedEffortLevels: FULL_EFFORT
-  },
+  { value: 'claude-fable-5', displayName: 'Fable 5', supportedEffortLevels: FULL_EFFORT },
   { value: 'claude-opus-4-8', displayName: 'Opus 4.8', supportedEffortLevels: FULL_EFFORT },
   { value: 'claude-opus-4-7', displayName: 'Opus 4.7', supportedEffortLevels: FULL_EFFORT },
   { value: 'claude-opus-4-6', displayName: 'Opus 4.6', supportedEffortLevels: NO_XHIGH },

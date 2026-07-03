@@ -32,6 +32,7 @@ import {
 } from '../shared/events.js'
 import type { ConversationPluginState } from '../shared/plugins.js'
 import { readTranscript, editMessageText, parentUuidOf, childUuidOf } from './sessionStore.js'
+import { BackgroundRegistry } from './backgroundTasks.js'
 import { bashResponseText, type BashPublish } from './bashTap.js'
 import {
   listConversations,
@@ -191,6 +192,8 @@ class Session {
   instructionProvider?: InstructionProvider
   /** Ambient Bash tap: publishes the agent's real shell I/O onto the bash-stream DataBus channel. */
   bashProvider?: BashPublish
+  /** Subagents/tasks currently running for this conversation (from lifecycle hooks). */
+  private background = new BackgroundRegistry()
 
   private input = new InputQueue()
   // Auto-resume: when on, a usage-limit interrupt schedules a one-shot wake-up at the reported reset
@@ -345,7 +348,7 @@ class Session {
         return servers ? { mcpServers: servers } : {}
       })(),
       // Ambient Bash tap: observe (never block) Bash tool calls and stream their I/O to the pane.
-      ...(this.bashProvider ? { hooks: this.buildBashHooks(this.bashProvider) } : {}),
+      hooks: this.buildHooks(),
       // Resume the active branch's session so history is preserved.
       ...(this.sessionId ? { resume: this.sessionId } : {}),
       ...(opts?.resumeAt ? { resumeSessionAt: opts.resumeAt } : {}),
@@ -359,6 +362,77 @@ class Session {
    * hook, so this is command-granular (see docs/SDK_NOTES.md). Hooks return `{ continue: true }`
    * so the tap never blocks execution; permission still flows through `canUseTool`.
    */
+  /** Emit the current running-background snapshot to the renderer (top indicator + picker). */
+  private emitBackground(): void {
+    this.emit({ instanceId: this.id, kind: 'background', tasks: this.background.list() })
+  }
+
+  /** All SDK hooks for a query: background-task tracking (always) + the ambient Bash tap (if wired).
+   *  The two use disjoint hook events, so they merge cleanly. */
+  private buildHooks(): Options['hooks'] {
+    const hooks: NonNullable<Options['hooks']> = { ...this.buildBackgroundHooks() }
+    if (this.bashProvider) Object.assign(hooks, this.buildBashHooks(this.bashProvider))
+    return hooks
+  }
+
+  /** Track subagent/task lifecycle from the SDK's hooks; every change re-emits the snapshot. */
+  private buildBackgroundHooks(): NonNullable<Options['hooks']> {
+    return {
+      SubagentStart: [
+        {
+          hooks: [
+            async (i: HookInput) => {
+              if (i.hook_event_name === 'SubagentStart') {
+                this.background.startSubagent(i.agent_id, i.agent_type)
+                this.emitBackground()
+              }
+              return { continue: true }
+            }
+          ]
+        }
+      ],
+      SubagentStop: [
+        {
+          hooks: [
+            async (i: HookInput) => {
+              if (i.hook_event_name === 'SubagentStop') {
+                this.background.stopSubagent(i.agent_id)
+                this.emitBackground()
+              }
+              return { continue: true }
+            }
+          ]
+        }
+      ],
+      TaskCreated: [
+        {
+          hooks: [
+            async (i: HookInput) => {
+              if (i.hook_event_name === 'TaskCreated') {
+                this.background.createTask(i.task_id, i.task_subject, i.task_description)
+                this.emitBackground()
+              }
+              return { continue: true }
+            }
+          ]
+        }
+      ],
+      TaskCompleted: [
+        {
+          hooks: [
+            async (i: HookInput) => {
+              if (i.hook_event_name === 'TaskCompleted') {
+                this.background.completeTask(i.task_id)
+                this.emitBackground()
+              }
+              return { continue: true }
+            }
+          ]
+        }
+      ]
+    }
+  }
+
   private buildBashHooks(publish: BashPublish): Options['hooks'] {
     const tap = (msg: BashStreamMessage): void => publish(this.id, BASH_STREAM_CHANNEL, msg)
     return {
@@ -426,6 +500,8 @@ class Session {
     } catch {
       /* already dead */
     }
+    this.background.clear() // the torn-down query owned any running subagents/tasks
+    this.emitBackground()
     this.input = new InputQueue()
     this.start(opts)
   }

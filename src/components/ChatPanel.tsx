@@ -39,6 +39,7 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
   // Only render the last N messages so a huge transcript doesn't block the main thread
   // (markdown + Shiki are synchronous per block). "Show earlier" raises this on demand.
   const [visibleCount, setVisibleCount] = useState(VISIBLE_DEFAULT)
+  const [showBackground, setShowBackground] = useState(false)
   // Generation guard: ignore a transcript load that resolves after a newer one (e.g. a
   // mount-time load landing after Clear chat) so stale messages can't repopulate.
   const loadGenRef = useRef(0)
@@ -301,6 +302,35 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
         </label>
         <span className={`status status-${state.status}`}>{state.status}</span>
       </header>
+
+      {state.background.length > 0 && (
+        <div className="background">
+          <button
+            className="background-bar"
+            onClick={() => setShowBackground((v) => !v)}
+            title="Background subagents and tasks running for this conversation"
+          >
+            <span className="spinner" />
+            <span className="background-count">
+              {state.background.length} running in the background
+            </span>
+            <span className="background-caret">{showBackground ? '▾' : '▸'}</span>
+          </button>
+          {showBackground && (
+            <ul className="background-list">
+              {state.background.map((t) => (
+                <li key={`${t.kind}:${t.id}`} className="background-item">
+                  <span className={`background-kind background-kind-${t.kind}`}>
+                    {t.kind === 'subagent' ? 'agent' : 'task'}
+                  </span>
+                  <span className="background-label">{t.label}</span>
+                  {t.detail && <span className="background-detail">{t.detail}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       <div className="transcript" ref={transcriptRef} onScroll={onTranscriptScroll}>
         {state.messages.length > visibleCount && (

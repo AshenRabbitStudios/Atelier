@@ -6,6 +6,7 @@ import type {
   PermissionMode,
   PermissionRequest,
   QuestionRequest,
+  RunningTask,
   TranscriptBlock,
   TranscriptMessage
 } from '@shared/events'
@@ -42,6 +43,7 @@ export interface TranscriptState {
   liveTokens?: { output: number; input?: number } // running usage for the in-flight turn
   autoResumeAt?: number | null // epoch-ms a usage limit resets when auto-resume is armed (else null)
   errors: AgentError[]
+  background: RunningTask[] // subagents/tasks currently running (top indicator + picker)
 }
 
 export interface AgentError {
@@ -62,7 +64,8 @@ export const initialState: TranscriptState = {
   questions: [],
   permissionMode: 'default',
   forkPoints: {},
-  errors: []
+  errors: [],
+  background: []
 }
 
 export type Action =
@@ -203,6 +206,8 @@ function applyEvent(state: TranscriptState, e: AgentEvent): TranscriptState {
         ...state,
         lastResult: { costUsd: e.costUsd, durationMs: e.durationMs, isError: e.isError }
       }
+    case 'background':
+      return { ...state, background: e.tasks }
     case 'error':
       return {
         ...state,

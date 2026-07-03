@@ -125,6 +125,16 @@ export interface QuestionRequest {
   questions: Question[]
 }
 
+/** A background unit of work in flight for a conversation (subagent or task) — for the running
+ * indicator + picker. Carried on the `background` AgentEvent. */
+export interface RunningTask {
+  id: string
+  kind: 'subagent' | 'task'
+  label: string
+  detail?: string
+  startedAt: number
+}
+
 export interface AgentInstance {
   id: string
   cwd: string
@@ -210,6 +220,8 @@ export type AgentEvent =
   // Auto-resume status: when a usage-limit interrupt is caught and auto-resume is enabled, `resetsAt`
   // is the epoch-ms the limit resets (a wake-up is scheduled for then); null clears it (fired/cancelled).
   | { instanceId: string; kind: 'auto_resume'; resetsAt: number | null }
+  // The set of background subagents/tasks currently running for this conversation (full snapshot).
+  | { instanceId: string; kind: 'background'; tasks: RunningTask[] }
 
 // ---- Request payloads (renderer → main), Zod-validated in main ----
 

@@ -1682,6 +1682,69 @@ body {
 .error-dismiss:hover {
   opacity: 1;
 }
+
+/* Background subagents/tasks — running indicator + picker at the top of the chat pane. */
+.background {
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.background-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 12px;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+.background-count {
+  flex: 1 1 auto;
+  font-weight: 600;
+}
+.background-caret {
+  color: var(--dim);
+}
+.background-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 12px 8px;
+}
+.background-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12px;
+}
+.background-kind {
+  flex: 0 0 auto;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--surface-3);
+  color: var(--dim);
+}
+.background-kind-subagent {
+  color: var(--accent);
+}
+.background-label {
+  flex: 0 0 auto;
+  color: var(--text);
+}
+.background-detail {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .error-detail {
   margin: 0;
   padding: 8px 10px;

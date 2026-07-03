@@ -1,4 +1,4 @@
-import { memo, useEffect, useReducer, useRef, useState } from 'react'
+import { Fragment, memo, useEffect, useReducer, useRef, useState } from 'react'
 import {
   KNOWN_MODELS,
   type EffortLevel,
@@ -8,7 +8,7 @@ import {
   type Question,
   type QuestionRequest
 } from '@shared/events'
-import { initialState, reduce, type Block, type Message } from '../transcriptModel'
+import { initialState, reduce, type AgentError, type Block, type Message } from '../transcriptModel'
 import { Markdown } from './Markdown'
 import { ToolCallView } from './ToolCall'
 
@@ -312,30 +312,55 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
             Show earlier messages ({state.messages.length - visibleCount} hidden)
           </button>
         )}
-        {(state.messages.length > visibleCount
-          ? state.messages.slice(-visibleCount)
-          : state.messages
-        ).map((m, i, shown) => (
-          <MessageView
-            key={m.id}
-            message={m}
-            live={busy && m.role === 'assistant' && i === shown.length - 1}
-            editing={editing?.id === m.id ? editing.draft : null}
-            forkPoint={state.forkPoints[m.id]}
-            onSwitch={switchBranch}
-            onStartEdit={() => startEdit(m)}
-            onChangeDraft={changeDraft}
-            onSave={saveEdit}
-            onFork={forkEdit}
-            onCancel={cancelEdit}
-          />
-        ))}
-        {state.errors.map((err, i) => (
-          <details key={`err-${i}`} className="error-note" open>
-            <summary>{err.message}</summary>
-            {err.detail !== undefined && <pre className="error-detail">{pretty(err.detail)}</pre>}
-          </details>
-        ))}
+        {(() => {
+          // Interleave errors into the message stream at the point they occurred (err.after = the
+          // message count at error time), so an error scrolls up with the conversation instead of
+          // staying pinned below the newest message. Errors anchored above the visible window or
+          // past the current end fall back to the end (rare: truncated view / after an edit-fork).
+          const msgs = state.messages
+          const offset = msgs.length > visibleCount ? msgs.length - visibleCount : 0
+          const shown = msgs.slice(offset)
+          const errorNote = (err: AgentError): React.JSX.Element => (
+            <details key={err.id} className="error-note" open>
+              <summary>
+                <span className="error-msg">{err.message}</span>
+                <button
+                  className="error-dismiss"
+                  title="Dismiss"
+                  aria-label="Dismiss error"
+                  onClick={() => dispatch({ type: 'dismiss-error', id: err.id })}
+                >
+                  ×
+                </button>
+              </summary>
+              {err.detail !== undefined && <pre className="error-detail">{pretty(err.detail)}</pre>}
+            </details>
+          )
+          return (
+            <>
+              {shown.map((m, i) => (
+                <Fragment key={m.id}>
+                  <MessageView
+                    message={m}
+                    live={busy && m.role === 'assistant' && i === shown.length - 1}
+                    editing={editing?.id === m.id ? editing.draft : null}
+                    forkPoint={state.forkPoints[m.id]}
+                    onSwitch={switchBranch}
+                    onStartEdit={() => startEdit(m)}
+                    onChangeDraft={changeDraft}
+                    onSave={saveEdit}
+                    onFork={forkEdit}
+                    onCancel={cancelEdit}
+                  />
+                  {state.errors.filter((e) => e.after === offset + i + 1).map(errorNote)}
+                </Fragment>
+              ))}
+              {state.errors
+                .filter((e) => e.after <= offset || e.after > msgs.length)
+                .map(errorNote)}
+            </>
+          )
+        })()}
         {busy && state.pending.length === 0 && state.questions.length === 0 && (
           <div className="activity">
             <span className="spinner" />

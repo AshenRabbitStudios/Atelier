@@ -45,8 +45,13 @@ export interface TranscriptState {
 }
 
 export interface AgentError {
+  id: string
   message: string
   detail?: unknown
+  // Number of messages present when the error occurred. The transcript renders the error right
+  // after this many messages, so it scrolls up with the conversation instead of pinning to the
+  // bottom of the pane forever. Survives reconciliation because history is append-only.
+  after: number
 }
 
 export const initialState: TranscriptState = {
@@ -70,6 +75,7 @@ export type Action =
   | { type: 'transcript'; messages: TranscriptMessage[] }
   | { type: 'fork-points'; forkPoints: ForkPoints }
   | { type: 'fork-local'; uuid: string; tempId: string; newText: string }
+  | { type: 'dismiss-error'; id: string }
 
 function toBlocks(blocks: TranscriptBlock[]): Block[] {
   return blocks.map((b, i) => {
@@ -91,6 +97,9 @@ export function reduce(state: TranscriptState, action: Action): TranscriptState 
   }
   if (action.type === 'set-effort') {
     return { ...state, effort: action.effort }
+  }
+  if (action.type === 'dismiss-error') {
+    return { ...state, errors: state.errors.filter((x) => x.id !== action.id) }
   }
   if (action.type === 'transcript') {
     return {
@@ -195,7 +204,18 @@ function applyEvent(state: TranscriptState, e: AgentEvent): TranscriptState {
         lastResult: { costUsd: e.costUsd, durationMs: e.durationMs, isError: e.isError }
       }
     case 'error':
-      return { ...state, errors: [...state.errors, { message: e.message, detail: e.detail }] }
+      return {
+        ...state,
+        errors: [
+          ...state.errors,
+          {
+            id: crypto.randomUUID(),
+            message: e.message,
+            detail: e.detail,
+            after: state.messages.length
+          }
+        ]
+      }
     default:
       return state
   }

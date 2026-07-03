@@ -1660,6 +1660,27 @@ body {
   padding: 6px 10px;
   user-select: none;
   white-space: pre-wrap;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.error-msg {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.error-dismiss {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: var(--err);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 2px;
+  opacity: 0.7;
+}
+.error-dismiss:hover {
+  opacity: 1;
 }
 .error-detail {
   margin: 0;

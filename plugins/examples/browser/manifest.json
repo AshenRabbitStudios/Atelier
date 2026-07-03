@@ -1,0 +1,34 @@
+{
+  "id": "browser",
+  "name": "Browser",
+  "version": "0.1.0",
+  "icon": "M8 1.6a6.4 6.4 0 100 12.8A6.4 6.4 0 008 1.6zM1.7 8h12.6M8 1.7c1.8 1.8 2.8 4 2.8 6.3S9.8 12.5 8 14.3M8 1.7C6.2 3.5 5.2 5.7 5.2 8s1 4.5 2.8 6.3",
+  "kind": "panel",
+  "entry": "index.html",
+  "permissions": ["context", "data:subscribe", "storage"],
+  "defaultDock": "right",
+  "contextExports": [
+    {
+      "key": "content",
+      "label": "Browser content",
+      "format": "markdown",
+      "maxTokens": 8000,
+      "inject": false,
+      "description": "Send full HTML or Markdown here to render it in the Browser pane for the user. If it starts with '<' it is treated as HTML, otherwise as Markdown. The user views and navigates it; you read what they see back via the 'Browser page state' and 'Browser snapshot' outputs."
+    },
+    {
+      "key": "page",
+      "label": "Browser page state",
+      "format": "text",
+      "maxTokens": 3000,
+      "inject": true
+    },
+    {
+      "key": "snapshot",
+      "label": "Browser snapshot",
+      "format": "text",
+      "maxTokens": 6000,
+      "inject": true
+    }
+  ]
+}

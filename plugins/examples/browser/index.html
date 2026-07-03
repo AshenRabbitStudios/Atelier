@@ -1,0 +1,548 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Browser</title>
+    <script src="atelier-plugin://__runtime__/atelier.js"></script>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: var(--surface, #14171e);
+        color: var(--text, #e7eaf0);
+        font-family: var(--font, system-ui, sans-serif);
+      }
+
+      #root {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+
+      #bar {
+        flex: 0 0 auto;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 8px;
+        border-bottom: 1px solid var(--border, #252b37);
+        font-size: 11px;
+        color: var(--dim, #8b97ae);
+      }
+
+      #bar input[type='text'] {
+        flex: 1 1 160px;
+        min-width: 100px;
+        padding: 3px 7px;
+        border: 1px solid var(--border, #252b37);
+        border-radius: 4px;
+        background: var(--input, #0f1117);
+        color: var(--text, #e7eaf0);
+        font-family: var(--mono, monospace);
+        font-size: 11px;
+        outline: none;
+      }
+
+      #bar input[type='text']:focus {
+        border-color: var(--accent, #5b9cff);
+      }
+
+      #bar button {
+        padding: 3px 9px;
+        border: 1px solid var(--border, #252b37);
+        border-radius: 4px;
+        background: var(--surface-2, #1a1e27);
+        color: var(--text, #e7eaf0);
+        font-size: 11px;
+        cursor: pointer;
+      }
+
+      #bar button.primary {
+        border: none;
+        background: var(--accent, #5b9cff);
+        color: var(--on-accent, #fff);
+      }
+
+      #bar label {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        user-select: none;
+        cursor: pointer;
+      }
+
+      .seg {
+        display: inline-flex;
+        border: 1px solid var(--border, #252b37);
+        border-radius: 4px;
+        overflow: hidden;
+      }
+
+      .seg button {
+        border: none !important;
+        border-radius: 0 !important;
+        background: transparent;
+      }
+
+      .seg button.on {
+        background: var(--accent-weak, #23324a);
+        color: var(--text, #e7eaf0);
+      }
+
+      #status {
+        flex: 1 1 100%;
+        font-size: 10px;
+        color: var(--faint, #5e6677);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      #status b {
+        color: var(--ok, #4caf82);
+        font-weight: 600;
+      }
+
+      #view {
+        flex: 1 1 0;
+        min-height: 0;
+        overflow: auto;
+        position: relative;
+      }
+
+      #page {
+        padding: 14px 16px;
+        min-height: 100%;
+      }
+
+      /* Give agent/markdown content sane defaults without overriding its own styles too hard. */
+      #page :where(h1, h2, h3) {
+        line-height: 1.25;
+      }
+      #page :where(pre) {
+        background: var(--bg-2, #0f1117);
+        padding: 10px;
+        border-radius: 4px;
+        overflow: auto;
+      }
+      #page :where(code) {
+        font-family: var(--mono, monospace);
+      }
+      #page :where(a) {
+        color: var(--accent, #5b9cff);
+      }
+      #page :where(img) {
+        max-width: 100%;
+      }
+
+      #source {
+        margin: 0;
+        padding: 14px 16px;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: var(--mono, monospace);
+        font-size: 12px;
+        line-height: 1.5;
+        color: var(--dim, #8b97ae);
+      }
+
+      #toast {
+        position: absolute;
+        left: 50%;
+        bottom: 12px;
+        transform: translateX(-50%);
+        max-width: 90%;
+        padding: 6px 12px;
+        border-radius: 4px;
+        background: var(--surface-3, #222835);
+        border: 1px solid var(--border-2, #313847);
+        color: var(--text, #e7eaf0);
+        font-size: 11px;
+        opacity: 0;
+        transition: opacity 0.2s;
+        pointer-events: none;
+      }
+
+      #toast.show {
+        opacity: 1;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div id="bar">
+        <input id="path" type="text" placeholder="local file to load, e.g. docs/DESIGN_SYSTEM.md" />
+        <button id="load">Load</button>
+        <button id="clear">Clear</button>
+        <span class="seg">
+          <button id="mode-rendered" class="on">Rendered</button>
+          <button id="mode-source">Source</button>
+        </span>
+        <label><input id="run-scripts" type="checkbox" checked /> Run&nbsp;scripts</label>
+        <label><input id="stream" type="checkbox" checked /> Stream&nbsp;state</label>
+        <button id="snapshot" class="primary">Snapshot</button>
+        <span id="status">empty</span>
+      </div>
+      <div id="view">
+        <div id="page"></div>
+        <pre id="source" class="hidden"></pre>
+        <div id="toast"></div>
+      </div>
+    </div>
+
+    <script>
+      // Browser surface: the agent pushes HTML/Markdown (the `content` export) or the user loads a
+      // local file; the user views/interacts here; the live page state + on-demand snapshots go back
+      // to the agent as the `page` / `snapshot` exports. Content renders in THIS document (not a
+      // nested frame) because the plugin sandbox (allow-scripts, opaque origin) would make a child
+      // frame unreadable — rendering in-doc is what lets us read the live, post-interaction DOM.
+      // (External-site browsing via an Electron <webview> is the documented follow-up.)
+      const el = (id) => document.getElementById(id)
+      const pathInput = el('path')
+      const pageEl = el('page')
+      const sourceEl = el('source')
+      const statusEl = el('status')
+      const streamCb = el('stream')
+      const runScriptsCb = el('run-scripts')
+
+      const state = {
+        mode: 'rendered', // 'rendered' | 'source'
+        raw: '', // the current source text (HTML or Markdown)
+        label: 'empty', // where it came from (a path, 'agent', 'markdown', …)
+        fileChannel: null // the file:<path> channel we're currently subscribed to, if any
+      }
+
+      let toastTimer = null
+      function toast(msg) {
+        const t = el('toast')
+        t.textContent = msg
+        t.classList.add('show')
+        clearTimeout(toastTimer)
+        toastTimer = setTimeout(() => t.classList.remove('show'), 2600)
+      }
+
+      // ---- Minimal Markdown → HTML (common subset; not full CommonMark) ----
+      function esc(s) {
+        return s
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+      }
+      function inline(s) {
+        return esc(s)
+          .replace(/`([^`]+)`/g, (_m, c) => '<code>' + c + '</code>')
+          .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img alt="$1" src="$2" />')
+          .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
+          .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+          .replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>')
+          .replace(/_([^_]+)_/g, '<em>$1</em>')
+      }
+      function mdToHtml(md) {
+        const lines = md.replace(/\r\n/g, '\n').split('\n')
+        const out = []
+        let i = 0
+        let listType = null
+        const closeList = () => {
+          if (listType) {
+            out.push('</' + listType + '>')
+            listType = null
+          }
+        }
+        while (i < lines.length) {
+          const line = lines[i]
+          const fence = line.match(/^```(\w*)/)
+          if (fence) {
+            closeList()
+            const body = []
+            i++
+            while (i < lines.length && !/^```/.test(lines[i])) body.push(lines[i++])
+            i++
+            out.push('<pre><code>' + esc(body.join('\n')) + '</code></pre>')
+            continue
+          }
+          const h = line.match(/^(#{1,6})\s+(.*)$/)
+          if (h) {
+            closeList()
+            const n = h[1].length
+            out.push('<h' + n + '>' + inline(h[2]) + '</h' + n + '>')
+            i++
+            continue
+          }
+          if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) {
+            closeList()
+            out.push('<hr />')
+            i++
+            continue
+          }
+          if (/^\s*>\s?/.test(line)) {
+            closeList()
+            out.push('<blockquote>' + inline(line.replace(/^\s*>\s?/, '')) + '</blockquote>')
+            i++
+            continue
+          }
+          const ul = line.match(/^\s*[-*+]\s+(.*)$/)
+          const ol = line.match(/^\s*\d+\.\s+(.*)$/)
+          if (ul || ol) {
+            const want = ul ? 'ul' : 'ol'
+            if (listType !== want) {
+              closeList()
+              out.push('<' + want + '>')
+              listType = want
+            }
+            out.push('<li>' + inline((ul || ol)[1]) + '</li>')
+            i++
+            continue
+          }
+          if (/^\s*$/.test(line)) {
+            closeList()
+            i++
+            continue
+          }
+          closeList()
+          out.push('<p>' + inline(line) + '</p>')
+          i++
+        }
+        closeList()
+        return out.join('\n')
+      }
+
+      function looksLikeHtml(text) {
+        return /^\s*<(!doctype|html|div|section|main|article|body|h[1-6]|p|ul|ol|table|span|a|img|svg|form|button)/i.test(
+          text
+        )
+      }
+
+      // ---- Rendering ----
+      function runScripts(container) {
+        // innerHTML-inserted <script>s don't execute; re-create them so pushed/loaded JS runs.
+        for (const old of Array.from(container.querySelectorAll('script'))) {
+          const s = document.createElement('script')
+          for (const a of Array.from(old.attributes)) s.setAttribute(a.name, a.value)
+          s.textContent = old.textContent
+          old.replaceWith(s)
+        }
+      }
+
+      function interceptLinks(container) {
+        container.addEventListener('click', (e) => {
+          const a = e.target && e.target.closest ? e.target.closest('a') : null
+          if (!a) return
+          const href = a.getAttribute('href') || ''
+          if (href.startsWith('#')) {
+            e.preventDefault()
+            const target = container.querySelector(href)
+            if (target) target.scrollIntoView({ behavior: 'smooth' })
+            return
+          }
+          if (/^https?:\/\//i.test(href)) {
+            e.preventDefault()
+            toast('External navigation needs the webview upgrade — link not followed: ' + href)
+          }
+          // relative/other links fall through; there is no page to navigate to in-doc.
+        })
+      }
+
+      function render() {
+        const html = looksLikeHtml(state.raw) ? state.raw : mdToHtml(state.raw)
+        if (state.mode === 'source') {
+          sourceEl.textContent = state.raw
+          sourceEl.classList.remove('hidden')
+          pageEl.classList.add('hidden')
+        } else {
+          pageEl.innerHTML = html
+          if (runScriptsCb.checked) runScripts(pageEl)
+          interceptLinks(pageEl)
+          pageEl.classList.remove('hidden')
+          sourceEl.classList.add('hidden')
+        }
+        captureState()
+        updateStatus()
+      }
+
+      function setContent(raw, label) {
+        state.raw = raw || ''
+        state.label = label || 'content'
+        render()
+      }
+
+      // ---- State + snapshot exports ----
+      function describe() {
+        const text = (pageEl.innerText || '').trim()
+        const links = Array.from(pageEl.querySelectorAll('a, button, input, [role=button]'))
+          .slice(0, 30)
+          .map((n) => {
+            const t = (n.innerText || n.value || n.getAttribute('aria-label') || '').trim()
+            const tag = n.tagName.toLowerCase()
+            return t ? '• ' + tag + ': ' + t.slice(0, 60) : null
+          })
+          .filter(Boolean)
+        return { text, links }
+      }
+
+      function captureState() {
+        if (!streamCb.checked) {
+          setExport('page', '')
+          return
+        }
+        const d = describe()
+        let s = 'SOURCE: ' + state.label + '\n\nVISIBLE TEXT:\n' + d.text.slice(0, 4000)
+        if (d.text.length > 4000) s += '\n… [truncated]'
+        if (d.links.length) s += '\n\nINTERACTIVE:\n' + d.links.join('\n')
+        setExport('page', s)
+      }
+
+      function takeSnapshot() {
+        const d = describe()
+        const html = (state.mode === 'source' ? '' : pageEl.innerHTML).slice(0, 8000)
+        let s = 'SNAPSHOT @ ' + new Date().toISOString() + '\nSOURCE: ' + state.label
+        s += '\n\nVISIBLE TEXT:\n' + d.text.slice(0, 3000)
+        if (d.links.length) s += '\n\nINTERACTIVE:\n' + d.links.join('\n')
+        if (html) s += '\n\nHTML:\n' + html
+        setExport('snapshot', s)
+        toast('Snapshot sent to the agent')
+      }
+
+      let lastExport = {}
+      function setExport(key, value) {
+        if (lastExport[key] === value) return
+        lastExport[key] = value
+        try {
+          window.atelier.context.set(key, value)
+        } catch (_) {
+          /* host not ready */
+        }
+      }
+
+      function updateStatus() {
+        const chars = state.raw.length
+        const stream = streamCb.checked ? '<b>state→agent ON</b>' : 'state→agent off'
+        statusEl.innerHTML =
+          state.label === 'empty'
+            ? 'empty — push content or load a file'
+            : state.label + ' · ' + chars + ' chars · ' + state.mode + ' · ' + stream
+      }
+
+      // Re-capture live state as the user interacts (debounced).
+      let stateTimer = null
+      new MutationObserver(() => {
+        clearTimeout(stateTimer)
+        stateTimer = setTimeout(captureState, 300)
+      }).observe(pageEl, { subtree: true, childList: true, characterData: true, attributes: true })
+
+      // ---- Local file loading (DataBus file: source) ----
+      function loadFile(path) {
+        const rel = (path || '').trim()
+        if (!rel) return
+        if (state.fileChannel) {
+          try {
+            window.atelier.data.unsubscribe(state.fileChannel)
+          } catch (_) {
+            /* ignore */
+          }
+        }
+        const channel = 'file:' + rel
+        state.fileChannel = channel
+        window.atelier.data
+          .subscribe(channel, (data) => {
+            if (data && typeof data === 'object' && 'error' in data) {
+              setContent('# Could not load\n\n' + String(data.error), rel)
+              return
+            }
+            // render() auto-detects: an HTML-looking file renders as HTML, otherwise as Markdown.
+            setContent(typeof data === 'string' ? data : String(data), rel)
+          })
+          .catch((e) =>
+            setContent('# Load failed\n\n' + (e && e.message ? e.message : String(e)), rel)
+          )
+        window.atelier.storage.set('path', rel)
+      }
+
+      // ---- Wiring ----
+      el('load').addEventListener('click', () => loadFile(pathInput.value))
+      pathInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') loadFile(pathInput.value)
+      })
+      el('clear').addEventListener('click', () => {
+        state.fileChannel = null
+        setContent('', 'empty')
+      })
+      el('snapshot').addEventListener('click', takeSnapshot)
+      streamCb.addEventListener('change', () => {
+        captureState()
+        updateStatus()
+        window.atelier.storage.set('stream', streamCb.checked ? '1' : '0')
+      })
+      runScriptsCb.addEventListener('change', () => {
+        window.atelier.storage.set('runScripts', runScriptsCb.checked ? '1' : '0')
+        render()
+      })
+      function setMode(mode) {
+        state.mode = mode
+        el('mode-rendered').classList.toggle('on', mode === 'rendered')
+        el('mode-source').classList.toggle('on', mode === 'source')
+        window.atelier.storage.set('mode', mode)
+        render()
+      }
+      el('mode-rendered').addEventListener('click', () => setMode('rendered'))
+      el('mode-source').addEventListener('click', () => setMode('source'))
+
+      // The agent pushed new content (host fires a 'context' event for the 'content' export).
+      window.atelier.on('context', async (p) => {
+        if (!p || p.key !== 'content') return
+        try {
+          const v = await window.atelier.context.get('content')
+          if (typeof v === 'string' && v) setContent(v, 'agent')
+        } catch (_) {
+          /* ignore */
+        }
+      })
+
+      window.atelier.on('load', async () => {
+        try {
+          const [savedStream, savedRun, savedMode, savedPath] = await Promise.all([
+            window.atelier.storage.get('stream'),
+            window.atelier.storage.get('runScripts'),
+            window.atelier.storage.get('mode'),
+            window.atelier.storage.get('path')
+          ])
+          if (savedStream === '0') streamCb.checked = false
+          if (savedRun === '0') runScriptsCb.checked = false
+          if (savedMode === 'source') {
+            state.mode = 'source'
+            el('mode-rendered').classList.remove('on')
+            el('mode-source').classList.add('on')
+          }
+          // Prefer agent-pushed content; otherwise reload the last file.
+          const pushed = await window.atelier.context.get('content')
+          if (typeof pushed === 'string' && pushed) setContent(pushed, 'agent')
+          else if (typeof savedPath === 'string' && savedPath) {
+            pathInput.value = savedPath
+            loadFile(savedPath)
+          } else {
+            setContent(
+              '# Browser\n\nThis surface renders HTML or Markdown the agent pushes, or a local file you load.\n\n- The agent pushes via its `set_browser__content` tool.\n- Load a project file with the path box above.\n- Your live view goes back to the agent as the **page state**; hit **Snapshot** for a frozen capture.',
+              'welcome'
+            )
+          }
+          updateStatus()
+        } catch (_) {
+          updateStatus()
+        }
+      })
+    </script>
+  </body>
+</html>

@@ -99,6 +99,23 @@ it. Gate green (typecheck node+web, 68 tests, lint, format, build). Branch `feat
   ambient. (Appears when the command completes — command-granular, by SDK limitation.)
 - A failing command (e.g. `ls /nope`) shows its stderr as an error frame.
 
+## 2026-07-02 — `browser` example plugin + launcher fix + Fable re-enabled (on feat/p4-data-channels)
+
+Three small landings on the P4 branch (gate green each: typecheck node+web, 79 tests, lint, format):
+
+- **`plugins/examples/browser`** — a render/browse surface built on P4. The agent pushes HTML/Markdown
+  (`content` export, push-only) or the user loads a local file (`file:` DataBus source); it renders
+  **in the plugin's own document** (so the live, post-interaction DOM is readable under the
+  `allow-scripts`-only sandbox), and streams the page state + on-demand snapshots back as the `page`
+  and `snapshot` exports. Toolbar: load/clear, Rendered/Source, Run-scripts, Stream-state, Snapshot.
+  Local Markdown renderer (common subset). **Scope is local/authored content**; real external-site
+  browsing (webview + main-process read/capture) is the documented follow-up (DECISIONS.md).
+  _Needs human spot-check:_ enable it, have the agent `set_browser__content` some HTML → it renders;
+  load a project `.md` → renders; interact → the agent's `page` state updates; Snapshot → agent gets it.
+- **Launcher rebuild-on-change** — the pinned shortcut ran a frozen `out/` build so edits never showed;
+  `scripts/launch.ps1` now rebuilds only when source is newer than the last build, then starts the app.
+- **Fable 5 re-enabled** in the model picker (dropped the disabled/"(unavailable)" flag).
+
 ## P4 — Data channels (slice 1: DataBus + live file tail) — landed 2026-06-30
 
 The `DataBus` + `data` host API, with a built-in file source and a `living-doc` example. Gate green

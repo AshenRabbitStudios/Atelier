@@ -52,6 +52,20 @@ export class BackgroundRegistry {
     return this.tasks.delete(keyOf('task', taskId))
   }
 
+  /** Drop all subagent entries (tasks kept). Used to clear stale subagents the Task tool_result
+   *  never closed (run_in_background acks, interrupted turns), reconciled against SDK ground truth.
+   *  @returns true if anything was removed. */
+  clearSubagents(): boolean {
+    let changed = false
+    for (const [key, task] of this.tasks) {
+      if (task.kind === 'subagent') {
+        this.tasks.delete(key)
+        changed = true
+      }
+    }
+    return changed
+  }
+
   /** Everything currently running, oldest first (stable order for the picker). */
   list(): RunningTask[] {
     return [...this.tasks.values()].sort((a, b) => a.startedAt - b.startedAt)

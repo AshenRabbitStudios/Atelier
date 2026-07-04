@@ -39,6 +39,15 @@ describe('BackgroundRegistry', () => {
     expect(list.find((t) => t.kind === 'subagent')?.startedAt).toBe(1)
   })
 
+  it('clearSubagents() drops subagents but keeps tasks, reporting whether it changed anything', () => {
+    const r = new BackgroundRegistry()
+    r.startSubagent('a1', 'agent', undefined, 1)
+    r.createTask('t1', 'task', undefined, 2)
+    expect(r.clearSubagents()).toBe(true)
+    expect(r.list().map((t) => t.id)).toEqual(['t1']) // task survives
+    expect(r.clearSubagents()).toBe(false) // no subagents left — nothing to emit
+  })
+
   it('clear() empties the registry', () => {
     const r = new BackgroundRegistry()
     r.startSubagent('a', 'b', undefined, 1)

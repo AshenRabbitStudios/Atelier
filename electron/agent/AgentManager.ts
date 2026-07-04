@@ -410,6 +410,24 @@ class Session {
             }
           ]
         }
+      ],
+      // Turn end carries the authoritative set of still-in-flight background work. A subagent is
+      // added from its forwarded frames but removed via its Task tool_result, which is unreliable
+      // for run_in_background subagents (the result is a "launched" ack, not "done") and for
+      // interrupted turns — leaving a stuck "running" entry. Reconcile against ground truth: when
+      // the SDK reports no in-flight subagents, drop any stale subagent entries we still hold.
+      Stop: [
+        {
+          hooks: [
+            async (i: HookInput) => {
+              if (i.hook_event_name === 'Stop') {
+                const liveSubagents = (i.background_tasks ?? []).some((t) => t.type === 'subagent')
+                if (!liveSubagents && this.background.clearSubagents()) this.emitBackground()
+              }
+              return { continue: true }
+            }
+          ]
+        }
       ]
     }
   }

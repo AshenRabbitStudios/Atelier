@@ -142,9 +142,21 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
 
   // Stick to the bottom only when the user is already watching the tail; if they
   // have scrolled up to read, leave their position alone as new text streams in.
+  // `status` is a dep too so the thinking/activity spinner (which appears when the turn
+  // starts, before any message delta) scrolls into view instead of dropping below the fold.
   useEffect(() => {
-    if (atBottomRef.current) bottomRef.current?.scrollIntoView({ block: 'end' })
-  }, [state.messages, state.pending])
+    if (viewTask === null && atBottomRef.current)
+      bottomRef.current?.scrollIntoView({ block: 'end' })
+  }, [state.messages, state.pending, state.status, viewTask])
+
+  // Returning from a background-task view lands you back at the bottom of the chat (not scrolled
+  // to the top, where the re-rendered transcript would otherwise leave you).
+  useEffect(() => {
+    if (viewTask === null) {
+      atBottomRef.current = true
+      bottomRef.current?.scrollIntoView({ block: 'end' })
+    }
+  }, [viewTask])
 
   const onTranscriptScroll = () => {
     const el = transcriptRef.current

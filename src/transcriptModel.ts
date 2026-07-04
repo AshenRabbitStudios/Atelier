@@ -7,6 +7,7 @@ import type {
   PermissionRequest,
   QuestionRequest,
   RunningTask,
+  TaskItem,
   TranscriptBlock,
   TranscriptMessage
 } from '@shared/events'
@@ -44,6 +45,9 @@ export interface TranscriptState {
   autoResumeAt?: number | null // epoch-ms a usage limit resets when auto-resume is armed (else null)
   errors: AgentError[]
   background: RunningTask[] // subagents/tasks currently running (top indicator + picker)
+  // Live activity per background subagent, keyed by its Task call's toolUseId. Kept after the
+  // task finishes so the viewer can still show what it did; in-memory only (not persisted).
+  taskViews: Record<string, TaskItem[]>
 }
 
 export interface AgentError {
@@ -65,7 +69,8 @@ export const initialState: TranscriptState = {
   permissionMode: 'default',
   forkPoints: {},
   errors: [],
-  background: []
+  background: [],
+  taskViews: {}
 }
 
 export type Action =
@@ -208,6 +213,12 @@ function applyEvent(state: TranscriptState, e: AgentEvent): TranscriptState {
       }
     case 'background':
       return { ...state, background: e.tasks }
+    case 'task_activity': {
+      const items = state.taskViews[e.taskId] ?? []
+      // Bound each task's buffer so a chatty subagent can't grow memory without limit.
+      const next = items.length >= 500 ? [...items.slice(-499), e.item] : [...items, e.item]
+      return { ...state, taskViews: { ...state.taskViews, [e.taskId]: next } }
+    }
     case 'error':
       return {
         ...state,

@@ -26,6 +26,7 @@ import {
   type ModelOption,
   type Question,
   type SessionSummary,
+  type TaskItem,
   type TranscriptMessage,
   type UsageInfo,
   type UsageWindow
@@ -349,6 +350,9 @@ class Session {
       })(),
       // Ambient Bash tap: observe (never block) Bash tool calls and stream their I/O to the pane.
       hooks: this.buildHooks(),
+      // Forward the full subagent conversation (tagged parent_tool_use_id) so the background-task
+      // viewer can render it live; the pump routes those frames OUT of the main transcript.
+      forwardSubagentText: true,
       // Resume the active branch's session so history is preserved.
       ...(this.sessionId ? { resume: this.sessionId } : {}),
       ...(opts?.resumeAt ? { resumeSessionAt: opts.resumeAt } : {}),
@@ -375,35 +379,12 @@ class Session {
     return hooks
   }
 
-  /** Track subagent/task lifecycle from the SDK's hooks; every change re-emits the snapshot. */
+  /** Track background-task lifecycle from the SDK's hooks; every change re-emits the snapshot.
+   *  (Subagents are NOT tracked here: they're keyed by their Task call's toolUseId from their
+   *  forwarded messages in the pump, so the picker id matches the task-activity feed — the
+   *  SubagentStart/Stop hooks use a different id (agent_id) and would double-count.) */
   private buildBackgroundHooks(): NonNullable<Options['hooks']> {
     return {
-      SubagentStart: [
-        {
-          hooks: [
-            async (i: HookInput) => {
-              if (i.hook_event_name === 'SubagentStart') {
-                this.background.startSubagent(i.agent_id, i.agent_type)
-                this.emitBackground()
-              }
-              return { continue: true }
-            }
-          ]
-        }
-      ],
-      SubagentStop: [
-        {
-          hooks: [
-            async (i: HookInput) => {
-              if (i.hook_event_name === 'SubagentStop') {
-                this.background.stopSubagent(i.agent_id)
-                this.emitBackground()
-              }
-              return { continue: true }
-            }
-          ]
-        }
-      ],
       TaskCreated: [
         {
           hooks: [
@@ -914,7 +895,66 @@ class Session {
     }
   }
 
+  /** A message from a background subagent: track it as running and stream its activity to the
+   *  task viewer. Keyed by the Task call's toolUseId — the same id its tool_result closes. */
+  private handleSubagentFrame(msg: SDKMessage, taskId: string): void {
+    const meta = msg as { subagent_type?: string; task_description?: string }
+    if (
+      this.background.startSubagent(taskId, meta.subagent_type ?? 'subagent', meta.task_description)
+    ) {
+      this.emitBackground()
+    }
+    const activity = (item: TaskItem): void =>
+      this.emit({ instanceId: this.id, kind: 'task_activity', taskId, item })
+
+    if (msg.type === 'assistant') {
+      for (const block of (msg.message.content as unknown as ContentBlock[]) ?? []) {
+        if (block.type === 'text' && typeof (block as { text?: unknown }).text === 'string') {
+          activity({ kind: 'text', text: (block as unknown as { text: string }).text })
+        } else if (
+          block.type === 'thinking' &&
+          typeof (block as { thinking?: unknown }).thinking === 'string'
+        ) {
+          activity({ kind: 'thinking', text: (block as unknown as { thinking: string }).thinking })
+        } else if (block.type === 'tool_use') {
+          activity({
+            kind: 'tool_use',
+            toolUseId: block.id ?? '',
+            name: block.name ?? 'tool',
+            input: block.input
+          })
+        }
+      }
+    } else if (msg.type === 'user') {
+      const content = msg.message.content
+      if (Array.isArray(content)) {
+        for (const block of content as unknown as ContentBlock[]) {
+          if (block.type === 'tool_result') {
+            activity({
+              kind: 'tool_result',
+              toolUseId: block.tool_use_id ?? '',
+              ok: block.is_error !== true,
+              output: block.content
+            })
+          }
+        }
+      }
+    }
+    // stream_event frames from subagents are dropped: the viewer updates per message, not per token.
+  }
+
   private handle(msg: SDKMessage): void {
+    // Messages produced by a background subagent are tagged with the spawning Task call's
+    // tool_use id. Route them to the task-activity feed (the picker's live view) and keep them
+    // OUT of the main transcript stream.
+    const parentId =
+      'parent_tool_use_id' in msg
+        ? (msg as { parent_tool_use_id?: string | null }).parent_tool_use_id
+        : null
+    if (parentId) {
+      this.handleSubagentFrame(msg, parentId)
+      return
+    }
     switch (msg.type) {
       case 'system': {
         if ('subtype' in msg && msg.subtype === 'init') {
@@ -989,6 +1029,10 @@ class Session {
                 ok: block.is_error !== true,
                 output: block.content
               })
+              // A result for a tracked Task call means that subagent finished.
+              if (block.tool_use_id && this.background.stopSubagent(block.tool_use_id)) {
+                this.emitBackground()
+              }
             }
           }
         }

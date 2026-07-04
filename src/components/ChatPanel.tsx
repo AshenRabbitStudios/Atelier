@@ -6,7 +6,9 @@ import {
   type ModelOption,
   type PermissionRequest,
   type Question,
-  type QuestionRequest
+  type QuestionRequest,
+  type RunningTask,
+  type TaskItem
 } from '@shared/events'
 import { initialState, reduce, type AgentError, type Block, type Message } from '../transcriptModel'
 import { Markdown } from './Markdown'
@@ -40,6 +42,8 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
   // (markdown + Shiki are synchronous per block). "Show earlier" raises this on demand.
   const [visibleCount, setVisibleCount] = useState(VISIBLE_DEFAULT)
   const [showBackground, setShowBackground] = useState(false)
+  // When set, the transcript area shows this background task's live activity instead of the chat.
+  const [viewTask, setViewTask] = useState<string | null>(null)
   // Generation guard: ignore a transcript load that resolves after a newer one (e.g. a
   // mount-time load landing after Clear chat) so stale messages can't repopulate.
   const loadGenRef = useRef(0)
@@ -303,37 +307,16 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
         <span className={`status status-${state.status}`}>{state.status}</span>
       </header>
 
-      {state.background.length > 0 && (
-        <div className="background">
-          <button
-            className="background-bar"
-            onClick={() => setShowBackground((v) => !v)}
-            title="Background subagents and tasks running for this conversation"
-          >
-            <span className="spinner" />
-            <span className="background-count">
-              {state.background.length} running in the background
-            </span>
-            <span className="background-caret">{showBackground ? '▾' : '▸'}</span>
-          </button>
-          {showBackground && (
-            <ul className="background-list">
-              {state.background.map((t) => (
-                <li key={`${t.kind}:${t.id}`} className="background-item">
-                  <span className={`background-kind background-kind-${t.kind}`}>
-                    {t.kind === 'subagent' ? 'agent' : 'task'}
-                  </span>
-                  <span className="background-label">{t.label}</span>
-                  {t.detail && <span className="background-detail">{t.detail}</span>}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-
       <div className="transcript" ref={transcriptRef} onScroll={onTranscriptScroll}>
-        {state.messages.length > visibleCount && (
+        {viewTask !== null && (
+          <TaskViewer
+            taskId={viewTask}
+            task={state.background.find((t) => t.kind === 'subagent' && t.id === viewTask)}
+            items={state.taskViews[viewTask] ?? []}
+            onBack={() => setViewTask(null)}
+          />
+        )}
+        {viewTask === null && state.messages.length > visibleCount && (
           <button
             className="load-earlier"
             onClick={() => setVisibleCount((v) => v + 200)}
@@ -342,68 +325,74 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
             Show earlier messages ({state.messages.length - visibleCount} hidden)
           </button>
         )}
-        {(() => {
-          // Interleave errors into the message stream at the point they occurred (err.after = the
-          // message count at error time), so an error scrolls up with the conversation instead of
-          // staying pinned below the newest message. Errors anchored above the visible window or
-          // past the current end fall back to the end (rare: truncated view / after an edit-fork).
-          const msgs = state.messages
-          const offset = msgs.length > visibleCount ? msgs.length - visibleCount : 0
-          const shown = msgs.slice(offset)
-          const errorNote = (err: AgentError): React.JSX.Element => (
-            <details key={err.id} className="error-note" open>
-              <summary>
-                <span className="error-msg">{err.message}</span>
-                <button
-                  className="error-dismiss"
-                  title="Dismiss"
-                  aria-label="Dismiss error"
-                  onClick={() => dispatch({ type: 'dismiss-error', id: err.id })}
-                >
-                  ×
-                </button>
-              </summary>
-              {err.detail !== undefined && <pre className="error-detail">{pretty(err.detail)}</pre>}
-            </details>
-          )
-          return (
-            <>
-              {shown.map((m, i) => (
-                <Fragment key={m.id}>
-                  <MessageView
-                    message={m}
-                    live={busy && m.role === 'assistant' && i === shown.length - 1}
-                    editing={editing?.id === m.id ? editing.draft : null}
-                    forkPoint={state.forkPoints[m.id]}
-                    onSwitch={switchBranch}
-                    onStartEdit={() => startEdit(m)}
-                    onChangeDraft={changeDraft}
-                    onSave={saveEdit}
-                    onFork={forkEdit}
-                    onCancel={cancelEdit}
-                  />
-                  {state.errors.filter((e) => e.after === offset + i + 1).map(errorNote)}
-                </Fragment>
-              ))}
-              {state.errors
-                .filter((e) => e.after <= offset || e.after > msgs.length)
-                .map(errorNote)}
-            </>
-          )
-        })()}
-        {busy && state.pending.length === 0 && state.questions.length === 0 && (
-          <div className="activity">
-            <span className="spinner" />
-            <span>{activityLabel(state.messages)}</span>
-            <span className="activity-meta">
-              {state.liveTokens && state.liveTokens.output > 0
-                ? `${fmtTokens(state.liveTokens.output)} tokens · `
-                : ''}
-              {fmtElapsed(elapsedSec)}
-            </span>
-          </div>
-        )}
-        {!busy && typeof state.autoResumeAt === 'number' && (
+        {viewTask === null &&
+          (() => {
+            // Interleave errors into the message stream at the point they occurred (err.after = the
+            // message count at error time), so an error scrolls up with the conversation instead of
+            // staying pinned below the newest message. Errors anchored above the visible window or
+            // past the current end fall back to the end (rare: truncated view / after an edit-fork).
+            const msgs = state.messages
+            const offset = msgs.length > visibleCount ? msgs.length - visibleCount : 0
+            const shown = msgs.slice(offset)
+            const errorNote = (err: AgentError): React.JSX.Element => (
+              <details key={err.id} className="error-note" open>
+                <summary>
+                  <span className="error-msg">{err.message}</span>
+                  <button
+                    className="error-dismiss"
+                    title="Dismiss"
+                    aria-label="Dismiss error"
+                    onClick={() => dispatch({ type: 'dismiss-error', id: err.id })}
+                  >
+                    ×
+                  </button>
+                </summary>
+                {err.detail !== undefined && (
+                  <pre className="error-detail">{pretty(err.detail)}</pre>
+                )}
+              </details>
+            )
+            return (
+              <>
+                {shown.map((m, i) => (
+                  <Fragment key={m.id}>
+                    <MessageView
+                      message={m}
+                      live={busy && m.role === 'assistant' && i === shown.length - 1}
+                      editing={editing?.id === m.id ? editing.draft : null}
+                      forkPoint={state.forkPoints[m.id]}
+                      onSwitch={switchBranch}
+                      onStartEdit={() => startEdit(m)}
+                      onChangeDraft={changeDraft}
+                      onSave={saveEdit}
+                      onFork={forkEdit}
+                      onCancel={cancelEdit}
+                    />
+                    {state.errors.filter((e) => e.after === offset + i + 1).map(errorNote)}
+                  </Fragment>
+                ))}
+                {state.errors
+                  .filter((e) => e.after <= offset || e.after > msgs.length)
+                  .map(errorNote)}
+              </>
+            )
+          })()}
+        {viewTask === null &&
+          busy &&
+          state.pending.length === 0 &&
+          state.questions.length === 0 && (
+            <div className="activity">
+              <span className="spinner" />
+              <span>{activityLabel(state.messages)}</span>
+              <span className="activity-meta">
+                {state.liveTokens && state.liveTokens.output > 0
+                  ? `${fmtTokens(state.liveTokens.output)} tokens · `
+                  : ''}
+                {fmtElapsed(elapsedSec)}
+              </span>
+            </div>
+          )}
+        {viewTask === null && !busy && typeof state.autoResumeAt === 'number' && (
           <div className="resume-banner">
             <span className="spinner" />
             <span>
@@ -430,7 +419,129 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
         </div>
       )}
 
+      {state.background.length > 0 && (
+        <div className="background">
+          <button
+            className="background-bar"
+            onClick={() => setShowBackground((v) => !v)}
+            title="Background subagents and tasks running for this conversation"
+          >
+            <span className="spinner" />
+            <span className="background-count">
+              {state.background.length} running in the background
+            </span>
+            <span className="background-caret">{showBackground ? '▾' : '▸'}</span>
+          </button>
+          {showBackground && (
+            <ul className="background-list">
+              {state.background.map((t) => (
+                <li key={`${t.kind}:${t.id}`}>
+                  <button
+                    className="background-item"
+                    disabled={t.kind !== 'subagent'}
+                    title={
+                      t.kind === 'subagent'
+                        ? 'View this subagent’s live activity'
+                        : 'No live view for this task kind'
+                    }
+                    onClick={() => {
+                      setViewTask(t.id)
+                      setShowBackground(false)
+                    }}
+                  >
+                    <span className={`background-kind background-kind-${t.kind}`}>
+                      {t.kind === 'subagent' ? 'agent' : 'task'}
+                    </span>
+                    <span className="background-label">{t.label}</span>
+                    {t.detail && <span className="background-detail">{t.detail}</span>}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
       <Composer busy={busy} onSend={send} onInterrupt={interrupt} />
+    </div>
+  )
+}
+
+/**
+ * Live view of one background subagent's activity (its forwarded conversation), shown in the
+ * transcript area while the user peeks at it. Purely a view — sending still goes to the main
+ * thread, and the Back button returns to the chat.
+ */
+function TaskViewer({
+  taskId,
+  task,
+  items,
+  onBack
+}: {
+  taskId: string
+  task?: RunningTask
+  items: TaskItem[]
+  onBack: () => void
+}) {
+  return (
+    <div className="task-view">
+      <div className="task-banner">
+        <button className="task-back" onClick={onBack} title="Return to the main conversation">
+          ‹ Back to chat
+        </button>
+        <span className="task-title">
+          {task ? task.label : 'background task'}
+          {task?.detail ? ` — ${task.detail}` : ''}
+        </span>
+        <span className={`task-state ${task ? 'running' : 'done'}`}>
+          {task ? 'running' : 'finished'}
+        </span>
+      </div>
+      {items.length === 0 && (
+        <div className="task-empty">
+          No activity captured yet{task ? ' — it should appear here as the agent works' : ''}.
+          <span className="task-empty-id"> (task {taskId.slice(0, 12)}…)</span>
+        </div>
+      )}
+      {items.map((item, i) => {
+        if (item.kind === 'text') {
+          return (
+            <div key={i} className="task-item-text">
+              <Markdown text={item.text} />
+            </div>
+          )
+        }
+        if (item.kind === 'thinking') {
+          return (
+            <details key={i} className="task-item-thinking">
+              <summary>thinking</summary>
+              <div>{item.text}</div>
+            </details>
+          )
+        }
+        if (item.kind === 'tool_use') {
+          return (
+            <details key={i} className="task-item-tool">
+              <summary>
+                <span className="task-tool-name">{item.name}</span>
+              </summary>
+              <pre>{pretty(item.input)}</pre>
+            </details>
+          )
+        }
+        return (
+          <details key={i} className={`task-item-result ${item.ok ? '' : 'failed'}`}>
+            <summary>{item.ok ? 'result' : 'result (error)'}</summary>
+            <pre>{pretty(item.output)}</pre>
+          </details>
+        )
+      })}
+      {task && (
+        <div className="activity">
+          <span className="spinner" />
+          <span>working…</span>
+        </div>
+      )}
     </div>
   )
 }

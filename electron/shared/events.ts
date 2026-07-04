@@ -126,7 +126,8 @@ export interface QuestionRequest {
 }
 
 /** A background unit of work in flight for a conversation (subagent or task) — for the running
- * indicator + picker. Carried on the `background` AgentEvent. */
+ * indicator + picker. Carried on the `background` AgentEvent. Subagents are keyed by the Task
+ * call's toolUseId (the same id that tags their forwarded messages), tasks by task_id. */
 export interface RunningTask {
   id: string
   kind: 'subagent' | 'task'
@@ -134,6 +135,13 @@ export interface RunningTask {
   detail?: string
   startedAt: number
 }
+
+/** One item of a background subagent's live activity (its forwarded conversation, simplified). */
+export type TaskItem =
+  | { kind: 'text'; text: string }
+  | { kind: 'thinking'; text: string }
+  | { kind: 'tool_use'; toolUseId: string; name: string; input: unknown }
+  | { kind: 'tool_result'; toolUseId: string; ok: boolean; output: unknown }
 
 export interface AgentInstance {
   id: string
@@ -222,6 +230,8 @@ export type AgentEvent =
   | { instanceId: string; kind: 'auto_resume'; resetsAt: number | null }
   // The set of background subagents/tasks currently running for this conversation (full snapshot).
   | { instanceId: string; kind: 'background'; tasks: RunningTask[] }
+  // Live activity from a background subagent (its forwarded conversation), for the task viewer.
+  | { instanceId: string; kind: 'task_activity'; taskId: string; item: TaskItem }
 
 // ---- Request payloads (renderer → main), Zod-validated in main ----
 

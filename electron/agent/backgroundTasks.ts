@@ -1,7 +1,9 @@
-// Tracks the background work a conversation has in flight — subagents (Task tool) and background
-// tasks — from the SDK's lifecycle hooks (SubagentStart/Stop, TaskCreated/TaskCompleted). Pure and
-// synchronous so it is unit-testable without Electron/the SDK; the Session owns one and emits its
-// `list()` to the renderer whenever it changes (the top-of-screen "running" indicator + picker).
+// Tracks the background work a conversation has in flight — subagents (Task tool calls, keyed by
+// the call's toolUseId, detected from their forwarded messages in the pump) and background tasks
+// (TaskCreated/TaskCompleted hooks). Pure and synchronous so it is unit-testable without
+// Electron/the SDK; the Session owns one and emits its `list()` to the renderer whenever it
+// changes (the running indicator + picker). Mutators report whether they changed anything so the
+// caller can emit only on a real change.
 
 import type { RunningTask } from '../shared/events.js'
 
@@ -12,24 +14,29 @@ const keyOf = (kind: RunningTask['kind'], id: string): string => `${kind}:${id}`
 export class BackgroundRegistry {
   private tasks = new Map<string, RunningTask>()
 
-  startSubagent(agentId: string, agentType: string, now = Date.now()): void {
-    const key = keyOf('subagent', agentId)
-    if (this.tasks.has(key)) return
+  /** @returns true if this is a new subagent (false = already tracked). */
+  startSubagent(id: string, label: string, detail?: string, now = Date.now()): boolean {
+    const key = keyOf('subagent', id)
+    if (this.tasks.has(key)) return false
     this.tasks.set(key, {
-      id: agentId,
+      id,
       kind: 'subagent',
-      label: agentType || 'subagent',
+      label: label || 'subagent',
+      detail,
       startedAt: now
     })
+    return true
   }
 
-  stopSubagent(agentId: string): void {
-    this.tasks.delete(keyOf('subagent', agentId))
+  /** @returns true if the subagent was tracked (false = unknown id, nothing changed). */
+  stopSubagent(id: string): boolean {
+    return this.tasks.delete(keyOf('subagent', id))
   }
 
-  createTask(taskId: string, subject: string, detail?: string, now = Date.now()): void {
+  /** @returns true if this is a new task. */
+  createTask(taskId: string, subject: string, detail?: string, now = Date.now()): boolean {
     const key = keyOf('task', taskId)
-    if (this.tasks.has(key)) return
+    if (this.tasks.has(key)) return false
     this.tasks.set(key, {
       id: taskId,
       kind: 'task',
@@ -37,10 +44,12 @@ export class BackgroundRegistry {
       detail,
       startedAt: now
     })
+    return true
   }
 
-  completeTask(taskId: string): void {
-    this.tasks.delete(keyOf('task', taskId))
+  /** @returns true if the task was tracked. */
+  completeTask(taskId: string): boolean {
+    return this.tasks.delete(keyOf('task', taskId))
   }
 
   /** Everything currently running, oldest first (stable order for the picker). */

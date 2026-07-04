@@ -1683,9 +1683,9 @@ body {
   opacity: 1;
 }
 
-/* Background subagents/tasks — running indicator + picker at the top of the chat pane. */
+/* Background subagents/tasks — running indicator + picker, docked above the composer. */
 .background {
-  border-bottom: 1px solid var(--border);
+  border-top: 1px solid var(--border);
   background: var(--surface-2);
 }
 .background-bar {
@@ -1713,12 +1713,29 @@ body {
   margin: 0;
   padding: 0 12px 8px;
 }
+.background-list li {
+  list-style: none;
+}
 .background-item {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  padding: 3px 0;
+  padding: 4px 6px;
   font-size: 12px;
+  width: 100%;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.background-item:hover:not(:disabled) {
+  background: var(--surface-3);
+}
+.background-item:disabled {
+  cursor: default;
+  opacity: 0.75;
 }
 .background-kind {
   flex: 0 0 auto;
@@ -1744,6 +1761,112 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Task viewer — the transcript area while peeking at a background subagent's live activity. */
+.task-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  margin-bottom: 12px;
+  border: 1px solid var(--accent-weak);
+  border-radius: 6px;
+  background: var(--surface-2);
+  font-size: 12px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.task-back {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-3);
+  color: var(--text);
+  font-size: 12px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.task-back:hover {
+  border-color: var(--accent);
+}
+.task-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-state {
+  flex: 0 0 auto;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+.task-state.running {
+  color: var(--ok);
+  border: 1px solid var(--ok);
+}
+.task-state.done {
+  color: var(--dim);
+  border: 1px solid var(--border);
+}
+.task-empty {
+  color: var(--dim);
+  font-size: 13px;
+  padding: 12px 4px;
+}
+.task-empty-id {
+  color: var(--faint);
+  font-size: 11px;
+}
+.task-item-text {
+  margin-bottom: 10px;
+}
+.task-item-thinking,
+.task-item-tool,
+.task-item-result {
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-2);
+  font-size: 12px;
+}
+.task-item-thinking > summary,
+.task-item-tool > summary,
+.task-item-result > summary {
+  cursor: pointer;
+  padding: 4px 8px;
+  color: var(--dim);
+  user-select: none;
+}
+.task-item-thinking > div {
+  padding: 6px 10px;
+  color: var(--dim);
+  font-style: italic;
+  white-space: pre-wrap;
+}
+.task-item-tool pre,
+.task-item-result pre {
+  margin: 0;
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  overflow: auto;
+  max-height: 240px;
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+}
+.task-tool-name {
+  color: var(--accent);
+  font-family: var(--mono, monospace);
+}
+.task-item-result.failed > summary {
+  color: var(--err);
 }
 .error-detail {
   margin: 0;

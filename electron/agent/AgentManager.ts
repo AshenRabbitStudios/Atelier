@@ -35,6 +35,7 @@ import type { ConversationPluginState } from '../shared/plugins.js'
 import { readTranscript, editMessageText, parentUuidOf, childUuidOf } from './sessionStore.js'
 import { BackgroundRegistry } from './backgroundTasks.js'
 import { bashResponseText, type BashPublish } from './bashTap.js'
+import { zeroExpiredWindows } from './usage.js'
 import {
   listConversations,
   saveConversation,
@@ -1466,14 +1467,15 @@ export class AgentManager {
 
   async usage(instanceId: string): Promise<UsageInfo> {
     const u = await this.require(instanceId).usage()
+    // Idle/just-restored sessions report no windows until their first turn — keep serving the
+    // last-known account-wide snapshot so the bars stay visible.
     if (u.windows.length > 0) {
       this.lastUsage = u
       setLastUsage(u)
-      return u
     }
-    // Idle/just-restored sessions report no windows until their first turn — serve
-    // the last-known account-wide snapshot so the bars stay visible.
-    return this.lastUsage ?? u
+    // Recompute against the clock so a window that has since reset reads 0% instead of a stuck
+    // pre-reset percentage (the snapshot can be minutes-to-hours old, even persisted across restart).
+    return zeroExpiredWindows(this.lastUsage ?? u)
   }
 
   transcript(instanceId: string): TranscriptMessage[] {

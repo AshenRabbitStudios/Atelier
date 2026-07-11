@@ -49,6 +49,10 @@ export function App() {
   const pluginsRef = useRef<DiscoveredPlugin[]>([])
   const appliedRef = useRef<string | null>(null)
   const restoringRef = useRef(false)
+  // The enabled-plugin set the reconcile effect last acted on. Reconcile mounts/unmounts only on
+  // TRANSITIONS against this, so a hand-closed panel stays closed and a registry refresh (new
+  // `plugins` array ref) never re-opens it — the serialized layout owns open/closed state.
+  const prevEnabledRef = useRef<Set<string>>(new Set())
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   pluginsRef.current = plugins
 
@@ -201,31 +205,48 @@ export function App() {
   // Which plugins THIS conversation has enabled (per-conversation set).
   useEffect(() => {
     if (!activeId) {
+      prevEnabledRef.current = new Set()
       setPluginState({})
       return
     }
     let alive = true
     void window.atelier.plugins.enabledFor(activeId).then((s) => {
-      if (alive) setPluginState(s)
+      if (!alive) return
+      // Reset the reconcile baseline to this conversation's enabled set BEFORE the state update, so
+      // switching conversations doesn't diff against the previous one's set — panel presence is
+      // restored from the serialized layout, not re-derived here.
+      prevEnabledRef.current = new Set(
+        Object.entries(s)
+          .filter(([, v]) => v.enabled)
+          .map(([id]) => id)
+      )
+      setPluginState(s)
     })
     return () => {
       alive = false
     }
   }, [activeId])
 
-  // Reconcile mounted plugin panes with the enabled set: mount the enabled, unmount the disabled.
+  // Reconcile plugin panes with the enabled set on ENABLE/DISABLE TRANSITIONS only. Deliberately
+  // NOT "enabled ⇒ mounted" every run: that fought the user (closing a panel re-opened it on the
+  // next registry refresh) since enablement and panel-open are decoupled (a plugin can be enabled
+  // with its pane closed). Newly enabled → mount; newly disabled → unmount; otherwise leave alone.
   useEffect(() => {
     const ls = layout.current
     if (!ls || restoringRef.current) return
-    for (const p of plugins) {
-      const isEnabled = p.valid && Boolean(pluginState[p.id]?.enabled)
-      const mounted = ls.hasPlugin(p.id)
-      if (isEnabled && !mounted) {
-        ls.addPlugin(p.id, p.manifest?.name ?? p.id, p.manifest?.defaultDock ?? 'right')
-      } else if (!isEnabled && mounted) {
-        ls.removePlugin(p.id)
-      }
+    const current = new Set(
+      plugins.filter((p) => p.valid && pluginState[p.id]?.enabled).map((p) => p.id)
+    )
+    const prev = prevEnabledRef.current
+    for (const id of current) {
+      if (prev.has(id) || ls.hasPlugin(id)) continue
+      const p = plugins.find((x) => x.id === id)
+      ls.addPlugin(id, p?.manifest?.name ?? id, p?.manifest?.defaultDock ?? 'right')
     }
+    for (const id of prev) {
+      if (!current.has(id)) ls.removePlugin(id)
+    }
+    prevEnabledRef.current = current
   }, [plugins, pluginState, activeId])
 
   const togglePlugin = async (pluginId: string, enabled: boolean) => {

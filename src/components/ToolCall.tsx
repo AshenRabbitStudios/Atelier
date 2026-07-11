@@ -610,11 +610,19 @@ function ToolBody({ block }: { block: ToolUse }) {
   )
 }
 
+// Read-only lookups whose body is just retrieved content (often a whole file or a long match list):
+// collapse them by default so the transcript isn't dominated by things the user didn't ask to read.
+// A FAILED one still opens, so errors stay visible. Action/narrative tools (bash, edits, sub-agents,
+// questions, context writes) keep their default-open behavior.
+const READ_ONLY_COLLAPSED = /^(read|glob|grep|ls|toolsearch|webfetch|websearch)$/i
+
 export const ToolCallView = memo(function ToolCallView({ block }: { block: ToolUse }) {
   const s = summary(block.name, block.input)
   const kind = toolKindClass(block.name)
+  const startsOpen =
+    !READ_ONLY_COLLAPSED.test(block.name) || (block.result ? !block.result.ok : false)
   return (
-    <details className="block-tool" open>
+    <details className="block-tool" open={startsOpen}>
       <summary>
         <span className={`tool-name ${kind}`}>{s.label}</span>
         {s.detail && <span className={`tool-detail ${s.mono ? 'mono' : ''}`}>{s.detail}</span>}

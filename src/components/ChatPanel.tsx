@@ -158,6 +158,21 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
     }
   }, [viewTask])
 
+  // Closing a dock panel (e.g. a bottom-docked plugin) makes Dockview reparent this scroll
+  // container, which resets its native scrollTop to 0 — leaving a tail-pinned user stranded at the
+  // top with no state change to re-scroll them. Re-pin to the tail on any resize when they were at
+  // the bottom (also keeps the tail glued through window/panel resizes generally).
+  useEffect(() => {
+    const el = transcriptRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => {
+      if (viewTask === null && atBottomRef.current)
+        bottomRef.current?.scrollIntoView({ block: 'end' })
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [viewTask])
+
   const onTranscriptScroll = () => {
     const el = transcriptRef.current
     if (!el) return

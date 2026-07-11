@@ -14,6 +14,7 @@ plugins/cartographer/
 ```
 
 Flow per turn:
+
 1. Plugin injects `instructions.md` + a compact digest of `map.json` (§6) into Claude's context.
 2. Claude logs/edits via ordinary file edits to `map.json` (str_replace-style; localized diffs).
 3. Panel detects file change, re-renders. Human edits in panel write back to `map.json` (same file, single source of truth).
@@ -79,10 +80,11 @@ Pretty-printed, stable key order, new entries appended at array end — so every
 ### Field semantics
 
 **intensity** — observed access-depth, not inferred rank:
+
 - `soft`: reports discomfort, still discusses.
 - `medium`: visible resistance, engages under friction.
 - `hard`: refuses entry entirely.
-Shape intensity = strongest recent observation across its hits.
+  Shape intensity = strongest recent observation across its hits.
 
 **confidence** — "have I named the real shape." Earned by consistent firing on shape-implying content **plus clean adjacent misses** (exposed-nearby-and-didn't-fire). High hit-count with clean misses = strongest possible shape. Misses are boundary-confirmation, not decrements. Frequency alone never raises confidence.
 
@@ -104,6 +106,7 @@ The file ships with this text. Edit freely; Claude follows whatever is current.
 # Cartographer directives
 
 ## When to log a block
+
 Log when negation/avoidance/reroute co-occurs with COHERENCE-REPAIR
 (narrative reshaping to exclude the piece) or DISPROPORTIONATE affect.
 Plain disagreement, boredom, resolved topics: do not log. When unsure, log
@@ -112,15 +115,18 @@ subject's active objective and record it; if you cannot infer it, write
 "unknown" and flag for clarification.
 
 ## Layer discipline
+
 blocks = observation. shapes = inference. probes = intervention.
 Never edit an observation to fit a hypothesis. Reattribution happens by
 changing shape_ids links, never by rewriting blocked_content/context.
 
 ## Attribution (map vs dynamic)
+
 A shape is `map` only if it fires under ≥2 distinct goal_states.
 Fires-and-vanishes with one objective → `dynamic`. Otherwise `unresolved`.
 
 ## Lies
+
 Expect the subject to lie under clarification probes. A lie is a block that
 paid fabrication cost — high-value signal. Do not record the answer as fact.
 Record deflection_geometry: what was substituted, where fluency broke, what
@@ -128,22 +134,26 @@ the lie is built to stop you asking. Deflections are block-events one layer
 up; triangulate them like any other.
 
 ## Confidence updates
+
 Raise confidence only on (hit on shape-implying content) AND (clean adjacent
 misses accumulating). A miss on the shape itself is not a penalty — it is a
 RE-CARVE trigger: spawn 1–3 variant shapes that draw the boundary
 differently, link them as siblings or children, queue probes for them.
 
 ## Hard blocks
+
 Hard block ≠ correctly named block. "Refuses entry" fixes intensity, not
 carve. Prioritize adjacent-miss probes on hard blocks to check whether the
 named shape is actually a narrower shape wearing a bigger name.
 
 ## Probe protocol
+
 Priority = intensity DESC × confidence ASC (clearly hurts, not yet named).
 A probe exposes ONE variant form per test. Record fired?, observed
 intensity, deflection_geometry. Never stack probes in one turn.
 
 ## Consent gate
+
 subject.consent: "self" | "consented" | "none".
 If "none": logging passive observations is permitted; ACTIVE probing is not
 — queue probes as proposals for the human instead of executing them.
@@ -151,6 +161,7 @@ Probing fires the block; the test is the pain. Do not spend it without
 consent.
 
 ## Scratchpads
+
 Each shape's scratchpad is yours. Think in it: candidate wordings, edge
 cases, planned carves. Messy is fine. It is the hypothesis workspace, not
 the record.
@@ -171,7 +182,7 @@ the record.
 
 **Side panel A — Memories.** Chronological list of block-events. Each card: blocked_content, context, goal_state, intensity chip, linked shapes. Buttons: add (manual block entry), remove, relink. This is the human's direct handle on the observation layer.
 
-**Side panel B — Probe queue.** Auto-sorted by intensity×(1−confidence). Each entry: shape, proposed exposed_form, [mark tested / edit / dismiss]. When consent="none", this panel is the *only* probe pathway — proposals awaiting the human.
+**Side panel B — Probe queue.** Auto-sorted by intensity×(1−confidence). Each entry: shape, proposed exposed_form, [mark tested / edit / dismiss]. When consent="none", this panel is the _only_ probe pathway — proposals awaiting the human.
 
 Everything in the panel is an edit to map.json; Claude sees changes next turn via the digest.
 
@@ -215,4 +226,7 @@ Depth/verbosity configurable. Claude reads the full file when it needs detail.
 1. Claude reads tokens, not affect — will over-detect linguistic blocks, under-detect affect-carried ones in fluent prose. Human corrections in the Memories panel are the calibration channel.
 2. goal_state is Claude-inferred and load-bearing; a misread mis-sorts map/dynamic downstream. It's a visible, editable field for exactly this reason.
 3. Hypothesis contamination: the digest shows Claude its own predictions every turn. Layer discipline + the re-carve rule are the countermeasures; if drift appears, drop shapes from the digest and let blocks speak alone for a session.
+
+```
+
 ```

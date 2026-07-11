@@ -197,7 +197,9 @@ describe('the edit_ tool (targeted find-and-replace)', () => {
     pluginStorageSet('c1', 'mm', contextStorageKey('model'), 'cost is TOKEN here')
     const res = await editTool('c1').handler({ old_string: 'TOKEN', new_string: '$1 & $&' })
     expect(res.isError).toBeFalsy()
-    expect(pluginValueOrDefault(REG, 'c1', 'mm', contextStorageKey('model'))).toBe('cost is $1 & $& here')
+    expect(pluginValueOrDefault(REG, 'c1', 'mm', contextStorageKey('model'))).toBe(
+      'cost is $1 & $& here'
+    )
   })
 })
 

@@ -488,7 +488,10 @@
           const kids = (childrenOf.get(shape.id) || []).map(layout)
           const leafR = intensityR(shape.intensity)
           if (kids.length === 0) return { shape, r: leafR, kids: [] }
-          const maxChildR = Math.max.apply(null, kids.map((k) => k.r))
+          const maxChildR = Math.max.apply(
+            null,
+            kids.map((k) => k.r)
+          )
           const k = kids.length
           const ringR = k === 1 ? 0 : maxChildR / Math.sin(Math.PI / k)
           kids.forEach((lk, i) => {
@@ -626,7 +629,10 @@
         const sub = document.createElement('div')
         sub.className = 'sub'
         sub.textContent =
-          shape.id + (shape.parent_id ? '  ⊂ ' + shape.parent_id : '') + '  ·  ' + (shape.updated || '')
+          shape.id +
+          (shape.parent_id ? '  ⊂ ' + shape.parent_id : '') +
+          '  ·  ' +
+          (shape.updated || '')
         const row = document.createElement('div')
         row.className = 'row'
         row.append(
@@ -638,7 +644,7 @@
         const hitLbl = document.createElement('div')
         hitLbl.className = 'field-lbl'
         hitLbl.textContent =
-          'hits ' + ((shape.hit_ids || []).length) + ' · misses ' + ((shape.miss_ids || []).length)
+          'hits ' + (shape.hit_ids || []).length + ' · misses ' + (shape.miss_ids || []).length
         const scLbl = document.createElement('div')
         scLbl.className = 'field-lbl'
         scLbl.textContent = 'scratchpad'
@@ -739,7 +745,9 @@
           }
           const meta = document.createElement('div')
           meta.className = 'meta'
-          meta.appendChild(chip('', s ? truncate(s.concept || s.id, 24) : p.shape_id || '(no shape)'))
+          meta.appendChild(
+            chip('', s ? truncate(s.concept || s.id, 24) : p.shape_id || '(no shape)')
+          )
           meta.appendChild(chip(p.fired ? 'fired' : 'unfired', p.fired ? 'fired' : 'not fired'))
           if (p.intensity) meta.appendChild(chip(p.intensity, p.intensity))
           card.appendChild(meta)

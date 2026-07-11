@@ -236,7 +236,9 @@ export function buildContextMcpServers(
         `enough surrounding text to be unique) unless you pass replace_all: true. On a not-found or ` +
         `not-unique error, adjust old_string or fall back to set_${base}.`,
       {
-        old_string: z.string().describe('Exact text to find in the current value (verbatim, may span lines).'),
+        old_string: z
+          .string()
+          .describe('Exact text to find in the current value (verbatim, may span lines).'),
         new_string: z.string().describe('Text to replace it with.'),
         replace_all: z
           .boolean()
@@ -256,8 +258,11 @@ export function buildContextMcpServers(
         )
         const current = typeof raw === 'string' ? raw : ''
         if (!current)
-          return fail(`"${ex.label}" is empty — nothing to edit. Use set_${base} to write it first.`)
-        if (args.old_string === '') return fail('old_string is empty — provide the snippet to replace.')
+          return fail(
+            `"${ex.label}" is empty — nothing to edit. Use set_${base} to write it first.`
+          )
+        if (args.old_string === '')
+          return fail('old_string is empty — provide the snippet to replace.')
         if (args.old_string === args.new_string)
           return fail('old_string and new_string are identical — no change to make.')
 
@@ -282,7 +287,10 @@ export function buildContextMcpServers(
         const n = args.replace_all ? count : 1
         return {
           content: [
-            { type: 'text' as const, text: `Edited "${ex.label}" (${n} replacement${n === 1 ? '' : 's'}).` }
+            {
+              type: 'text' as const,
+              text: `Edited "${ex.label}" (${n} replacement${n === 1 ? '' : 's'}).`
+            }
           ]
         }
       }

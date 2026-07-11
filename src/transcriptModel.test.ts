@@ -20,6 +20,7 @@ const snapshot = (over: Partial<UiStateSnapshot> = {}): UiStateSnapshot => ({
   autoResumeAt: null,
   autoResumeEnabled: false,
   tokens: { output: 42, input: 7 },
+  turnStartedAt: null,
   ...over
 })
 
@@ -69,5 +70,35 @@ describe('hydrate (mount-time resync to main)', () => {
     })
     expect(s.status).toBe('idle')
     expect(s.pending).toHaveLength(0)
+  })
+
+  it('carries the turn clock anchor and auto-resume flag from the snapshot', () => {
+    const s = reduce(initialState, {
+      type: 'hydrate',
+      snapshot: snapshot({ turnStartedAt: 12345, autoResumeEnabled: true })
+    })
+    expect(s.turnStartedAt).toBe(12345)
+    expect(s.autoResumeEnabled).toBe(true)
+  })
+})
+
+describe('turn clock (elapsed anchor survives remounts)', () => {
+  it('anchors on the first transition to working and keeps it across repeats', () => {
+    let s = ev(initialState, { instanceId: 'i', kind: 'status', status: 'working' })
+    expect(s.turnStartedAt).not.toBeNull()
+    const anchor = s.turnStartedAt
+    s = ev(s, { instanceId: 'i', kind: 'status', status: 'working' }) // queued turn, same run
+    expect(s.turnStartedAt).toBe(anchor)
+  })
+
+  it('clears the anchor when the run ends', () => {
+    let s = ev(initialState, { instanceId: 'i', kind: 'status', status: 'working' })
+    s = ev(s, { instanceId: 'i', kind: 'status', status: 'idle' })
+    expect(s.turnStartedAt).toBeNull()
+  })
+
+  it('set-auto-resume flips the flag', () => {
+    const s = reduce(initialState, { type: 'set-auto-resume', enabled: true })
+    expect(s.autoResumeEnabled).toBe(true)
   })
 })

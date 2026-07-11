@@ -1,4 +1,4 @@
-import { Fragment, memo, useEffect, useReducer, useRef, useState } from 'react'
+import { Fragment, memo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import {
   KNOWN_MODELS,
   type EffortLevel,
@@ -10,13 +10,10 @@ import {
   type RunningTask,
   type TaskItem
 } from '@shared/events'
-import { initialState, reduce, type AgentError, type Block, type Message } from '../transcriptModel'
+import type { AgentError, Block, Message } from '../transcriptModel'
+import { storeFor } from '../services/conversationViewStore'
 import { Markdown } from './Markdown'
 import { ToolCallView } from './ToolCall'
-
-// Render only the last N messages by default; older ones load on demand. Keeps a huge
-// transcript from blocking the main thread (markdown + Shiki tokenize synchronously per block).
-const VISIBLE_DEFAULT = 60
 
 type DecideFn = (requestId: string, behavior: 'allow' | 'deny', allowAlways?: boolean) => void
 type AnswerFn = (requestId: string, answers: Record<string, string>, response?: string) => void
@@ -30,84 +27,29 @@ function messageText(m: Message): string {
 }
 
 export function ChatPanel({ instanceId }: { instanceId: string }) {
-  const [state, dispatch] = useReducer(reduce, initialState)
+  // All conversation state lives in the per-conversation store (services/conversationViewStore),
+  // which outlives this panel — Dockview disposes panels on tab switch, and events keep reducing
+  // into the store while this conversation is hidden. This component is a disposable view.
+  const store = useMemo(() => storeFor(instanceId), [instanceId])
+  const state = useSyncExternalStore(store.subscribeTranscript, store.getTranscript)
+  const view = useSyncExternalStore(store.subscribeView, store.getView)
   const [models, setModels] = useState<ModelOption[]>(KNOWN_MODELS)
-  const [editing, setEditing] = useState<{ id: string; draft: string } | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const transcriptRef = useRef<HTMLDivElement>(null)
-  // Whether the user is at (or near) the tail. Updated on scroll; not state, so
-  // it never triggers a re-render. Starts true so the first messages stick.
-  const atBottomRef = useRef(true)
-  // Only render the last N messages so a huge transcript doesn't block the main thread
-  // (markdown + Shiki are synchronous per block). "Show earlier" raises this on demand.
-  const [visibleCount, setVisibleCount] = useState(VISIBLE_DEFAULT)
-  const [showBackground, setShowBackground] = useState(false)
-  // When set, the transcript area shows this background task's live activity instead of the chat.
-  const [viewTask, setViewTask] = useState<string | null>(null)
-  // Generation guard: ignore a transcript load that resolves after a newer one (e.g. a
-  // mount-time load landing after Clear chat) so stale messages can't repopulate.
-  const loadGenRef = useRef(0)
-  // Elapsed-time clock for the in-flight turn (ticks once a second while working).
-  const turnStartRef = useRef<number | null>(null)
+  // 1s re-render tick while working — the elapsed clock's ANCHOR lives in state.turnStartedAt.
   const [, setNowTick] = useState(0)
 
-  // Load the authoritative transcript (with on-disk uuids) + branch list.
-  const loadCanonical = async () => {
-    const gen = ++loadGenRef.current
-    // Independent so a transcript failure can't also drop the branch update.
-    try {
-      const messages = await window.atelier.agent.transcript(instanceId)
-      if (gen === loadGenRef.current) dispatch({ type: 'transcript', messages })
-    } catch {
-      /* transcript not available yet */
-    }
-    try {
-      const forkPoints = await window.atelier.agent.forkPoints(instanceId)
-      if (gen === loadGenRef.current) dispatch({ type: 'fork-points', forkPoints })
-    } catch {
-      /* fork points not available yet */
-    }
-  }
-
+  // Current model/effort for the header controls (system_init may predate the store).
   useEffect(() => {
-    const off = window.atelier.agent.onEvent((e) => {
-      if (e.instanceId !== instanceId) return
-      dispatch({ type: 'event', event: e })
-      // After each completed turn, reconcile to the on-disk transcript so messages
-      // carry real uuids (needed for edit/fork) and tool results are fully paired.
-      if (e.kind === 'result') setTimeout(() => void loadCanonical(), 150)
-    })
-    return off
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [instanceId])
-
-  // Clear-chat resets the transcript VIEW (not the dock layout, so plugin panes are
-  // untouched). App dispatches this after agent.clearChat starts a fresh session.
-  useEffect(() => {
-    const onReload = (e: Event) => {
-      if ((e as CustomEvent).detail !== instanceId) return
-      dispatch({ type: 'transcript', messages: [] })
-      void loadCanonical()
-    }
-    window.addEventListener('atelier-reload-transcript', onReload)
-    return () => window.removeEventListener('atelier-reload-transcript', onReload)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [instanceId])
-
-  // Hydrate when (re)mounted onto an existing instance: load its transcript and
-  // current model, since system_init already fired before this panel mounted.
-  useEffect(() => {
-    void loadCanonical()
     void window.atelier.agent
       .list()
       .then((list) => {
         const inst = list.find((i) => i.id === instanceId)
-        if (inst?.model) dispatch({ type: 'set-model', model: inst.model })
-        if (inst?.effort) dispatch({ type: 'set-effort', effort: inst.effort })
+        if (inst?.model) store.dispatch({ type: 'set-model', model: inst.model })
+        if (inst?.effort) store.dispatch({ type: 'set-effort', effort: inst.effort })
       })
       .catch(() => {})
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [instanceId])
+  }, [instanceId, store])
 
   useEffect(() => {
     let alive = true
@@ -129,34 +71,46 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
 
   const onModelChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const model = e.target.value
-    dispatch({ type: 'set-model', model })
+    store.dispatch({ type: 'set-model', model })
     void window.atelier.agent.setModel(instanceId, model)
   }
 
   const effortLevels = models.find((m) => m.value === state.model)?.supportedEffortLevels ?? []
   const onEffortChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const effort = e.target.value as EffortLevel
-    dispatch({ type: 'set-effort', effort })
+    store.dispatch({ type: 'set-effort', effort })
     void window.atelier.agent.setEffort(instanceId, effort)
   }
+
+  // Restore the persisted scroll position on (re)mount: tail-pinned users land at the tail,
+  // scrolled-up readers land where they left off (Dockview disposed the DOM on tab switch).
+  useEffect(() => {
+    const el = transcriptRef.current
+    if (!el) return
+    if (store.scrollAtBottom) bottomRef.current?.scrollIntoView({ block: 'end' })
+    else el.scrollTop = store.scrollTop
+  }, [store])
 
   // Stick to the bottom only when the user is already watching the tail; if they
   // have scrolled up to read, leave their position alone as new text streams in.
   // `status` is a dep too so the thinking/activity spinner (which appears when the turn
   // starts, before any message delta) scrolls into view instead of dropping below the fold.
   useEffect(() => {
-    if (viewTask === null && atBottomRef.current)
+    if (view.viewTask === null && store.scrollAtBottom)
       bottomRef.current?.scrollIntoView({ block: 'end' })
-  }, [state.messages, state.pending, state.status, viewTask])
+  }, [state.messages, state.pending, state.status, view.viewTask, store])
 
-  // Returning from a background-task view lands you back at the bottom of the chat (not scrolled
-  // to the top, where the re-rendered transcript would otherwise leave you).
+  // Returning from a background-task view lands you back at the bottom of the chat. TRANSITION
+  // only (not on mount, which must respect the restored scroll position instead).
+  const prevViewTaskRef = useRef(view.viewTask)
   useEffect(() => {
-    if (viewTask === null) {
-      atBottomRef.current = true
+    const was = prevViewTaskRef.current
+    prevViewTaskRef.current = view.viewTask
+    if (was !== null && view.viewTask === null) {
+      store.scrollAtBottom = true
       bottomRef.current?.scrollIntoView({ block: 'end' })
     }
-  }, [viewTask])
+  }, [view.viewTask, store])
 
   // Closing a dock panel (e.g. a bottom-docked plugin) makes Dockview reparent this scroll
   // container, which resets its native scrollTop to 0 — leaving a tail-pinned user stranded at the
@@ -166,41 +120,39 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
     const el = transcriptRef.current
     if (!el || typeof ResizeObserver === 'undefined') return
     const ro = new ResizeObserver(() => {
-      if (viewTask === null && atBottomRef.current)
+      if (view.viewTask === null && store.scrollAtBottom)
         bottomRef.current?.scrollIntoView({ block: 'end' })
     })
     ro.observe(el)
     return () => ro.disconnect()
-  }, [viewTask])
+  }, [view.viewTask, store])
 
   const onTranscriptScroll = () => {
     const el = transcriptRef.current
     if (!el) return
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-    atBottomRef.current = distanceFromBottom <= 40
+    store.scrollAtBottom = distanceFromBottom <= 40
+    store.scrollTop = el.scrollTop
   }
 
   const busy = state.status === 'working'
 
-  // Run a 1s clock while working so the elapsed time updates; stop (and reset) when idle.
+  // Run a 1s clock while working so the elapsed readout updates. The start time is store
+  // state (anchored by main), so the clock survives tab switches instead of restarting.
   useEffect(() => {
-    if (!busy) {
-      turnStartRef.current = null
-      return
-    }
-    if (turnStartRef.current === null) turnStartRef.current = Date.now()
+    if (!busy) return
     const t = setInterval(() => setNowTick((n) => n + 1), 1000)
     return () => clearInterval(t)
   }, [busy])
-  const elapsedSec = turnStartRef.current
-    ? Math.floor((Date.now() - turnStartRef.current) / 1000)
+  const elapsedSec = state.turnStartedAt
+    ? Math.max(0, Math.floor((Date.now() - state.turnStartedAt) / 1000))
     : 0
 
   const send = (raw: string) => {
     const text = raw.trim()
     if (!text) return // allowed while busy: the message queues and runs after the current turn
-    atBottomRef.current = true // sending is an explicit action — jump to the tail
-    dispatch({ type: 'user', id: crypto.randomUUID(), text })
+    store.scrollAtBottom = true // sending is an explicit action — jump to the tail
+    store.dispatch({ type: 'user', id: crypto.randomUUID(), text })
     void window.atelier.agent.send(instanceId, text)
   }
 
@@ -208,12 +160,12 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
 
   const decide: DecideFn = (requestId, behavior, allowAlways) => {
     void window.atelier.agent.decide(instanceId, requestId, behavior, allowAlways)
-    dispatch({ type: 'resolve-permission', requestId })
+    store.dispatch({ type: 'resolve-permission', requestId })
   }
 
   const answer: AnswerFn = (requestId, answers, response) => {
     void window.atelier.agent.answer(instanceId, requestId, answers, response)
-    dispatch({ type: 'resolve-question', requestId })
+    store.dispatch({ type: 'resolve-question', requestId })
   }
 
   const bypass = state.permissionMode === 'bypassPermissions'
@@ -224,60 +176,48 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
     )
   }
 
-  const [autoResume, setAutoResume] = useState(false)
   const toggleAutoResume = (e: React.ChangeEvent<HTMLInputElement>) => {
     const on = e.target.checked
-    setAutoResume(on)
+    store.dispatch({ type: 'set-auto-resume', enabled: on })
     void window.atelier.agent.setAutoResume(instanceId, on)
   }
 
-  // Resync to main's authoritative live state on (re)mount. Runs AFTER the onEvent effect above
-  // (declaration order = mount order), so the subscription is already live: the snapshot can't
-  // miss anything, and later events apply on top of it. Without this, a remounted panel loses
-  // pending approval cards — the SDK then sits blocked on an answer no one can see to give,
-  // which reads as an eternal "working" — and resets the bypass toggle/busy display.
-  useEffect(() => {
-    void window.atelier.agent
-      .uiState(instanceId)
-      .then((s) => {
-        dispatch({ type: 'hydrate', snapshot: s })
-        setAutoResume(s.autoResumeEnabled)
-      })
-      .catch(() => {})
-  }, [instanceId])
-
-  const startEdit = (m: Message) => setEditing({ id: m.id, draft: messageText(m) })
-  const cancelEdit = () => setEditing(null)
-  const changeDraft = (draft: string) => setEditing((e) => (e ? { ...e, draft } : e))
+  const startEdit = (m: Message) => store.setView({ editing: { id: m.id, draft: messageText(m) } })
+  const cancelEdit = () => store.setView({ editing: null })
+  const changeDraft = (draft: string) =>
+    store.setView({ editing: view.editing ? { ...view.editing, draft } : null })
 
   const saveEdit = async () => {
-    if (!editing) return
-    const id = editing.id
-    const draft = editing.draft
-    setEditing(null)
+    if (!view.editing) return
+    const id = view.editing.id
+    const draft = view.editing.draft
+    store.setView({ editing: null })
     const t = await window.atelier.agent.editSave(instanceId, id, draft)
-    dispatch({ type: 'transcript', messages: t })
-    dispatch({ type: 'fork-points', forkPoints: await window.atelier.agent.forkPoints(instanceId) })
+    store.dispatch({ type: 'transcript', messages: t })
+    store.dispatch({
+      type: 'fork-points',
+      forkPoints: await window.atelier.agent.forkPoints(instanceId)
+    })
   }
 
   const forkEdit = () => {
-    if (!editing) return
-    atBottomRef.current = true
+    if (!view.editing) return
+    store.scrollAtBottom = true
     // Clear the stale tail immediately, then the new branch streams in.
-    dispatch({
+    store.dispatch({
       type: 'fork-local',
-      uuid: editing.id,
+      uuid: view.editing.id,
       tempId: crypto.randomUUID(),
-      newText: editing.draft
+      newText: view.editing.draft
     })
-    void window.atelier.agent.fork(instanceId, editing.id, editing.draft) // streams; result reloads
-    setEditing(null)
+    void window.atelier.agent.fork(instanceId, view.editing.id, view.editing.draft)
+    store.setView({ editing: null })
   }
 
   const switchBranch = async (sessionId: string) => {
     const res = await window.atelier.agent.switchBranch(instanceId, sessionId)
-    dispatch({ type: 'transcript', messages: res.transcript })
-    dispatch({ type: 'fork-points', forkPoints: res.forkPoints })
+    store.dispatch({ type: 'transcript', messages: res.transcript })
+    store.dispatch({ type: 'fork-points', forkPoints: res.forkPoints })
   }
 
   return (
@@ -337,10 +277,10 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
           <span className="switch-text">bypass approvals</span>
         </label>
         <label
-          className={`switch ${autoResume ? 'on' : ''}`}
+          className={`switch ${state.autoResumeEnabled ? 'on' : ''}`}
           title="When a usage limit interrupts the chat, wait for it to reset and resume automatically — no polling, no requests while limited"
         >
-          <input type="checkbox" checked={autoResume} onChange={toggleAutoResume} />
+          <input type="checkbox" checked={state.autoResumeEnabled} onChange={toggleAutoResume} />
           <span className="switch-track">
             <span className="switch-thumb" />
           </span>
@@ -355,31 +295,31 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
       </header>
 
       <div className="transcript" ref={transcriptRef} onScroll={onTranscriptScroll}>
-        {viewTask !== null && (
+        {view.viewTask !== null && (
           <TaskViewer
-            taskId={viewTask}
-            task={state.background.find((t) => t.kind === 'subagent' && t.id === viewTask)}
-            items={state.taskViews[viewTask] ?? []}
-            onBack={() => setViewTask(null)}
+            taskId={view.viewTask}
+            task={state.background.find((t) => t.kind === 'subagent' && t.id === view.viewTask)}
+            items={state.taskViews[view.viewTask] ?? []}
+            onBack={() => store.setView({ viewTask: null })}
           />
         )}
-        {viewTask === null && state.messages.length > visibleCount && (
+        {view.viewTask === null && state.messages.length > view.visibleCount && (
           <button
             className="load-earlier"
-            onClick={() => setVisibleCount((v) => v + 200)}
+            onClick={() => store.setView({ visibleCount: view.visibleCount + 200 })}
             title="Older messages are hidden to keep the UI responsive"
           >
-            Show earlier messages ({state.messages.length - visibleCount} hidden)
+            Show earlier messages ({state.messages.length - view.visibleCount} hidden)
           </button>
         )}
-        {viewTask === null &&
+        {view.viewTask === null &&
           (() => {
             // Interleave errors into the message stream at the point they occurred (err.after = the
             // message count at error time), so an error scrolls up with the conversation instead of
             // staying pinned below the newest message. Errors anchored above the visible window or
             // past the current end fall back to the end (rare: truncated view / after an edit-fork).
             const msgs = state.messages
-            const offset = msgs.length > visibleCount ? msgs.length - visibleCount : 0
+            const offset = msgs.length > view.visibleCount ? msgs.length - view.visibleCount : 0
             const shown = msgs.slice(offset)
             const errorNote = (err: AgentError): React.JSX.Element => (
               <details key={err.id} className="error-note" open>
@@ -389,7 +329,7 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
                     className="error-dismiss"
                     title="Dismiss"
                     aria-label="Dismiss error"
-                    onClick={() => dispatch({ type: 'dismiss-error', id: err.id })}
+                    onClick={() => store.dispatch({ type: 'dismiss-error', id: err.id })}
                   >
                     ×
                   </button>
@@ -406,7 +346,7 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
                     <MessageView
                       message={m}
                       live={busy && m.role === 'assistant' && i === shown.length - 1}
-                      editing={editing?.id === m.id ? editing.draft : null}
+                      editing={view.editing?.id === m.id ? view.editing.draft : null}
                       forkPoint={state.forkPoints[m.id]}
                       onSwitch={switchBranch}
                       onStartEdit={() => startEdit(m)}
@@ -424,7 +364,7 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
               </>
             )
           })()}
-        {viewTask === null &&
+        {view.viewTask === null &&
           busy &&
           state.pending.length === 0 &&
           state.questions.length === 0 && (
@@ -439,7 +379,7 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
               </span>
             </div>
           )}
-        {viewTask === null && !busy && typeof state.autoResumeAt === 'number' && (
+        {view.viewTask === null && !busy && typeof state.autoResumeAt === 'number' && (
           <div className="resume-banner">
             <span className="spinner" />
             <span>
@@ -470,16 +410,16 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
         <div className="background">
           <button
             className="background-bar"
-            onClick={() => setShowBackground((v) => !v)}
+            onClick={() => store.setView({ showBackground: !view.showBackground })}
             title="Background subagents and tasks running for this conversation"
           >
             <span className="spinner" />
             <span className="background-count">
               {state.background.length} running in the background
             </span>
-            <span className="background-caret">{showBackground ? '▾' : '▸'}</span>
+            <span className="background-caret">{view.showBackground ? '▾' : '▸'}</span>
           </button>
-          {showBackground && (
+          {view.showBackground && (
             <ul className="background-list">
               {state.background.map((t) => (
                 <li key={`${t.kind}:${t.id}`}>
@@ -491,10 +431,7 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
                         ? 'View this subagent’s live activity'
                         : 'No live view for this task kind'
                     }
-                    onClick={() => {
-                      setViewTask(t.id)
-                      setShowBackground(false)
-                    }}
+                    onClick={() => store.setView({ viewTask: t.id, showBackground: false })}
                   >
                     <span className={`background-kind background-kind-${t.kind}`}>
                       {t.kind === 'subagent' ? 'agent' : 'task'}
@@ -509,7 +446,15 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
         </div>
       )}
 
-      <Composer busy={busy} onSend={send} onInterrupt={interrupt} />
+      <Composer
+        busy={busy}
+        initialDraft={store.draft}
+        onDraftChange={(t) => {
+          store.draft = t
+        }}
+        onSend={send}
+        onInterrupt={interrupt}
+      />
     </div>
   )
 }
@@ -596,29 +541,39 @@ function TaskViewer({
 /**
  * The composer owns its own input state so typing never re-renders the (potentially
  * huge) transcript — that was the source of multi-second keystroke lag on long chats.
+ * The draft is written through to the store (non-reactively) so it survives the panel
+ * being disposed on a conversation switch.
  */
 function Composer({
   busy,
+  initialDraft,
+  onDraftChange,
   onSend,
   onInterrupt
 }: {
   busy: boolean
+  initialDraft: string
+  onDraftChange: (text: string) => void
   onSend: (text: string) => void
   onInterrupt: () => void
 }) {
-  const [input, setInput] = useState('')
+  const [input, setInput] = useState(initialDraft)
+  const change = (t: string) => {
+    setInput(t)
+    onDraftChange(t)
+  }
   const submit = () => {
     const t = input.trim()
     if (!t) return // allowed while busy — the message queues for after the current turn
     onSend(t)
-    setInput('')
+    change('')
   }
   return (
     <div className="composer">
       <div className="composer-field">
         <textarea
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => change(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()

@@ -209,6 +209,8 @@ class Session {
   // SDK drains eagerly — is what says whether the agent is still working, so a message queued
   // behind a running turn keeps the status truthful until ITS result arrives.
   private turnsInFlight = 0
+  // When the current run of work began (first transition to 'working'; survives queued turns).
+  private turnStartedAtMs: number | null = null
   // The instruction string baked into the live query's systemPrompt. Compared on each send so we
   // only rebind (and pay the one-time history cache invalidation) when it actually changes.
   private appliedInstruction = ''
@@ -891,7 +893,8 @@ class Session {
       background: this.background.list(),
       autoResumeAt: this.autoResumeAtMs,
       autoResumeEnabled: this.autoResume,
-      tokens: { output: this.turnOutputTokens + this.curMsgOutTokens, input: this.turnInputTokens }
+      tokens: { output: this.turnOutputTokens + this.curMsgOutTokens, input: this.turnInputTokens },
+      turnStartedAt: this.turnStartedAtMs
     }
   }
 
@@ -949,6 +952,10 @@ class Session {
   }
 
   private setStatus(status: AgentStatus): void {
+    // Anchor the elapsed clock: set on the first transition to 'working', kept across queued
+    // turns within the same run, cleared when the run ends.
+    if (status === 'working') this.turnStartedAtMs ??= Date.now()
+    else this.turnStartedAtMs = null
     this.status = status
     this.emit({ instanceId: this.id, kind: 'status', status })
   }

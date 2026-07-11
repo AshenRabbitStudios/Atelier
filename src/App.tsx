@@ -7,6 +7,7 @@ import { PluginPane } from './components/PluginPane'
 import { PluginRail } from './components/PluginRail'
 import { UsageMeters } from './components/UsageMeters'
 import { LayoutService } from './services/LayoutService'
+import { storeFor, dropStore } from './services/conversationViewStore'
 
 const THEMES = ['slate', 'carbon', 'daylight'] as const
 
@@ -116,7 +117,11 @@ export function App() {
   }, [activeId])
 
   const refresh = async () => {
-    setOpen(await window.atelier.agent.list())
+    const list = await window.atelier.agent.list()
+    // Every OPEN conversation gets a live view store, mounted panel or not, so hidden tabs
+    // accumulate streamed state exactly like the visible one (services/conversationViewStore).
+    for (const c of list) storeFor(c.id)
+    setOpen(list)
     setAll(await window.atelier.agent.listAll())
   }
 
@@ -304,6 +309,7 @@ export function App() {
 
   const closeConversation = async (id: string) => {
     await window.atelier.agent.close(id)
+    dropStore(id) // its live session is gone; a reopen re-creates + re-hydrates the store
     const remaining = await window.atelier.agent.list()
     setOpen(remaining)
     setAll(await window.atelier.agent.listAll())
@@ -318,8 +324,8 @@ export function App() {
   const clearChat = (id: string) =>
     askConfirm('Clear the chat context for this conversation? This starts a fresh session.', () => {
       void window.atelier.agent.clearChat(id).then(() => {
-        // Reset the transcript VIEW only — the ChatPanel reloads its now-empty transcript.
-        window.dispatchEvent(new CustomEvent('atelier-reload-transcript', { detail: id }))
+        // Reset the view store only (not the dock layout, so plugin panes are untouched).
+        storeFor(id).reset()
       })
     })
 
@@ -355,6 +361,7 @@ export function App() {
       () => {
         void (async () => {
           await window.atelier.agent.delete(id)
+          dropStore(id)
           const remaining = await window.atelier.agent.list()
           setOpen(remaining)
           setAll(await window.atelier.agent.listAll())

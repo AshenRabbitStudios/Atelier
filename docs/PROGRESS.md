@@ -552,3 +552,27 @@ tool calls run unprompted (incl. in a brand-new conversation); (b) trigger an ap
 (bypass off), switch conversations and back → the card is still there and answerable, header says
 "needs approval"; (c) queue a second message mid-turn → status stays working until the second turn
 finishes.
+
+## 2026-07-04 — Refactor: per-conversation view store (visible and hidden tabs identical)
+
+User-reported trio — elapsed timer restarting on tab switch, streamed text missing until the
+message finished, composer drafts cleared — were all one lifetime mismatch: conversation view
+state lived inside Dockview-disposed panels. New `src/services/conversationViewStore.ts`: a
+store per open conversation (App creates them eagerly in refresh()), one app-level event router
+reducing every AgentEvent into its store regardless of visibility, ChatPanel reduced to a pure
+subscribing view. transcriptModel gains `turnStartedAt` (clock anchor, also main-tracked and in
+UiStateSnapshot) + `autoResumeEnabled` (+ set-auto-resume action). Composer draft and scroll
+position are non-reactive write-through store fields (keystrokes/scrolls never re-render the
+transcript); scroll position is restored on remount (tail-pinned users land at the tail).
+Removed: the `atelier-reload-transcript` CustomEvent bus, per-panel onEvent subscriptions, the
+per-remount uiState hydration effect (hydration now happens once at store creation), and the
+mount-time turnStartRef. Store routes only to EXISTING stores so dropped conversations can't
+resurrect as zombies (close/delete → dropStore).
+
+Gate green (typecheck node+web, 115 tests incl. 9 new store tests, eslint, prettier).
+
+needs human spot-check after relaunch: start a long turn, switch tabs mid-stream and back →
+full partial text present immediately, elapsed clock continuous; type a draft, switch away and
+back → draft intact; scroll up in a long chat, switch away/back → same scroll position; clear
+chat still empties the view; edit/fork, background viewer, and "needs approval" cards all still
+behave.

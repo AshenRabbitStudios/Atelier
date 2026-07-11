@@ -139,3 +139,18 @@ toolsearch|webfetch|websearch` start collapsed in the chat (they're just retriev
 - **2026-07-04 — A cleanly-ended pump = dead CLI → restart.** The message stream ending WITHOUT an
   error (CLI crash/kill) previously did nothing: status stayed 'working' forever and later sends
   queued into a stream nobody read. Now treated like a thrown pump error (surface + bounded restart).
+- **2026-07-04 — Conversation view state lives in a renderer store, not the panel (visible ≡
+  hidden).** Dockview disposes a conversation's panels on tab switch; holding live state in
+  component state made hidden tabs second-class: streamed deltas broadcast while unmounted were
+  dropped (text missing until the result reconciled), the elapsed clock restarted per remount, and
+  composer drafts vanished. `src/services/conversationViewStore.ts`: one store per OPEN
+  conversation (eagerly created by App), fed by ONE app-level onEvent router — state is written
+  identically whether or not a panel is mounted; ChatPanel is a pure view (useSyncExternalStore).
+  Ownership hierarchy: main = durable truth (uiState + on-disk transcript, consumed at store
+  creation/crash-reload) → store = live working copy → panel = disposable view. High-frequency
+  fields (composer draft, scroll position) are write-through NON-reactive store fields so a
+  keystroke/scroll can never re-render the transcript. Killed with it: the
+  `atelier-reload-transcript` window CustomEvent bus (App now calls store.reset()), per-panel
+  event subscriptions, and the per-remount hydration crutch. Elapsed clock anchors on
+  `turnStartedAt` (main-tracked, in UiStateSnapshot; mirrored by the reducer on status
+  transitions) instead of a mount-time ref.

@@ -43,6 +43,10 @@ export interface TranscriptState {
   forkPoints: ForkPoints
   lastResult?: { costUsd?: number; durationMs?: number; isError: boolean }
   liveTokens?: { output: number; input?: number } // running usage for the in-flight turn
+  // Epoch-ms the in-flight run started (null when idle) — the elapsed clock derives from this,
+  // so it survives panel remounts instead of restarting on every tab switch.
+  turnStartedAt: number | null
+  autoResumeEnabled: boolean // the auto-resume toggle (agent-side setting, mirrored here)
   autoResumeAt?: number | null // epoch-ms a usage limit resets when auto-resume is armed (else null)
   errors: AgentError[]
   background: RunningTask[] // subagents/tasks currently running (top indicator + picker)
@@ -69,6 +73,8 @@ export const initialState: TranscriptState = {
   questions: [],
   permissionMode: 'default',
   forkPoints: {},
+  turnStartedAt: null,
+  autoResumeEnabled: false,
   errors: [],
   background: [],
   taskViews: {}
@@ -82,6 +88,7 @@ export type Action =
   | { type: 'resolve-question'; requestId: string }
   | { type: 'set-model'; model: string }
   | { type: 'set-effort'; effort: EffortLevel }
+  | { type: 'set-auto-resume'; enabled: boolean }
   | { type: 'transcript'; messages: TranscriptMessage[] }
   | { type: 'fork-points'; forkPoints: ForkPoints }
   | { type: 'fork-local'; uuid: string; tempId: string; newText: string }
@@ -115,6 +122,8 @@ export function reduce(state: TranscriptState, action: Action): TranscriptState 
       questions: s.questions,
       background: s.background,
       autoResumeAt: s.autoResumeAt,
+      autoResumeEnabled: s.autoResumeEnabled,
+      turnStartedAt: s.turnStartedAt,
       liveTokens: s.tokens
     }
   }
@@ -123,6 +132,9 @@ export function reduce(state: TranscriptState, action: Action): TranscriptState 
   }
   if (action.type === 'set-effort') {
     return { ...state, effort: action.effort }
+  }
+  if (action.type === 'set-auto-resume') {
+    return { ...state, autoResumeEnabled: action.enabled }
   }
   if (action.type === 'dismiss-error') {
     return { ...state, errors: state.errors.filter((x) => x.id !== action.id) }
@@ -150,7 +162,13 @@ export function reduce(state: TranscriptState, action: Action): TranscriptState 
       role: 'user',
       blocks: [{ kind: 'text', index: 0, text: action.newText }]
     }
-    return { ...state, messages: [...head, userMsg], status: 'working', liveTokens: { output: 0 } }
+    return {
+      ...state,
+      messages: [...head, userMsg],
+      status: 'working',
+      turnStartedAt: Date.now(),
+      liveTokens: { output: 0 }
+    }
   }
   if (action.type === 'user') {
     const msg: Message = {
@@ -180,7 +198,13 @@ function applyEvent(state: TranscriptState, e: AgentEvent): TranscriptState {
         tools: e.tools
       }
     case 'status':
-      return { ...state, status: e.status }
+      // Anchor the elapsed clock on the first transition to working; keep it across queued
+      // turns within the run (main mirrors this — hydrate carries the authoritative value).
+      return {
+        ...state,
+        status: e.status,
+        turnStartedAt: e.status === 'working' ? (state.turnStartedAt ?? Date.now()) : null
+      }
     case 'tokens':
       return { ...state, liveTokens: { output: e.output, input: e.input } }
     case 'auto_resume':

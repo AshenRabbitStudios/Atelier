@@ -169,6 +169,8 @@ export interface UiStateSnapshot {
   autoResumeAt: number | null
   autoResumeEnabled: boolean
   tokens: { output: number; input?: number }
+  /** Epoch-ms the in-flight run started (null when idle) — the elapsed clock's anchor. */
+  turnStartedAt: number | null
 }
 
 /** A persisted conversation as listed in the dropdown (open + closed). */

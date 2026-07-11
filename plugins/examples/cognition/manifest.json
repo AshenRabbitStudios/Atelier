@@ -2,6 +2,7 @@
   "id": "cognition",
   "name": "Cognition",
   "version": "0.1.0",
+  "description": "Your persistent working state for a conversation, carried across clears: a mental model (how you understand the system), 10 working-memory slots, an A→B plan, and a problems log. Each is a context document you read every turn and update via its set_* tool. Clear the chat often to cut drift/tokens; these carry your state across the reset.",
   "icon": "M5.2 8.5a3.5 3.5 0 1 1 5.6 0l-.7 1.3v1.2h-4.2v-1.2zM6.5 12.2h3M7 13.5h2",
   "kind": "panel",
   "entry": "index.html",

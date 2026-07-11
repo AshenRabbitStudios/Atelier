@@ -2,6 +2,7 @@
   "id": "data-table",
   "name": "Data Table",
   "version": "0.2.0",
+  "description": "A spreadsheet-style pane backed by one CSV context document you and the user share. Maintain tabular data (rows/columns) via its set_* tool; it renders as a grid the user can read and edit.",
   "icon": "M2.5 3.5h11v9h-11zM2.5 6.7h11M6.3 3.5v9M9.8 3.5v9",
   "kind": "panel",
   "entry": "index.html",

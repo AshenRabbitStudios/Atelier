@@ -2,6 +2,7 @@
   "id": "browser",
   "name": "Browser",
   "version": "0.1.0",
+  "description": "A pane the user views: push HTML or Markdown into it to render for them, then read back the page state and a text snapshot of what they see. Use it to show rich output (reports, previews, rendered pages) rather than dumping it into chat.",
   "icon": "M8 1.6a6.4 6.4 0 100 12.8A6.4 6.4 0 008 1.6zM1.7 8h12.6M8 1.7c1.8 1.8 2.8 4 2.8 6.3S9.8 12.5 8 14.3M8 1.7C6.2 3.5 5.2 5.7 5.2 8s1 4.5 2.8 6.3",
   "kind": "panel",
   "entry": "index.html",

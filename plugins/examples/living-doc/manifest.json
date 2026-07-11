@@ -2,6 +2,7 @@
   "id": "living-doc",
   "name": "Living Doc",
   "version": "0.1.0",
+  "description": "A pane that tails a file inside the conversation's working directory and live-renders its Markdown as the file changes on disk. Read-only display of a document you or the user edit; no tools or context for you.",
   "icon": "M4 2.5h6l2.5 2.5v8.5h-8.5zM10 2.5v2.5h2.5M5.5 8.5l1.5 1.5 3-3.5",
   "kind": "panel",
   "entry": "index.html",

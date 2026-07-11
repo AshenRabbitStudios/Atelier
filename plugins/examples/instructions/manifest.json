@@ -2,6 +2,7 @@
   "id": "instructions",
   "name": "Instructions",
   "version": "0.1.0",
+  "description": "A user-authored standing instruction appended to your system prompt for this conversation (stays prompt-cached). The user edits it in the pane; you cannot change it — treat it as fixed direction for how to work here.",
   "icon": "M4 2.5h6l2.5 2.5v8.5h-8.5zM10 2.5v2.5h2.5M5.5 8h5M5.5 10.5h5",
   "kind": "panel",
   "entry": "index.html",

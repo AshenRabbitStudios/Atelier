@@ -40,6 +40,7 @@ import { PluginRegistry } from './plugin/PluginRegistry.js'
 import { DataBus, createFileSource } from './plugin/DataBus.js'
 import { PluginBackendManager, type BackendTransport } from './plugin/PluginBackendManager.js'
 import { buildPluginToolServers } from './plugin/pluginTools.js'
+import { buildEnvironmentBriefing, buildAtelierToolServer } from './plugin/introspection.js'
 import { registerPluginScheme, handlePluginProtocol } from './plugin/protocol.js'
 import { pluginStorageSet, pluginStorageKeys } from './plugin/pluginStorage.js'
 import {
@@ -151,10 +152,18 @@ const agents = new AgentManager(
       pluginState,
       (pluginId, backendPath, t, i) => backends.invoke(pluginId, backendPath, t, i)
     )
-    if (!ctx && !toolServers) return undefined
-    return { ...(ctx ?? {}), ...(toolServers ?? {}) }
+    // The built-in `atelier` introspection server is always present (independent of enablement) so
+    // the agent can always inspect its environment; merged with the per-conversation servers.
+    const atelier = buildAtelierToolServer(plugins, pluginState)
+    return { ...atelier, ...(ctx ?? {}), ...(toolServers ?? {}) }
   },
-  (conversationId, pluginState) => buildSystemInstruction(plugins, conversationId, pluginState),
+  // System-prompt append: the always-on environment briefing first (so a fresh conversation knows
+  // it is inside Atelier and what plugins exist), then any enabled plugin's standing instruction.
+  (conversationId, pluginState) => {
+    const env = buildEnvironmentBriefing(plugins, agents.cwdFor(conversationId) ?? undefined)
+    const si = buildSystemInstruction(plugins, conversationId, pluginState)
+    return si ? `${env}\n\n${si}` : env
+  },
   // Ambient Bash tap → DataBus. Forward-referenced (dataBus is built just below, since it needs
   // agents.cwdFor); the closure only runs later when a Bash hook fires, by which point it's set.
   (conversationId, channel, data) => dataBus.publish(conversationId, channel, data)

@@ -59,6 +59,10 @@ export const ManifestSchema = z.object({
   id: z.string().regex(/^[a-z0-9-]+$/, 'id must be lowercase letters, digits, and hyphens only'),
   name: z.string().min(1),
   version: z.string().min(1),
+  // Optional prose describing what the plugin is for — its intention and use. Surfaced in the
+  // always-on environment briefing (one-line catalog entry) and in the `describe_plugin` tool
+  // (full text). May be multi-line. Absent → the plugin still appears in the catalog by name.
+  description: z.string().min(1).optional(),
   // Optional single-path 16px line-icon `d` string (DESIGN_SYSTEM.md §6), shown in the sidebar so
   // each plugin is distinguishable when collapsed. Falls back to a generic plug icon if omitted.
   icon: z.string().min(1).optional(),

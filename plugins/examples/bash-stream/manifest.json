@@ -2,6 +2,7 @@
   "id": "bash-stream",
   "name": "Bash Stream",
   "version": "0.1.0",
+  "description": "A terminal pane that mirrors the real shell I/O of the Bash commands you run in this conversation, so the user can watch command output live. Passive display; no tools or context for you.",
   "icon": "M2.5 3h11v10h-11zM4.5 6l2 2-2 2M8.5 10.5h3",
   "kind": "panel",
   "entry": "index.html",

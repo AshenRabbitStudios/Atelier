@@ -2,6 +2,7 @@
   "id": "tool-plugin",
   "name": "Tool Plugin",
   "version": "0.1.0",
+  "description": "An example plugin that contributes callable tools backed by a sandboxed child process: reverse_text and sum_numbers. Demonstrates how a plugin can add tools to your toolset when enabled.",
   "icon": "M8 2.5l1.4 3 3.1.3-2.3 2.1.7 3-2.9-1.6-2.9 1.6.7-3-2.3-2.1 3.1-.3z",
   "kind": "both",
   "entry": "index.html",

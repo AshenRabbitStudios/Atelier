@@ -2,6 +2,7 @@
   "id": "hologram",
   "name": "Hologram",
   "version": "0.1.0",
+  "description": "A 3D architecture viewer. Push one abstraction level at a time as a flat nodes-and-edges scene (its 'architecture' context document) and the pane renders it as a navigable subway-style map; drill into nodes for child scenes. Read back the user's selection and drive the camera via the 'command' document. Use describe_plugin for the full authoring schema.",
   "icon": "M8 1.4 13.6 4.7v6.6L8 14.6 2.4 11.3V4.7zM2.4 4.7 8 8l5.6-3.3M8 8v6.6",
   "kind": "panel",
   "entry": "index.html",

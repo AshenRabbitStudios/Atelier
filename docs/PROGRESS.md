@@ -16,6 +16,27 @@
 - **NOTE:** prior PROGRESS said "current phase: P0" — that was stale. P0 is done and most of
   P1 shipped without the status being updated. This entry corrects the record.
 
+## Context-doc `edit_` tool + `cartographer` plugin (2026-07-11, branch `feat/context-edit-tool`)
+
+- **`edit_<plugin>__<key>` — targeted diff writes for context documents.** Every pinned export now
+  gets `edit_` (old_string/new_string/replace_all) beside `set_`. Motivation: full-rewrite-only
+  re-samples every untouched byte, so context docs silently drift and compound turn-over-turn, and
+  an over-`maxTokens` value composed from its truncated injected view loses its tail. Contained to
+  `buildContextMcpServers`; no renderer change (same `onChange` → pane refresh). +7 tests (22 in
+  contextTools). Gate green (typecheck ×2, lint, 122 tests, build). DECISIONS 2026-07-11.
+- **`cartographer` plugin.** Maps a subject's blocked conceptual shapes (blocks/shapes/probes,
+  Map/Director framework — docs/CARTOGRAPHER_SPEC.md). One `map` JSON context export the agent
+  maintains via `edit_`/`set_`; directives via `systemInstruction`; config folded into the map.
+  Vanilla-SVG panel: nested-circle cluster (ring-pack, not d3.pack) + Memories (blocks) + Probe
+  queue + valid-only JSON write-back editor + directives editor. Validated against the real
+  `PluginRegistry` (manifest OK; all 10 plugins still valid). DECISIONS 2026-07-11.
+- **NEEDS HUMAN SPOT-CHECK (not yet eyeballed in-app):** enable Cartographer in a conversation and
+  confirm — (a) the pane renders (empty-state hint, then circles as shapes are added); (b) the agent
+  sees the seeded map + gets `edit_cartographer__map`/`set_cartographer__map` and the directives in
+  its system prompt; (c) agent edits push to the pane live; (d) the Source tab round-trips human JSON
+  edits (invalid JSON blocks save); (e) the Directives tab writes the systemInstruction. The headless
+  gate cannot exercise the rendered panel or the live agent loop.
+
 ## P1 — Multiple instances + editable history (acceptance breakdown)
 
 - [x] **N isolated instances.** `AgentManager` is fully N-instance (`create`/`open`/`close`/

@@ -1,0 +1,917 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Cartographer</title>
+    <!-- Host runtime injects window.atelier (all methods async). Must be the first script. -->
+    <script src="atelier-plugin://__runtime__/atelier.js"></script>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        font-family: var(--font, system-ui, sans-serif);
+        background: var(--bg, #0f1117);
+        color: var(--text, #e7eaf0);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        font-size: 13px;
+      }
+
+      /* ── Header ──────────────────────────────────────────────────────── */
+      .hdr {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        background: var(--surface, #14171e);
+        border-bottom: 1px solid var(--border, #252b37);
+      }
+      .hdr-title {
+        font-size: 13px;
+        font-weight: 600;
+        flex: 1;
+      }
+      .chip {
+        font-size: 10px;
+        font-family: var(--mono, monospace);
+        padding: 2px 6px;
+        border-radius: 4px;
+        background: var(--input, #1b2029);
+        color: var(--dim, #8b97ae);
+        border: 1px solid var(--border, #252b37);
+        white-space: nowrap;
+      }
+      .chip.consent-none {
+        color: #e0a23a;
+        border-color: #e0a23a;
+      }
+      .hdr-meta {
+        font-size: 11px;
+        color: var(--faint, #5e6677);
+        font-family: var(--mono, monospace);
+      }
+
+      /* ── Cluster viz ─────────────────────────────────────────────────── */
+      .viz-wrap {
+        flex: 1 1 0;
+        min-height: 120px;
+        overflow: auto;
+        position: relative;
+        background: var(--bg, #0f1117);
+      }
+      .viz {
+        position: relative;
+      }
+      .viz svg {
+        display: block;
+      }
+      .viz .node {
+        cursor: pointer;
+      }
+      .viz .node-label {
+        pointer-events: none;
+        user-select: none;
+      }
+      .empty-hint {
+        position: absolute;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        color: var(--faint, #5e6677);
+        font-family: var(--mono, monospace);
+        font-size: 12px;
+        text-align: center;
+        pointer-events: none;
+      }
+
+      /* ── Detail drawer (overlays the viz) ────────────────────────────── */
+      .detail {
+        display: none;
+        position: absolute;
+        inset: 8px 8px auto auto;
+        max-width: 280px;
+        max-height: calc(100% - 16px);
+        overflow: auto;
+        z-index: 50;
+        background: var(--surface-2, #191d27);
+        border: 1px solid var(--border-2, #333b4b);
+        border-radius: 8px;
+        padding: 10px 12px;
+        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+      }
+      .detail.open {
+        display: block;
+      }
+      .detail h3 {
+        font-size: 13px;
+        margin-bottom: 2px;
+        padding-right: 18px;
+      }
+      .detail .sub {
+        font-size: 10px;
+        font-family: var(--mono, monospace);
+        color: var(--faint, #5e6677);
+        margin-bottom: 8px;
+      }
+      .detail .row {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        margin-bottom: 8px;
+      }
+      .detail .field-lbl {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--faint, #5e6677);
+        margin: 8px 0 2px;
+      }
+      .detail .scratch {
+        font-family: var(--mono, monospace);
+        font-size: 11px;
+        line-height: 1.5;
+        color: var(--dim, #8b97ae);
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .detail-close {
+        position: absolute;
+        top: 6px;
+        right: 8px;
+        background: none;
+        border: none;
+        color: var(--faint, #5e6677);
+        font-size: 15px;
+        cursor: pointer;
+        line-height: 1;
+      }
+      .detail-close:hover {
+        color: var(--text, #e7eaf0);
+      }
+
+      /* ── Tabs + lower panels ─────────────────────────────────────────── */
+      .tabbar {
+        flex: 0 0 auto;
+        display: flex;
+        gap: 2px;
+        padding: 0 6px;
+        border-top: 1px solid var(--border, #252b37);
+        border-bottom: 1px solid var(--border, #252b37);
+        background: var(--surface, #14171e);
+        user-select: none;
+      }
+      .tab {
+        appearance: none;
+        background: transparent;
+        border: none;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -1px;
+        padding: 7px 9px;
+        font-family: inherit;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--faint, #5e6677);
+        cursor: pointer;
+      }
+      .tab:hover {
+        color: var(--dim, #8b97ae);
+      }
+      .tab.active {
+        color: var(--text, #e7eaf0);
+        border-bottom-color: var(--accent, #5b9cff);
+      }
+      .tab .count {
+        color: var(--faint, #5e6677);
+        font-weight: 400;
+      }
+      .lower {
+        flex: 0 0 auto;
+        height: 42%;
+        min-height: 130px;
+        display: flex;
+        flex-direction: column;
+        background: var(--surface, #14171e);
+      }
+      .tabpanel {
+        display: none;
+        flex: 1 1 0;
+        min-height: 0;
+        overflow: auto;
+      }
+      .tabpanel.active {
+        display: flex;
+        flex-direction: column;
+      }
+
+      /* Cards (memories + probes) */
+      .cards {
+        padding: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .card {
+        border: 1px solid var(--border, #252b37);
+        border-left-width: 3px;
+        border-radius: 5px;
+        padding: 7px 9px;
+        background: var(--surface-2, #191d27);
+      }
+      .card .lead {
+        font-size: 12px;
+        line-height: 1.4;
+        color: var(--text, #e7eaf0);
+      }
+      .card .ctx {
+        font-size: 11px;
+        color: var(--dim, #8b97ae);
+        margin-top: 3px;
+        line-height: 1.4;
+      }
+      .card .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-top: 6px;
+        align-items: center;
+      }
+      .tag {
+        font-size: 9px;
+        font-family: var(--mono, monospace);
+        padding: 1px 5px;
+        border-radius: 3px;
+        background: var(--input, #1b2029);
+        color: var(--dim, #8b97ae);
+        border: 1px solid var(--border, #252b37);
+        white-space: nowrap;
+      }
+      .tag.soft {
+        color: #6fb3e0;
+        border-color: #35516640;
+      }
+      .tag.medium {
+        color: #e0a23a;
+        border-color: #6b552a40;
+      }
+      .tag.hard {
+        color: #e0533a;
+        border-color: #6b2a2a40;
+      }
+      .tag.goal {
+        color: var(--accent, #5b9cff);
+      }
+      .tag.fired {
+        color: #e0533a;
+        border-color: #6b2a2a40;
+      }
+      .tag.unfired {
+        color: var(--faint, #5e6677);
+      }
+      .empty-list {
+        padding: 14px;
+        font-size: 12px;
+        font-style: italic;
+        color: var(--faint, #5e6677);
+      }
+
+      /* Source (JSON) + directives editors */
+      textarea.code {
+        flex: 1 1 0;
+        min-height: 0;
+        resize: none;
+        border: none;
+        outline: none;
+        background: var(--input, #1b2029);
+        color: var(--text, #e7eaf0);
+        font-family: var(--mono, monospace);
+        font-size: 12px;
+        line-height: 1.55;
+        padding: 8px 10px;
+        white-space: pre;
+        tab-size: 2;
+      }
+      textarea.code.wrap {
+        white-space: pre-wrap;
+      }
+      textarea.code:focus {
+        background: var(--bg-2, #0f1117);
+      }
+      .status-bar {
+        flex: 0 0 auto;
+        padding: 3px 10px 4px;
+        font-size: 10px;
+        font-family: var(--mono, monospace);
+        color: var(--faint, #5e6677);
+        border-top: 1px solid var(--border, #252b37);
+      }
+      .status-bar.err {
+        color: #e0533a;
+      }
+      .status-bar.ok {
+        color: var(--ok, #4caf82);
+      }
+      .hint-line {
+        flex: 0 0 auto;
+        padding: 5px 10px;
+        font-size: 10px;
+        color: var(--faint, #5e6677);
+        font-style: italic;
+        border-bottom: 1px solid var(--border, #252b37);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="hdr">
+      <span class="hdr-title">Cartographer</span>
+      <span class="chip" id="consent-chip">consent: —</span>
+      <span class="hdr-meta" id="meta"></span>
+    </div>
+
+    <!-- Cluster visualization -->
+    <div class="viz-wrap" id="viz-wrap">
+      <div class="viz" id="viz">
+        <svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg>
+      </div>
+      <div class="detail" id="detail">
+        <button class="detail-close" id="detail-close" title="Close">✕</button>
+        <div id="detail-body"></div>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabbar" id="tabbar">
+      <button class="tab active" data-tab="memories" type="button">
+        Memories <span class="count" id="c-mem"></span>
+      </button>
+      <button class="tab" data-tab="probes" type="button">
+        Probes <span class="count" id="c-prb"></span>
+      </button>
+      <button class="tab" data-tab="source" type="button">Source</button>
+      <button class="tab" data-tab="directives" type="button">Directives</button>
+    </div>
+
+    <div class="lower">
+      <!-- Memories = blocks -->
+      <section class="tabpanel active" data-panel="memories">
+        <div class="cards" id="mem-cards"></div>
+      </section>
+
+      <!-- Probe queue -->
+      <section class="tabpanel" data-panel="probes">
+        <div class="cards" id="prb-cards"></div>
+      </section>
+
+      <!-- Raw JSON source (the human write-back path) -->
+      <section class="tabpanel" data-panel="source">
+        <div class="hint-line">
+          The map is one JSON document. The agent edits it via its tools; you can edit it here —
+          saves only when the JSON is valid.
+        </div>
+        <textarea class="code" id="src" spellcheck="false" placeholder="{ }"></textarea>
+        <div class="status-bar" id="src-status">connecting…</div>
+      </section>
+
+      <!-- Directives (systemInstruction) -->
+      <section class="tabpanel" data-panel="directives">
+        <div class="hint-line">
+          Standing directives pinned to the agent's system prompt. Editable by you; the agent
+          follows whatever is current but cannot change it.
+        </div>
+        <textarea
+          class="code wrap"
+          id="dir"
+          spellcheck="false"
+          placeholder="Directive set for how the agent builds the map…"
+        ></textarea>
+        <div class="status-bar" id="dir-status"></div>
+      </section>
+    </div>
+
+    <script>
+      // ── Constants / helpers ────────────────────────────────────────────
+      const DEBOUNCE_MS = 450
+      const SVGNS = 'http://www.w3.org/2000/svg'
+      const INTENSITY_R = { soft: 18, medium: 26, hard: 36 }
+      const INTENSITY_RANK = { soft: 1, medium: 2, hard: 3 }
+      const GOLDEN = 137.508
+
+      function el(id) {
+        return document.getElementById(id)
+      }
+      function svgEl(name, attrs) {
+        const n = document.createElementNS(SVGNS, name)
+        for (const k in attrs) n.setAttribute(k, attrs[k])
+        return n
+      }
+      function intensityR(v) {
+        return INTENSITY_R[v] || 22
+      }
+      function clamp01(x) {
+        const n = Number(x)
+        return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 0
+      }
+      function truncate(s, n) {
+        s = String(s == null ? '' : s)
+        return s.length > n ? s.slice(0, n - 1) + '…' : s
+      }
+
+      // Tolerant map parse — never throws. Returns a normalized object or null.
+      function parseMap(text) {
+        let m
+        try {
+          m = JSON.parse(text)
+        } catch (_) {
+          return null
+        }
+        if (!m || typeof m !== 'object') return null
+        m.shapes = Array.isArray(m.shapes) ? m.shapes : []
+        m.blocks = Array.isArray(m.blocks) ? m.blocks : []
+        m.probes = Array.isArray(m.probes) ? m.probes : []
+        m.subject = m.subject && typeof m.subject === 'object' ? m.subject : {}
+        return m
+      }
+
+      // ── Family hues (each root shape family gets a stable hue) ──────────
+      function buildFamilyHues(shapes) {
+        const byId = new Map(shapes.map((s) => [s.id, s]))
+        function rootOf(s) {
+          let cur = s
+          const seen = new Set()
+          while (cur && cur.parent_id != null && byId.has(cur.parent_id) && !seen.has(cur.id)) {
+            seen.add(cur.id)
+            cur = byId.get(cur.parent_id)
+          }
+          return cur ? cur.id : s.id
+        }
+        const roots = []
+        for (const s of shapes) {
+          const r = rootOf(s)
+          if (!roots.includes(r)) roots.push(r)
+        }
+        const hueByRoot = new Map()
+        roots.forEach((rid, i) => hueByRoot.set(rid, (i * GOLDEN) % 360))
+        const hueByShape = new Map()
+        for (const s of shapes) hueByShape.set(s.id, hueByRoot.get(rootOf(s)))
+        return hueByShape
+      }
+
+      // ── Recursive ring-pack layout (dependency-free; not d3.pack) ───────
+      function layoutForest(shapes) {
+        const byId = new Map(shapes.map((s) => [s.id, s]))
+        const childrenOf = new Map()
+        const roots = []
+        for (const s of shapes) {
+          if (s.parent_id != null && byId.has(s.parent_id)) {
+            if (!childrenOf.has(s.parent_id)) childrenOf.set(s.parent_id, [])
+            childrenOf.get(s.parent_id).push(s)
+          } else {
+            roots.push(s)
+          }
+        }
+        const seen = new Set()
+        function layout(shape) {
+          if (seen.has(shape.id)) return { shape, r: intensityR(shape.intensity), kids: [] }
+          seen.add(shape.id)
+          const kids = (childrenOf.get(shape.id) || []).map(layout)
+          const leafR = intensityR(shape.intensity)
+          if (kids.length === 0) return { shape, r: leafR, kids: [] }
+          const maxChildR = Math.max.apply(null, kids.map((k) => k.r))
+          const k = kids.length
+          const ringR = k === 1 ? 0 : maxChildR / Math.sin(Math.PI / k)
+          kids.forEach((lk, i) => {
+            const ang = (2 * Math.PI * i) / k - Math.PI / 2
+            lk.dx = ringR * Math.cos(ang)
+            lk.dy = ringR * Math.sin(ang)
+          })
+          return { shape, r: Math.max(leafR, ringR + maxChildR + 8), kids }
+        }
+        return roots.map(layout)
+      }
+
+      // ── Render the cluster ──────────────────────────────────────────────
+      let selectedId = null
+      function renderViz(map) {
+        const wrap = el('viz-wrap')
+        const svg = el('svg')
+        while (svg.firstChild) svg.removeChild(svg.firstChild)
+        const oldHint = el('viz').querySelector('.empty-hint')
+        if (oldHint) oldHint.remove()
+
+        const shapes = map.shapes
+        if (shapes.length === 0) {
+          const hint = document.createElement('div')
+          hint.className = 'empty-hint'
+          hint.textContent = '○ no shapes yet — blocks accrue as the agent observes'
+          el('viz').appendChild(hint)
+          svg.setAttribute('width', wrap.clientWidth || 300)
+          svg.setAttribute('height', 80)
+          return
+        }
+
+        const hues = buildFamilyHues(shapes)
+        const laidRoots = layoutForest(shapes)
+
+        // Shelf-pack roots left→right, wrapping on width.
+        const PAD = 18,
+          GAP = 20
+        const maxW = Math.max(wrap.clientWidth || 300, 240)
+        let x = PAD,
+          y = PAD,
+          rowH = 0
+        for (const root of laidRoots) {
+          const d = root.r * 2
+          if (x + d > maxW - PAD && x > PAD) {
+            x = PAD
+            y += rowH + GAP
+            rowH = 0
+          }
+          root.cx = x + root.r
+          root.cy = y + root.r
+          x += d + GAP
+          rowH = Math.max(rowH, d)
+        }
+        const canvasH = y + rowH + PAD
+
+        svg.setAttribute('width', maxW)
+        svg.setAttribute('height', canvasH)
+
+        // Resolve absolute centres (pre-order: parent drawn before children).
+        function draw(node, cx, cy) {
+          node.cx = cx
+          node.cy = cy
+          drawNode(svg, node, hues)
+          for (const kid of node.kids) draw(kid, cx + kid.dx, cy + kid.dy)
+        }
+        for (const root of laidRoots) draw(root, root.cx, root.cy)
+      }
+
+      function drawNode(svg, node, hues) {
+        const s = node.shape
+        const hue = hues.get(s.id)
+        const hueV = typeof hue === 'number' ? hue : 210
+        const conf = clamp01(s.confidence)
+        const retired = s.status === 'retired'
+        const g = svgEl('g', { class: 'node' })
+
+        const circle = svgEl('circle', {
+          cx: node.cx,
+          cy: node.cy,
+          r: node.r
+        })
+        if (retired) {
+          circle.setAttribute('fill', 'none')
+          circle.setAttribute('stroke', 'hsla(' + hueV + ',20%,55%,0.7)')
+          circle.setAttribute('stroke-width', '1')
+          circle.setAttribute('stroke-dasharray', '2 3')
+        } else {
+          const sat = 25 + conf * 55
+          circle.setAttribute('fill', 'hsla(' + hueV + ',' + sat + '%,42%,0.82)')
+          circle.setAttribute('stroke', 'hsla(' + hueV + ',65%,70%,1)')
+          circle.setAttribute('stroke-width', s.id === selectedId ? '2.5' : '1.5')
+          const chan = s.channel
+          if (chan === 'dynamic') circle.setAttribute('stroke-dasharray', '5 4')
+          else if (chan === 'unresolved') circle.setAttribute('stroke-dasharray', '2 4')
+        }
+        g.appendChild(circle)
+
+        // Label only when the circle is roomy enough to hold text.
+        if (node.r >= 22) {
+          const label = svgEl('text', {
+            x: node.cx,
+            y: node.cy + node.r + 12,
+            'text-anchor': 'middle',
+            fill: 'var(--dim,#8b97ae)',
+            'font-size': '10',
+            'font-family': 'var(--font,system-ui,sans-serif)',
+            class: 'node-label'
+          })
+          label.textContent = truncate(s.concept, 18)
+          g.appendChild(label)
+        }
+
+        g.style.cursor = 'pointer'
+        g.addEventListener('click', (e) => {
+          e.stopPropagation()
+          showDetail(s)
+        })
+        svg.appendChild(g)
+      }
+
+      // ── Detail drawer ───────────────────────────────────────────────────
+      function chip(cls, text) {
+        const c = document.createElement('span')
+        c.className = 'tag ' + (cls || '')
+        c.textContent = text
+        return c
+      }
+      function showDetail(shape) {
+        selectedId = shape.id
+        const body = el('detail-body')
+        body.innerHTML = ''
+        const h = document.createElement('h3')
+        h.textContent = shape.concept || '(unnamed shape)'
+        const sub = document.createElement('div')
+        sub.className = 'sub'
+        sub.textContent =
+          shape.id + (shape.parent_id ? '  ⊂ ' + shape.parent_id : '') + '  ·  ' + (shape.updated || '')
+        const row = document.createElement('div')
+        row.className = 'row'
+        row.append(
+          chip(shape.intensity, shape.intensity || 'intensity?'),
+          chip('', 'conf ' + (Number(shape.confidence) || 0).toFixed(2)),
+          chip('', shape.channel || 'channel?'),
+          chip('', shape.status || 'status?')
+        )
+        const hitLbl = document.createElement('div')
+        hitLbl.className = 'field-lbl'
+        hitLbl.textContent =
+          'hits ' + ((shape.hit_ids || []).length) + ' · misses ' + ((shape.miss_ids || []).length)
+        const scLbl = document.createElement('div')
+        scLbl.className = 'field-lbl'
+        scLbl.textContent = 'scratchpad'
+        const sc = document.createElement('div')
+        sc.className = 'scratch'
+        sc.textContent = shape.scratchpad || '—'
+        body.append(h, sub, row, hitLbl, scLbl, sc)
+        el('detail').classList.add('open')
+        // redraw to reflect selection ring
+        if (currentMap) renderViz(currentMap)
+      }
+      function closeDetail() {
+        el('detail').classList.remove('open')
+        selectedId = null
+        if (currentMap) renderViz(currentMap)
+      }
+
+      // ── Memories (blocks) ───────────────────────────────────────────────
+      function renderMemories(map) {
+        const host = el('mem-cards')
+        host.innerHTML = ''
+        el('c-mem').textContent = map.blocks.length ? '(' + map.blocks.length + ')' : ''
+        if (map.blocks.length === 0) {
+          const e = document.createElement('div')
+          e.className = 'empty-list'
+          e.textContent = 'No block-events logged yet.'
+          host.appendChild(e)
+          return
+        }
+        const conceptById = new Map(map.shapes.map((s) => [s.id, s.concept]))
+        // newest first
+        for (let i = map.blocks.length - 1; i >= 0; i--) {
+          const b = map.blocks[i]
+          const card = document.createElement('div')
+          card.className = 'card'
+          card.style.borderLeftColor =
+            b.intensity === 'hard'
+              ? '#e0533a'
+              : b.intensity === 'medium'
+                ? '#e0a23a'
+                : 'var(--faint,#5e6677)'
+          const lead = document.createElement('div')
+          lead.className = 'lead'
+          lead.textContent = truncate(b.blocked_content, 160) || '(no content)'
+          card.appendChild(lead)
+          if (b.context) {
+            const ctx = document.createElement('div')
+            ctx.className = 'ctx'
+            ctx.textContent = truncate(b.context, 160)
+            card.appendChild(ctx)
+          }
+          const meta = document.createElement('div')
+          meta.className = 'meta'
+          if (b.type) meta.appendChild(chip('', b.type))
+          if (b.intensity) meta.appendChild(chip(b.intensity, b.intensity))
+          meta.appendChild(chip('goal', 'goal: ' + truncate(b.goal_state || 'unknown', 40)))
+          for (const sid of b.shape_ids || []) {
+            meta.appendChild(chip('', truncate(conceptById.get(sid) || sid, 24)))
+          }
+          card.appendChild(meta)
+          host.appendChild(card)
+        }
+      }
+
+      // ── Probe queue (sorted by intensity × (1 − confidence)) ───────────
+      function renderProbes(map) {
+        const host = el('prb-cards')
+        host.innerHTML = ''
+        el('c-prb').textContent = map.probes.length ? '(' + map.probes.length + ')' : ''
+        if (map.probes.length === 0) {
+          const e = document.createElement('div')
+          e.className = 'empty-list'
+          e.textContent = 'No probes queued.'
+          host.appendChild(e)
+          return
+        }
+        const shapeById = new Map(map.shapes.map((s) => [s.id, s]))
+        const scored = map.probes.map((p) => {
+          const s = shapeById.get(p.shape_id)
+          const rank = s ? INTENSITY_RANK[s.intensity] || 1 : 1
+          const conf = s ? clamp01(s.confidence) : 0
+          return { p, s, priority: rank * (1 - conf) }
+        })
+        scored.sort((a, b) => b.priority - a.priority)
+        for (const { p, s } of scored) {
+          const card = document.createElement('div')
+          card.className = 'card'
+          card.style.borderLeftColor = p.fired ? '#e0533a' : 'var(--accent,#5b9cff)'
+          const lead = document.createElement('div')
+          lead.className = 'lead'
+          lead.textContent = truncate(p.exposed_form, 160) || '(no exposed form)'
+          card.appendChild(lead)
+          if (p.deflection_geometry) {
+            const ctx = document.createElement('div')
+            ctx.className = 'ctx'
+            ctx.textContent = truncate(p.deflection_geometry, 160)
+            card.appendChild(ctx)
+          }
+          const meta = document.createElement('div')
+          meta.className = 'meta'
+          meta.appendChild(chip('', s ? truncate(s.concept || s.id, 24) : p.shape_id || '(no shape)'))
+          meta.appendChild(chip(p.fired ? 'fired' : 'unfired', p.fired ? 'fired' : 'not fired'))
+          if (p.intensity) meta.appendChild(chip(p.intensity, p.intensity))
+          card.appendChild(meta)
+          host.appendChild(card)
+        }
+      }
+
+      // ── Meta / consent ──────────────────────────────────────────────────
+      function renderMeta(map) {
+        el('meta').textContent =
+          map.shapes.length + 'S · ' + map.blocks.length + 'B · ' + map.probes.length + 'P'
+        const consent = (map.subject && map.subject.consent) || '—'
+        const chipEl = el('consent-chip')
+        chipEl.textContent = 'consent: ' + consent
+        chipEl.classList.toggle('consent-none', consent === 'none')
+      }
+
+      function renderAll(map) {
+        currentMap = map
+        renderMeta(map)
+        renderViz(map)
+        renderMemories(map)
+        renderProbes(map)
+      }
+
+      // ── State + wiring ──────────────────────────────────────────────────
+      let currentMap = null
+      let lastRaw = null
+      let srcFocused = false
+      let srcTimer = null
+
+      function setSrcStatus(text, cls) {
+        const b = el('src-status')
+        b.textContent = text
+        b.className = 'status-bar' + (cls ? ' ' + cls : '')
+      }
+
+      function applyRaw(raw, fromAgent) {
+        const text = typeof raw === 'string' ? raw : ''
+        lastRaw = text
+        if (!srcFocused) el('src').value = text
+        const map = parseMap(text)
+        if (map) {
+          renderAll(map)
+          setSrcStatus(fromAgent ? 'updated by agent' : 'valid', 'ok')
+        } else {
+          setSrcStatus('invalid JSON in map — showing last valid view', 'err')
+        }
+      }
+
+      async function loadMap() {
+        try {
+          const raw = await window.atelier.context.get('map')
+          applyRaw(raw, false)
+        } catch (e) {
+          setSrcStatus('load error: ' + ((e && e.message) || e), 'err')
+        }
+      }
+
+      function wireSource() {
+        const src = el('src')
+        src.addEventListener('focus', () => (srcFocused = true))
+        src.addEventListener('blur', () => (srcFocused = false))
+        src.addEventListener('input', () => {
+          const text = src.value
+          const map = parseMap(text)
+          if (map) {
+            renderAll(map)
+            setSrcStatus('valid — saving…', 'ok')
+          } else {
+            setSrcStatus('invalid JSON — not saved', 'err')
+          }
+          clearTimeout(srcTimer)
+          srcTimer = setTimeout(async () => {
+            if (!parseMap(src.value)) return // never persist invalid JSON
+            try {
+              await window.atelier.context.set('map', src.value)
+              lastRaw = src.value
+              setSrcStatus('saved ✓', 'ok')
+            } catch (e) {
+              setSrcStatus('save error: ' + ((e && e.message) || e), 'err')
+            }
+          }, DEBOUNCE_MS)
+        })
+      }
+
+      // ── Directives (systemInstruction key 'instructions') ───────────────
+      let dirFocused = false
+      let dirTimer = null
+      let dirLast = null
+      function wireDirectives() {
+        const dir = el('dir')
+        dir.addEventListener('focus', () => (dirFocused = true))
+        dir.addEventListener('blur', () => (dirFocused = false))
+        dir.addEventListener('input', () => {
+          clearTimeout(dirTimer)
+          el('dir-status').textContent = 'saving…'
+          dirTimer = setTimeout(async () => {
+            try {
+              await window.atelier.context.set('instructions', dir.value)
+              dirLast = dir.value
+              el('dir-status').textContent = 'saved ✓'
+            } catch (e) {
+              el('dir-status').textContent = 'save error: ' + ((e && e.message) || e)
+            }
+          }, DEBOUNCE_MS)
+        })
+      }
+      async function loadDirectives() {
+        try {
+          const v = await window.atelier.context.get('instructions')
+          dirLast = typeof v === 'string' ? v : ''
+          el('dir').value = dirLast
+        } catch (_) {
+          /* silent */
+        }
+      }
+
+      // ── Tabs ────────────────────────────────────────────────────────────
+      function setupTabs() {
+        const tabs = Array.from(document.querySelectorAll('.tab'))
+        const panels = Array.from(document.querySelectorAll('.tabpanel'))
+        tabs.forEach((t) =>
+          t.addEventListener('click', () => {
+            tabs.forEach((x) => x.classList.toggle('active', x === t))
+            panels.forEach((p) => p.classList.toggle('active', p.dataset.panel === t.dataset.tab))
+          })
+        )
+      }
+
+      // ── Refresh on agent writes (host pushes 'context') ─────────────────
+      function startListening() {
+        window.atelier.on('context', async (p) => {
+          if (!p) return
+          if (p.key === 'map') {
+            if (srcFocused) return // never clobber the human mid-edit
+            try {
+              const raw = await window.atelier.context.get('map')
+              if (raw !== lastRaw) applyRaw(raw, true)
+            } catch (_) {
+              /* silent */
+            }
+          } else if (p.key === 'instructions') {
+            if (dirFocused) return
+            try {
+              const v = await window.atelier.context.get('instructions')
+              const s = typeof v === 'string' ? v : ''
+              if (s !== dirLast) {
+                dirLast = s
+                el('dir').value = s
+              }
+            } catch (_) {
+              /* silent */
+            }
+          }
+        })
+      }
+
+      // ── Boot ────────────────────────────────────────────────────────────
+      el('detail-close').addEventListener('click', closeDetail)
+      if (typeof ResizeObserver !== 'undefined') {
+        new ResizeObserver(() => {
+          if (currentMap) renderViz(currentMap)
+        }).observe(el('viz-wrap'))
+      }
+      window.atelier.on('load', async () => {
+        setupTabs()
+        wireSource()
+        wireDirectives()
+        await Promise.all([loadMap(), loadDirectives()])
+        startListening()
+      })
+    </script>
+  </body>
+</html>

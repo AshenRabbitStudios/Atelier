@@ -1,0 +1,15 @@
+{
+  "id": "cartographer",
+  "name": "Cartographer",
+  "version": "0.1.0",
+  "description": "Builds and maintains a map of a subject's blocked conceptual shapes across a conversation (Map/Director framework). You observe block-events (refusals, deflections, reroutes, lies), triangulate hypothesized shapes, queue probes, and refine confidence. The map is one JSON context document you edit via edit_cartographer__map / set_cartographer__map; the pane renders it as a nested-circle cluster with a Memories log and a Probe queue, all editable. Directives live in the standing instruction. Consent-gated: active probing needs the subject's consent.",
+  "icon": "M8 1.8a6.2 6.2 0 1 0 0 12.4a6.2 6.2 0 0 0 0-12.4M8 4.9a3.1 3.1 0 1 0 0 6.2a3.1 3.1 0 0 0 0-6.2M8 7.4a0.6 0.6 0 1 0 0 1.2a0.6 0.6 0 0 0 0-1.2",
+  "kind": "panel",
+  "entry": "index.html",
+  "permissions": ["context"],
+  "defaultDock": "right",
+  "contextExports": [
+    { "key": "map", "label": "Cartographer map", "format": "json", "maxTokens": 7000 }
+  ],
+  "systemInstruction": { "key": "instructions", "maxTokens": 2000 }
+}

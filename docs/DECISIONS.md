@@ -88,3 +88,54 @@
   `plugins/hologram/hologram.bundle.js` is kept **tracked** (so the app runs from a clean checkout —
   `build:hologram` is standalone, not wired into `dev`/`build`) but marked `-diff linguist-generated`
   in `.gitattributes` and is **never hand-merged**: on conflict, rebuild and take the regenerated file.
+
+- **2026-07-04 — Always-on environment self-awareness (host-level, not a plugin).** A fresh
+  conversation's agent was blind to Atelier: context injection + the `systemInstruction` append only
+  fire for _enabled_ plugins, so "what plugins can you access?" got nothing. Fix (docs/ENVIRONMENT_AWARENESS.md,
+  `electron/plugin/introspection.ts`): (a) a stable `<atelier-environment>` briefing prepended to the
+  system-prompt append on every conversation — Atelier + cwd + a catalog of all discovered plugins;
+  (b) an always-registered built-in `atelier` MCP server (`list_plugins`/`describe_plugin`) so the
+  agent can introspect live per-conversation state + each plugin's tools/exports. Briefing holds only
+  install-level facts (per-conversation state lives in the tools) so it stays prompt-cached. Added an
+  optional `description` to `ManifestSchema` for the catalog/detail text. Composed in `main.ts`, not a
+  plugin — a plugin can't describe the app or a plugin the user hasn't enabled.
+
+- **2026-07-04 — Plugin pane reconcile is transition-based, not "enabled ⇒ mounted".** The effect
+  that syncs plugin panes to the enabled set used to re-assert on every run: any enabled plugin whose
+  panel wasn't mounted got (re)added. Since the registry emits a fresh `plugins` array on any fs event
+  under /plugins, a hand-closed pane (enablement and panel-open are decoupled — a plugin can be enabled
+  with its pane closed) kept re-opening. Now it mounts/unmounts only on enable→disable transitions
+  vs a `prevEnabledRef` baseline (reset per-conversation before the state update so a switch doesn't
+  diff against the previous conversation); the serialized Dockview layout owns open/closed state.
+- **2026-07-04 — Tail-pin the transcript on resize (ResizeObserver).** Closing a bottom-docked panel
+  makes Dockview reparent the transcript scroll container, resetting native `scrollTop` to 0 with no
+  React state change to re-scroll. A ResizeObserver on the transcript re-pins to the tail when the user
+  was at the bottom (also glues the tail through window/panel resizes generally).
+- **2026-07-04 — Read-only lookup tool calls render collapsed by default.** `read|glob|grep|ls|
+toolsearch|webfetch|websearch` start collapsed in the chat (they're just retrieved content, often a
+  whole file), so the transcript isn't dominated by things the user didn't ask to read. A FAILED one
+  still opens so errors stay visible; action/narrative tools (bash, edits, sub-agents, questions,
+  context writes) keep default-open.
+- **2026-07-04 — Permission mode is persisted (manifest) + app-wide default (state.json).** Bypass
+  approvals silently reverted to 'default' on every relaunch/reopen because `permissionMode` lived
+  only in the live Session — the user kept getting prompts they'd turned off. Now per-conversation in
+  the manifest, and the last mode set anywhere becomes `defaultPermissionMode` for NEW conversations
+  (the user treats bypass as one app-wide switch, not a per-conversation chore). Probe-verified
+  (SDK_NOTES): under bypassPermissions the CLI never consults `canUseTool`, both at query build and
+  after a runtime `setPermissionMode` — so honoring the mode is purely our state management.
+- **2026-07-04 — Live UI state is pulled on panel mount (`agent:ui-state`), not event-only.** Push
+  events only reach panels mounted when they fire; a ChatPanel remount (conversation switch, layout
+  change) dropped pending approval cards — leaving the SDK blocked forever on a `canUseTool` promise
+  nobody could see (the eternal "working" spinner with frozen tokens; a new message "unfroze" it only
+  because the CLI aborts the pending request). Main now serves a `UiStateSnapshot` (status, mode,
+  pending, questions, background, auto-resume, tokens) that the panel hydrates from on mount, ordered
+  after the event subscription so nothing can fall in the gap. Pending entries keep their announced
+  payloads so the exact cards can be re-served.
+- **2026-07-04 — Busy state = turns in flight (counter), not `input.hasPending()`.** The SDK drains
+  the input queue eagerly, so a message queued behind a running turn was invisible to `hasPending()`
+  at result time — status flipped to 'idle' while the queued turn ran. Now send/fork increment and
+  each `result` decrements; rebind/rate-limit-rejection/user-Stop reset to 0 (queued messages don't
+  reliably survive those). A blocked-on-approval turn shows "needs approval", not "working".
+- **2026-07-04 — A cleanly-ended pump = dead CLI → restart.** The message stream ending WITHOUT an
+  error (CLI crash/kill) previously did nothing: status stayed 'working' forever and later sends
+  queued into a stream nobody read. Now treated like a thrown pump error (surface + bounded restart).

@@ -231,6 +231,21 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
     void window.atelier.agent.setAutoResume(instanceId, on)
   }
 
+  // Resync to main's authoritative live state on (re)mount. Runs AFTER the onEvent effect above
+  // (declaration order = mount order), so the subscription is already live: the snapshot can't
+  // miss anything, and later events apply on top of it. Without this, a remounted panel loses
+  // pending approval cards — the SDK then sits blocked on an answer no one can see to give,
+  // which reads as an eternal "working" — and resets the bypass toggle/busy display.
+  useEffect(() => {
+    void window.atelier.agent
+      .uiState(instanceId)
+      .then((s) => {
+        dispatch({ type: 'hydrate', snapshot: s })
+        setAutoResume(s.autoResumeEnabled)
+      })
+      .catch(() => {})
+  }, [instanceId])
+
   const startEdit = (m: Message) => setEditing({ id: m.id, draft: messageText(m) })
   const cancelEdit = () => setEditing(null)
   const changeDraft = (draft: string) => setEditing((e) => (e ? { ...e, draft } : e))
@@ -331,7 +346,12 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
           </span>
           <span className="switch-text">auto-resume</span>
         </label>
-        <span className={`status status-${state.status}`}>{state.status}</span>
+        {/* A turn blocked on an approval/question is NOT "working" — say what it's waiting for. */}
+        {state.pending.length > 0 || state.questions.length > 0 ? (
+          <span className="status status-approval">needs approval</span>
+        ) : (
+          <span className={`status status-${state.status}`}>{state.status}</span>
+        )}
       </header>
 
       <div className="transcript" ref={transcriptRef} onScroll={onTranscriptScroll}>

@@ -153,6 +153,24 @@ export interface AgentInstance {
   status: AgentStatus
 }
 
+/**
+ * Snapshot of a conversation's live UI state — main is the source of truth. Fetched by the
+ * ChatPanel on (re)mount: push events only reach panels mounted when they fire, so a remounted
+ * panel (conversation switch, layout change) would otherwise lose pending approvals, the busy
+ * state, and the permission-mode toggle — a pending `canUseTool` promise with its card lost
+ * renders as an eternal "working" spinner while the SDK waits on an answer no one can give.
+ */
+export interface UiStateSnapshot {
+  status: AgentStatus
+  permissionMode: PermissionMode
+  pending: PermissionRequest[]
+  questions: QuestionRequest[]
+  background: RunningTask[]
+  autoResumeAt: number | null
+  autoResumeEnabled: boolean
+  tokens: { output: number; input?: number }
+}
+
 /** A persisted conversation as listed in the dropdown (open + closed). */
 export interface ConversationSummary {
   id: string
@@ -416,6 +434,7 @@ export const IPC = {
   agentSetEffort: 'agent:set-effort',
   agentSetAutoResume: 'agent:set-auto-resume',
   agentUsage: 'agent:usage',
+  agentUiState: 'agent:ui-state',
   agentTranscript: 'agent:transcript',
   agentEditSave: 'agent:edit-save',
   agentFork: 'agent:fork',
@@ -526,6 +545,7 @@ export interface AtelierAPI {
     setEffort(instanceId: string, effort: EffortLevel): Promise<void>
     setAutoResume(instanceId: string, enabled: boolean): Promise<void>
     usage(instanceId: string): Promise<UsageInfo>
+    uiState(instanceId: string): Promise<UiStateSnapshot>
     transcript(instanceId: string): Promise<TranscriptMessage[]>
     editSave(instanceId: string, uuid: string, newText: string): Promise<TranscriptMessage[]>
     fork(instanceId: string, uuid: string, newText: string): Promise<BranchInfo[]>

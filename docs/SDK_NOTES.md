@@ -195,6 +195,28 @@ rendering option `preview` fields as HTML if we later want rich previews.
 - [ ] `mcpServers` config discriminant for in-process tools (`type:'sdk'`) (P4 S3) — SDK_NOTES shows
       `{ type:'sdk', name, instance: server }`; re-confirm when wiring plugin backend tools.
 
+## Permission modes vs `canUseTool` — probe-verified 2026-07-04 (v0.3.195, live, Haiku)
+
+Three live probes (Write tool into fresh temp cwds; `canUseTool` recorded + denied every call):
+
+- **`permissionMode: 'bypassPermissions'` at query build** (with `allowDangerouslySkipPermissions:
+true`): `canUseTool` is **never consulted**; the tool executes. (AskUserQuestion still routes to
+  `canUseTool` — it's a question, not a permission.)
+- **Runtime `q.setPermissionMode('bypassPermissions')`** (default-mode query, mode flipped between
+  turns): same — subsequent turns skip `canUseTool` entirely and tools execute. After the control
+  call the CLI emits a `system status` message and a **second `system init`**.
+- **`permissionMode: 'default'`** (control): `canUseTool` IS consulted (e.g. for Write); a deny
+  blocks the tool.
+
+So honoring bypass is purely host-side state management: keep `permissionMode` on every
+(re)bind's options and persist it. Two probe traps worth remembering:
+
+- **Streaming input emits NOTHING (not even `system` init) until the first user message is
+  pushed** — "wait for init, then send" deadlocks.
+- **Don't `await q.setPermissionMode()` from inside the message-iteration loop** — the control
+  response arrives via the same stream you've stopped pulling; deadlock. Resolve it out-of-band
+  (Atelier calls it from an IPC handler, off the pump).
+
 ## Input is user-messages-only — system prompt is the only system-role lever (confirmed v0.3.195)
 
 `SDKUserMessage.message` is a `MessageParam` (role `user`); there is no system-role input message.

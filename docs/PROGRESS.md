@@ -496,3 +496,59 @@ prettier clean. needs human spot-check after reload + pinning "Hologram command"
 
 Bidirectional control now: pane→agent = `selection` (what the user references) + drill `request`;
 agent→pane = `architecture` (the scene) + `command` (focus/highlight a node).
+
+## 2026-07-04 — Agent environment self-awareness
+
+A fresh conversation now knows it's inside Atelier and what plugins exist. Two always-on pieces
+(`electron/plugin/introspection.ts`, wired in `main.ts`, docs/ENVIRONMENT_AWARENESS.md): a stable
+`<atelier-environment>` briefing prepended to the system-prompt append (Atelier + cwd + catalog of all
+discovered plugins), and a built-in `atelier` MCP server (`list_plugins`/`describe_plugin`) always
+registered so the agent can introspect live enabled/pinned state + each plugin's tools/exports. Added
+optional `description` to the manifest schema; populated it on every example plugin + hologram.
+Gate green (typecheck node+web, 96 tests incl. new introspection.test.ts, eslint, prettier).
+
+needs human spot-check: open a NEW chat in a NEW folder, ask "what plugins can you access / where are
+you?" — expect the agent to name Atelier + list the catalog and offer describe_plugin; then have it
+call describe_plugin on one and confirm the detail (tools/exports/enabled state) is accurate.
+
+## 2026-07-04 — Three UX bug fixes (plugin pane / scroll / tool collapse)
+
+1. **bash-stream (any plugin) re-opening after close.** The pane-reconcile effect re-asserted
+   "enabled ⇒ mounted" every run, so a hand-closed pane reopened on the next registry `onChanged`
+   (fresh `plugins` array). Now transition-based vs a `prevEnabledRef` baseline (App.tsx); the
+   serialized layout owns open/closed. 2. **Chat jumped to top when closing a bottom panel.** Dockview
+   reparents the transcript container → native scrollTop resets to 0. Added a ResizeObserver that
+   re-pins to the tail when the user was at the bottom (ChatPanel.tsx). 3. **Read-only tool calls
+   start collapsed** (`read|glob|grep|ls|toolsearch|webfetch|websearch`), failed ones still open
+   (ToolCall.tsx). Gate green (typecheck node+web, 96 tests, eslint, prettier).
+
+needs human spot-check after relaunch: close bash-stream → stays closed; close a bottom panel while
+at chat tail → stays pinned to bottom; a Read call renders collapsed with its summary line.
+
+## 2026-07-04 — Fix: bypass approvals not sticking + eternal "working" spinner
+
+Root causes (both state-management, SDK behavior probe-verified sound): (1) `permissionMode` was
+never persisted — every relaunch/reopen silently reverted bypass to 'default', so approval prompts
+came back; (2) pending approvals/questions, busy status, and the mode toggle lived only in
+ChatPanel's reducer — any panel remount lost the pending card while main stayed blocked on the
+`canUseTool` promise, rendering as "working" for 20+ minutes with frozen tokens (a new user message
+"unfroze" it because the CLI aborts the pending request → our abort handler denies → turn resumes).
+
+Fixes: permissionMode persisted per conversation + `defaultPermissionMode` for new ones; new
+`agent:ui-state` IPC serving a `UiStateSnapshot` the ChatPanel hydrates from on (re)mount (after
+subscribing to events, so no gap); pending entries retain their announced payloads for re-serving;
+`turnsInFlight` counter replaces `input.hasPending()` for truthful busy state (the SDK drains the
+queue eagerly); header chip shows "needs approval" when blocked on a card; a cleanly-ended pump
+(CLI died) now surfaces an error + restarts instead of sticking at 'working'; `setPermissionMode`
+on a dead query rebinds instead of dropping the mode. Live probes (3, Haiku, temp cwds) confirmed:
+bypass at build AND via runtime setPermissionMode suppress `canUseTool` entirely; 'default'
+consults it — recorded in SDK_NOTES.md.
+
+Gate green (typecheck node+web, 102 tests incl. new transcriptModel + conversationStore cases,
+eslint, prettier).
+
+needs human spot-check after relaunch: (a) toggle bypass ON, restart the app → toggle still ON and
+tool calls run unprompted (incl. in a brand-new conversation); (b) trigger an approval prompt
+(bypass off), switch conversations and back → the card is still there and answerable, header says
+"needs approval"; (c) queue a second message mid-turn → status stays working until the second turn
+finishes.

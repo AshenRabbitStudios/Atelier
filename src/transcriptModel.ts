@@ -9,7 +9,8 @@ import type {
   RunningTask,
   TaskItem,
   TranscriptBlock,
-  TranscriptMessage
+  TranscriptMessage,
+  UiStateSnapshot
 } from '@shared/events'
 
 export interface ToolResult {
@@ -75,6 +76,7 @@ export const initialState: TranscriptState = {
 
 export type Action =
   | { type: 'event'; event: AgentEvent }
+  | { type: 'hydrate'; snapshot: UiStateSnapshot }
   | { type: 'user'; id: string; text: string }
   | { type: 'resolve-permission'; requestId: string }
   | { type: 'resolve-question'; requestId: string }
@@ -100,6 +102,22 @@ function toBlocks(blocks: TranscriptBlock[]): Block[] {
 }
 
 export function reduce(state: TranscriptState, action: Action): TranscriptState {
+  if (action.type === 'hydrate') {
+    // Mount-time resync to main's authoritative live state. Push events only reach mounted
+    // panels, so a remounted panel starts from this snapshot (busy state, pending approval
+    // cards, permission mode) instead of initialState defaults that may all be lies.
+    const s = action.snapshot
+    return {
+      ...state,
+      status: s.status,
+      permissionMode: s.permissionMode,
+      pending: s.pending,
+      questions: s.questions,
+      background: s.background,
+      autoResumeAt: s.autoResumeAt,
+      liveTokens: s.tokens
+    }
+  }
   if (action.type === 'set-model') {
     return { ...state, model: action.model }
   }

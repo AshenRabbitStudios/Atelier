@@ -1010,6 +1010,9 @@ body {
 .status-error {
   color: var(--err);
 }
+.status-approval {
+  color: var(--warn);
+}
 
 .badge {
   padding: 1px 7px;

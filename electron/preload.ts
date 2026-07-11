@@ -43,6 +43,7 @@ const api: AtelierAPI = {
     setAutoResume: (instanceId, enabled) =>
       ipcRenderer.invoke(IPC.agentSetAutoResume, { instanceId, enabled }),
     usage: (instanceId) => ipcRenderer.invoke(IPC.agentUsage, { instanceId }),
+    uiState: (instanceId) => ipcRenderer.invoke(IPC.agentUiState, { instanceId }),
     transcript: (instanceId) => ipcRenderer.invoke(IPC.agentTranscript, { instanceId }),
     editSave: (instanceId, uuid, newText) =>
       ipcRenderer.invoke(IPC.agentEditSave, { instanceId, uuid, newText }),

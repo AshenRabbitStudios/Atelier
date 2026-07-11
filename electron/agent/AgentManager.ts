@@ -24,10 +24,13 @@ import {
   type EffortLevel,
   type ForkPoints,
   type ModelOption,
+  type PermissionRequest,
   type Question,
+  type QuestionRequest,
   type SessionSummary,
   type TaskItem,
   type TranscriptMessage,
+  type UiStateSnapshot,
   type UsageInfo,
   type UsageWindow
 } from '../shared/events.js'
@@ -43,6 +46,8 @@ import {
   setActiveConversationId,
   getOpenConversationIds,
   setOpenConversationIds,
+  getDefaultPermissionMode,
+  setDefaultPermissionMode,
   getLastUsage,
   setLastUsage,
   clearPluginData,
@@ -59,6 +64,7 @@ interface RestoreData {
   effort?: EffortLevel
   layout?: unknown
   plugins?: Record<string, ConversationPluginState>
+  permissionMode?: PermissionMode
 }
 
 /**
@@ -93,11 +99,6 @@ class InputQueue implements AsyncIterable<SDKUserMessage> {
       this.waiter = null
       w({ value: undefined as unknown as SDKUserMessage, done: true })
     }
-  }
-
-  /** A message has been queued (e.g. sent while a turn was running) but not yet consumed. */
-  hasPending(): boolean {
-    return this.items.length > 0
   }
 
   async *[Symbol.asyncIterator](): AsyncIterator<SDKUserMessage> {
@@ -180,7 +181,7 @@ class Session {
   effort?: EffortLevel
   layout?: unknown
   // Permission mode (e.g. bypass approvals). Remembered so it survives a rebind — buildOptions
-  // reapplies it, instead of every clear-chat/fork/effort change silently reverting to 'default'.
+  // reapplies it — and persisted in the manifest so it survives close/reopen and app relaunch.
   permissionMode: PermissionMode = 'default'
   pluginState: Record<string, ConversationPluginState> = {}
   sessionId?: string
@@ -202,6 +203,12 @@ class Session {
   // time that re-sends the resume prompt — no polling, no queries to Claude while limited.
   private autoResume = false
   private resumeTimer: ReturnType<typeof setTimeout> | null = null
+  // Epoch-ms of the scheduled auto-resume wake-up (null = none); mirrored into uiState().
+  private autoResumeAtMs: number | null = null
+  // Turns started (send/fork) minus turns finished (result). This — not the input queue, which the
+  // SDK drains eagerly — is what says whether the agent is still working, so a message queued
+  // behind a running turn keeps the status truthful until ITS result arrives.
+  private turnsInFlight = 0
   // The instruction string baked into the live query's systemPrompt. Compared on each send so we
   // only rebind (and pay the one-time history cache invalidation) when it actually changes.
   private appliedInstruction = ''
@@ -234,7 +241,9 @@ class Session {
     forkPointUuid: string
     forkAnchorUuid: string | null
   }
-  // Tool-approval requests awaiting a user decision from the renderer.
+  // Tool-approval requests awaiting a user decision from the renderer. Each entry keeps the
+  // payload it was announced with (`request`/`question`) so uiState() can re-serve the card to a
+  // remounted panel — the original push event only reached panels mounted when it fired.
   private pending = new Map<
     string,
     {
@@ -242,11 +251,13 @@ class Session {
       input: Record<string, unknown>
       suggestions?: PermissionUpdate[]
       isQuestion?: boolean
+      request?: PermissionRequest
+      question?: QuestionRequest
     }
   >()
 
   constructor(
-    opts: CreateOpts,
+    opts: CreateOpts & { permissionMode?: PermissionMode },
     private emit: (e: AgentEvent) => void,
     restore?: RestoreData,
     hooks?: {
@@ -268,6 +279,8 @@ class Session {
     this.createdAt = restore?.createdAt ?? Date.now()
     this.effort = restore?.effort
     this.layout = restore?.layout
+    // Before start(): buildOptions bakes the mode into the first query.
+    this.permissionMode = restore?.permissionMode ?? opts.permissionMode ?? 'default'
     if (restore?.plugins) this.pluginState = restore.plugins
     if (restore?.sessionId) this.sessionId = restore.sessionId
     if (restore?.branches) this.branches = restore.branches
@@ -283,6 +296,7 @@ class Session {
       effort: this.effort,
       layout: this.layout,
       plugins: this.pluginState,
+      permissionMode: this.permissionMode,
       branches: this.branches,
       activeBranch: this.sessionId,
       createdAt: this.createdAt,
@@ -502,6 +516,7 @@ class Session {
     }
     this.background.clear() // the torn-down query owned any running subagents/tasks
     this.emitBackground()
+    this.turnsInFlight = 0 // ...and any in-flight turns died with it
     this.input = new InputQueue()
     this.start(opts)
   }
@@ -576,6 +591,7 @@ class Session {
       forkAnchorUuid: parent
     }
     this.rebind({ resumeAt: parent ?? uuid, fork: true })
+    this.turnsInFlight = 1 // the fresh bind starts with exactly this regeneration in flight
     this.setStatus('working')
     this.input.push(newText)
     return this.listBranches()
@@ -639,11 +655,28 @@ class Session {
       const settle = (r: PermissionResult) => {
         if (this.pending.delete(requestId)) resolve(r)
       }
+      // Built once, kept on the pending entry: uiState() re-serves the same card to a panel
+      // that (re)mounts after this event fired.
+      const question: QuestionRequest | undefined = isQuestion
+        ? { requestId, toolUseId: ctx.toolUseID, questions: parseQuestions(input) }
+        : undefined
+      const request: PermissionRequest | undefined = isQuestion
+        ? undefined
+        : {
+            requestId,
+            toolUseId: ctx.toolUseID,
+            toolName,
+            title: ctx.title ?? toolName,
+            input,
+            canAllowAlways: Boolean(ctx.suggestions && ctx.suggestions.length > 0)
+          }
       this.pending.set(requestId, {
         resolve: settle,
         input,
         suggestions: ctx.suggestions,
-        isQuestion
+        isQuestion,
+        request,
+        question
       })
 
       ctx.signal.addEventListener('abort', () => {
@@ -658,25 +691,10 @@ class Session {
         }
       })
 
-      if (isQuestion) {
-        this.emit({
-          instanceId: this.id,
-          kind: 'question_request',
-          requestId,
-          toolUseId: ctx.toolUseID,
-          questions: parseQuestions(input)
-        })
-      } else {
-        this.emit({
-          instanceId: this.id,
-          kind: 'permission_request',
-          requestId,
-          toolUseId: ctx.toolUseID,
-          toolName,
-          title: ctx.title ?? toolName,
-          input,
-          canAllowAlways: Boolean(ctx.suggestions && ctx.suggestions.length > 0)
-        })
+      if (question) {
+        this.emit({ instanceId: this.id, kind: 'question_request', ...question })
+      } else if (request) {
+        this.emit({ instanceId: this.id, kind: 'permission_request', ...request })
       }
     })
   }
@@ -708,8 +726,15 @@ class Session {
   }
 
   async setPermissionMode(mode: PermissionMode): Promise<void> {
-    this.permissionMode = mode // remember it so a later rebind keeps it
-    await this.q.setPermissionMode(mode)
+    this.permissionMode = mode // remembered: buildOptions reapplies it on every rebind
+    this.onChange?.() // persisted: survives close/reopen and app relaunch
+    try {
+      // Live-probe-verified (docs/SDK_NOTES.md): takes effect for subsequent turns; under
+      // bypassPermissions the CLI stops consulting canUseTool entirely.
+      await this.q.setPermissionMode(mode)
+    } catch {
+      this.rebind() // dead query — the fresh bind applies the mode via buildOptions
+    }
     this.emit({ instanceId: this.id, kind: 'permission_mode', mode })
   }
 
@@ -723,6 +748,7 @@ class Session {
     if (!this.resumeTimer) return
     clearTimeout(this.resumeTimer)
     this.resumeTimer = null
+    this.autoResumeAtMs = null
     this.emit({ instanceId: this.id, kind: 'auto_resume', resetsAt: null })
   }
 
@@ -740,9 +766,11 @@ class Session {
       Math.max(0, resetMs - Date.now()) + AUTO_RESUME_BUFFER_MS
     )
     this.clearResumeTimer()
+    this.autoResumeAtMs = resetMs
     this.emit({ instanceId: this.id, kind: 'auto_resume', resetsAt: resetMs })
     this.resumeTimer = setTimeout(() => {
       this.resumeTimer = null
+      this.autoResumeAtMs = null
       if (this.closed || !this.autoResume) return
       this.emit({ instanceId: this.id, kind: 'auto_resume', resetsAt: null })
       this.send(AUTO_RESUME_PROMPT)
@@ -842,8 +870,34 @@ class Session {
     }
   }
 
+  /**
+   * The live UI state main is authoritative for. The ChatPanel pulls this on (re)mount: push
+   * events only reach mounted panels, so without this a remount (conversation switch, layout
+   * change) drops pending approval cards — leaving the SDK blocked on a canUseTool promise the
+   * user can no longer see or answer — and desyncs the busy/permission-mode display.
+   */
+  uiState(): UiStateSnapshot {
+    const pending: PermissionRequest[] = []
+    const questions: QuestionRequest[] = []
+    for (const p of this.pending.values()) {
+      if (p.question) questions.push(p.question)
+      else if (p.request) pending.push(p.request)
+    }
+    return {
+      status: this.status,
+      permissionMode: this.permissionMode,
+      pending,
+      questions,
+      background: this.background.list(),
+      autoResumeAt: this.autoResumeAtMs,
+      autoResumeEnabled: this.autoResume,
+      tokens: { output: this.turnOutputTokens + this.curMsgOutTokens, input: this.turnInputTokens }
+    }
+  }
+
   send(text: string): void {
     this.interrupted = false
+    this.turnsInFlight++
     // Fresh token count for this query (the live "N tokens" readout).
     this.turnInputTokens = 0
     this.turnOutputTokens = 0
@@ -911,7 +965,19 @@ class Session {
       this.emit({ instanceId: this.id, kind: 'error', message: errMsg(err) })
       this.setStatus('error')
       this.restart()
+      return
     }
+    // The stream ENDED without an error. For the live binding that means the CLI process went
+    // away on its own (crash/kill) — with no result coming, the status would say 'working'
+    // forever and later sends would queue into a stream nobody reads. Recover like an error.
+    if (token !== this.activeToken || this.closed) return
+    this.emit({
+      instanceId: this.id,
+      kind: 'error',
+      message: 'Agent process ended unexpectedly — reconnecting to the session.'
+    })
+    this.setStatus('error')
+    this.restart()
   }
 
   /** A message from a background subagent: track it as running and stream its activity to the
@@ -1089,9 +1155,13 @@ class Session {
         } else {
           this.restarts = 0 // a clean (or cleanly-stopped) turn means we're healthy
         }
-        // Stay 'working' if the user queued another message while this turn ran — the SDK reads
-        // it next, so the activity indicator should persist through the queued turn.
-        this.setStatus(this.input.hasPending() ? 'working' : 'idle')
+        // Stay 'working' while queued turns remain in flight. Counted via turnsInFlight, not the
+        // input queue — the SDK drains the queue eagerly, so a queued message is usually already
+        // inside the CLI (invisible to hasPending) when the running turn's result lands. A user
+        // Stop clears the whole pipeline: queued messages don't reliably survive an interrupt.
+        if (aborted) this.turnsInFlight = 0
+        else this.turnsInFlight = Math.max(0, this.turnsInFlight - 1)
+        this.setStatus(this.turnsInFlight > 0 ? 'working' : 'idle')
         this.onChange?.() // bump updatedAt; persist any new branch from this turn
         break
       }
@@ -1104,6 +1174,7 @@ class Session {
             message: 'Request blocked: usage limit reached for your plan.',
             detail: info
           })
+          this.turnsInFlight = 0 // the rejected request's turn(s) will produce no result
           this.setStatus('idle')
           // If the user opted in, wake up at the reset time and resume — no polling meanwhile.
           if (this.autoResume && typeof info.resetsAt === 'number') {
@@ -1260,7 +1331,10 @@ export class AgentManager {
         createdAt: m.createdAt,
         effort: m.effort,
         layout: m.layout,
-        plugins: m.plugins
+        plugins: m.plugins,
+        // Pre-persistence manifests carry no mode; heal them with the app-wide default rather
+        // than silently reverting a user who runs everything bypassed back to prompts.
+        permissionMode: m.permissionMode ?? getDefaultPermissionMode()
       },
       this.hooks()
     )
@@ -1279,7 +1353,14 @@ export class AgentManager {
   }
 
   create(opts: CreateOpts): string {
-    const s = new Session(opts, this.emit, undefined, this.hooks())
+    // New conversations start in the last mode the user set anywhere (bypass is treated as one
+    // app-wide switch, not a per-conversation chore).
+    const s = new Session(
+      { ...opts, permissionMode: getDefaultPermissionMode() },
+      this.emit,
+      undefined,
+      this.hooks()
+    )
     s.onChange = () => this.persist(s)
     this.sessions.set(s.id, s)
     this.persist(s)
@@ -1419,7 +1500,12 @@ export class AgentManager {
   }
 
   async setPermissionMode(instanceId: string, mode: PermissionMode): Promise<void> {
+    setDefaultPermissionMode(mode) // becomes the default for new conversations too
     await this.require(instanceId).setPermissionMode(mode)
+  }
+
+  uiState(instanceId: string): UiStateSnapshot {
+    return this.require(instanceId).uiState()
   }
 
   setAutoResume(instanceId: string, enabled: boolean): void {

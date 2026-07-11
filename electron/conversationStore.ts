@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ConversationPluginState } from './shared/plugins.js'
+import type { PermissionMode } from './shared/events.js'
 
 /** One branch (SDK session) in a conversation's fork tree. */
 export interface PersistedBranch {
@@ -22,6 +23,9 @@ export interface ConversationManifest {
   effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   branches: PersistedBranch[]
   activeBranch?: string // sessionId of the active branch
+  // Tool-approval mode (e.g. bypass). Persisted so a relaunch/reopen doesn't silently revert
+  // an enabled bypass to 'default' — the prompts coming back would contradict the user's toggle.
+  permissionMode?: PermissionMode
   layout?: unknown // per-conversation Dockview serialization (reserved)
   // Per-conversation plugin enablement + pinned exports (app-wide registry, per-conversation
   // enabled set — PLUGIN_ARCHITECTURE.md §1). Keyed by plugin id.
@@ -69,6 +73,9 @@ interface AppState {
   activeId?: string | null
   openIds?: string[]
   lastUsage?: unknown
+  // The permission mode new conversations start in (the user treats bypass as one app-wide
+  // switch, not something to re-enable per conversation). Updated on every toggle.
+  defaultPermissionMode?: PermissionMode
 }
 
 function loadState(): AppState {
@@ -102,6 +109,14 @@ export function getOpenConversationIds(): string[] {
 
 export function setOpenConversationIds(ids: string[]): void {
   saveState({ ...loadState(), openIds: ids })
+}
+
+export function getDefaultPermissionMode(): PermissionMode {
+  return loadState().defaultPermissionMode ?? 'default'
+}
+
+export function setDefaultPermissionMode(mode: PermissionMode): void {
+  saveState({ ...loadState(), defaultPermissionMode: mode })
 }
 
 export function getLastUsage(): unknown {

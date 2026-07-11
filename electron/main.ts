@@ -297,6 +297,11 @@ function registerIpc(): void {
     return agents.usage(instanceId)
   })
 
+  ipcMain.handle(IPC.agentUiState, (_e, payload) => {
+    const { instanceId } = InstanceRefSchema.parse(payload)
+    return agents.uiState(instanceId)
+  })
+
   ipcMain.handle(IPC.agentTranscript, (_e, payload) => {
     const { instanceId } = InstanceRefSchema.parse(payload)
     return agents.transcript(instanceId)

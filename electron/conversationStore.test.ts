@@ -16,6 +16,8 @@ import {
   setActiveConversationId,
   getOpenConversationIds,
   setOpenConversationIds,
+  getDefaultPermissionMode,
+  setDefaultPermissionMode,
   deleteConversationData,
   type ConversationManifest
 } from './conversationStore.js'
@@ -56,6 +58,11 @@ describe('conversation persistence', () => {
     expect(all[0]).toMatchObject({ id: 'a', title: 'conv a', cwd: '/work/a' })
   })
 
+  it('round-trips the permission mode (bypass must survive close/reopen)', () => {
+    saveConversation({ ...manifest('a', 1000), permissionMode: 'bypassPermissions' })
+    expect(listConversations()[0].permissionMode).toBe('bypassPermissions')
+  })
+
   it('lists conversations sorted by createdAt', () => {
     saveConversation(manifest('late', 3000))
     saveConversation(manifest('early', 1000))
@@ -85,5 +92,14 @@ describe('app state', () => {
     // Updating one field must not clobber the other.
     setActiveConversationId('b')
     expect(getOpenConversationIds()).toEqual(['a', 'b'])
+  })
+
+  it('defaults the app-wide permission mode to "default" and persists changes', () => {
+    expect(getDefaultPermissionMode()).toBe('default')
+    setDefaultPermissionMode('bypassPermissions')
+    expect(getDefaultPermissionMode()).toBe('bypassPermissions')
+    // Must not clobber the rest of the app state.
+    setOpenConversationIds(['a'])
+    expect(getDefaultPermissionMode()).toBe('bypassPermissions')
   })
 })

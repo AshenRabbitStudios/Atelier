@@ -34,10 +34,15 @@ per-plugin backend code:
    of every pinned export as a framed `<atelier-context>…</atelier-context>` block to the
    message sent to the model (stripped from the displayed transcript, so editable history stays
    clean). The agent always sees its latest model/memory/plan, labeled as its own prior notes.
-2. **Gives the agent a tool to update it.** The host auto-registers an in-process MCP tool per
-   export (`set_<plugin>__<key>`, content = the full new value). When the agent calls it, the
-   host writes the value to the conversation's plugin storage. The agent "pushes changes" this
-   way; the handler runs in the **main process on storage**, so it works whether the pane is
+2. **Gives the agent two tools to update it.** The host auto-registers, per export,
+   `set_<plugin>__<key>` (content = the full new value — a complete replace) **and**
+   `edit_<plugin>__<key>` (`old_string`/`new_string`/`replace_all?` — a targeted find-and-replace
+   that leaves the rest of the value byte-for-byte). `edit_` is preferred for small changes: a full
+   rewrite re-samples every untouched byte, so it silently drifts and compounds turn-over-turn (and
+   can drop the tail of an over-`maxTokens` value it only ever saw truncated); a diff can't. `edit_`
+   returns an error (writing nothing) when `old_string` is missing or non-unique, so the agent
+   corrects the anchor or falls back to `set_`. Both write the value to the conversation's plugin
+   storage; the handlers run in the **main process on storage**, so they work whether the pane is
    open or closed.
 3. **Lets you edit it.** The pane reads the value via `atelier.context.get(key)` and writes your
    edits via `atelier.context.set(key, value)`. Same storage the agent's tool writes, so you and

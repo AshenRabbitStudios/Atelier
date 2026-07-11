@@ -124,6 +124,83 @@ describe('buildContextMcpServers', () => {
   })
 })
 
+describe('the edit_ tool (targeted find-and-replace)', () => {
+  type EditArgs = { old_string: string; new_string: string; replace_all?: boolean }
+  type EditResult = { content: { text: string }[]; isError?: boolean }
+  type ToolEntry = { handler: (a: EditArgs) => Promise<EditResult> }
+
+  function editTool(conversationId: string, onChange: (p: string, k: string) => void = () => {}) {
+    const servers = buildContextMcpServers(REG, conversationId, { mm: pinned(['model']) }, onChange)
+    const reg = (servers!.atelier_context.instance as unknown as Record<string, unknown>)
+      ._registeredTools as Record<string, ToolEntry>
+    return reg['edit_mm__model']
+  }
+
+  it('is registered alongside set_ for every pinned export', () => {
+    const servers = buildContextMcpServers(REG, 'c1', { mm: pinned(['model']) }, () => {})
+    const reg = (servers!.atelier_context.instance as unknown as Record<string, unknown>)
+      ._registeredTools as Record<string, unknown>
+    expect(reg['set_mm__model']).toBeDefined()
+    expect(reg['edit_mm__model']).toBeDefined()
+  })
+
+  it('replaces a unique occurrence, persists, and fires onChange', async () => {
+    pluginStorageSet('c1', 'mm', contextStorageKey('model'), 'A house has 3 rooms and 1 door')
+    const changes: { pluginId: string; key: string }[] = []
+    const t = editTool('c1', (pluginId, key) => changes.push({ pluginId, key }))
+    const res = await t.handler({ old_string: '3 rooms', new_string: '4 rooms' })
+    expect(res.isError).toBeFalsy()
+    expect(pluginValueOrDefault(REG, 'c1', 'mm', contextStorageKey('model'))).toBe(
+      'A house has 4 rooms and 1 door'
+    )
+    expect(changes).toEqual([{ pluginId: 'mm', key: 'model' }])
+  })
+
+  it('errors (without writing) when old_string is not unique and replace_all is unset', async () => {
+    pluginStorageSet('c1', 'mm', contextStorageKey('model'), 'red red red')
+    const changes: unknown[] = []
+    const t = editTool('c1', () => changes.push(1))
+    const res = await t.handler({ old_string: 'red', new_string: 'blue' })
+    expect(res.isError).toBe(true)
+    expect(res.content[0].text).toContain('not unique')
+    // storage untouched, no push fired
+    expect(pluginValueOrDefault(REG, 'c1', 'mm', contextStorageKey('model'))).toBe('red red red')
+    expect(changes).toEqual([])
+  })
+
+  it('replaces every occurrence with replace_all', async () => {
+    pluginStorageSet('c1', 'mm', contextStorageKey('model'), 'red red red')
+    const res = await editTool('c1').handler({
+      old_string: 'red',
+      new_string: 'blue',
+      replace_all: true
+    })
+    expect(res.isError).toBeFalsy()
+    expect(res.content[0].text).toContain('3 replacements')
+    expect(pluginValueOrDefault(REG, 'c1', 'mm', contextStorageKey('model'))).toBe('blue blue blue')
+  })
+
+  it('errors when old_string is not found', async () => {
+    pluginStorageSet('c1', 'mm', contextStorageKey('model'), 'the map is not the territory')
+    const res = await editTool('c1').handler({ old_string: 'nowhere', new_string: 'x' })
+    expect(res.isError).toBe(true)
+    expect(res.content[0].text).toContain('not found')
+  })
+
+  it('errors on an empty value and points at set_', async () => {
+    const res = await editTool('c1').handler({ old_string: 'a', new_string: 'b' })
+    expect(res.isError).toBe(true)
+    expect(res.content[0].text).toContain('set_mm__model')
+  })
+
+  it('treats `$` in new_string literally (no String.replace pattern interpretation)', async () => {
+    pluginStorageSet('c1', 'mm', contextStorageKey('model'), 'cost is TOKEN here')
+    const res = await editTool('c1').handler({ old_string: 'TOKEN', new_string: '$1 & $&' })
+    expect(res.isError).toBeFalsy()
+    expect(pluginValueOrDefault(REG, 'c1', 'mm', contextStorageKey('model'))).toBe('cost is $1 & $& here')
+  })
+})
+
 describe('push-only exports (inject:false)', () => {
   const PUSH = fakeRegistry({
     viz: [

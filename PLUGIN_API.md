@@ -79,7 +79,10 @@ interface AtelierHost {
     onResize(cb: (size: { w: number; h: number }) => void): () => void
   }
 
-  // data channels — the legibility plumbing (SPEC §6)
+  // data channels — the legibility plumbing (SPEC §6). Built-in sources by channel prefix:
+  //   file:<rel>   — a text file, cwd-scoped, live-tailed (needs "data:subscribe")
+  //   url:<href>   — an http(s) URL fetched once in main (15s / 2MB / textual-only caps);
+  //                  re-subscribing refetches. Needs "net:fetch" ON TOP of "data:subscribe".
   data: {
     subscribe(channel: string, cb: (payload: unknown) => void): () => void
     publish(channel: string, payload: unknown): Promise<void> // needs "data:publish"
@@ -122,7 +125,11 @@ mediates. This is the line that keeps a malformed or hostile plugin contained.
 
 Declared in the manifest, enforced by the host. Minimum useful set:
 
-- `data:subscribe`, `data:publish` — read / write data channels.
+- `data:subscribe`, `data:publish` — read / write data channels (conversation-scoped
+  sources: files, bash taps, plugin-published topics).
+- `net:fetch` — subscribe to `url:` channels (host-side HTTP fetch). Split from
+  `data:subscribe` because network reach is a different capability class than reading the
+  conversation's own files.
 - `agent:read`, `agent:send` — observe / drive agent instances.
 - `storage` — per-plugin persisted KV.
 - `tools` — register agent tools (requires a `backend` module).

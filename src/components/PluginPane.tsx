@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { URL_CHANNEL_PREFIX } from '@shared/plugins'
 import type { DockPosition } from '@shared/plugins'
 
 // Host side of one mounted plugin: a sandboxed iframe loaded over atelier-plugin://, plus the
@@ -178,6 +179,11 @@ export function PluginPane({
               return reply(d.id, false, undefined, 'permission "data:subscribe" not granted')
             }
             const channel = String(args[0])
+            // Network reach is its own capability class: `data:subscribe` alone grants only
+            // conversation-scoped sources (files, bash taps), not host-side URL fetches.
+            if (channel.startsWith(URL_CHANNEL_PREFIX) && !permissions.includes('net:fetch')) {
+              return reply(d.id, false, undefined, 'permission "net:fetch" not granted')
+            }
             if (d.method === 'subscribe') {
               await window.atelier.plugins.dataSubscribe(conv, pluginId, channel)
               subscribedChannels.set(channel, conv)

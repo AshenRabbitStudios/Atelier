@@ -184,7 +184,7 @@
   <body>
     <div id="root">
       <div id="bar">
-        <input id="path" type="text" placeholder="local file to load, e.g. docs/DESIGN_SYSTEM.md" />
+        <input id="path" type="text" placeholder="file path (docs/NOTES.md) or https:// URL" />
         <button id="load">Load</button>
         <button id="clear">Clear</button>
         <span class="seg">
@@ -204,12 +204,16 @@
     </div>
 
     <script>
-      // Browser surface: the agent pushes HTML/Markdown (the `content` export) or the user loads a
-      // local file; the user views/interacts here; the live page state + on-demand snapshots go back
-      // to the agent as the `page` / `snapshot` exports. Content renders in THIS document (not a
-      // nested frame) because the plugin sandbox (allow-scripts, opaque origin) would make a child
-      // frame unreadable — rendering in-doc is what lets us read the live, post-interaction DOM.
-      // (External-site browsing via an Electron <webview> is the documented follow-up.)
+      // Browser surface. Inputs, in preference order: the agent sets `source` to a cwd-relative
+      // file path (live-tailed over the DataBus file: channel) or an http(s) URL (one-shot host
+      // fetch over the url: channel, needs net:fetch); the user types either into the box; or the
+      // agent pushes a small HTML/Markdown fragment directly (the `content` export). The live page
+      // state + on-demand snapshots go back to the agent as the `page` / `snapshot` exports.
+      // Content renders in THIS document (not a nested frame) because the plugin sandbox
+      // (allow-scripts, opaque origin) would make a child frame unreadable — rendering in-doc is
+      // what lets us read the live, post-interaction DOM. Scripts in url-fetched content are NEVER
+      // executed: remote JS running here could drive the atelier bridge (context.set → text the
+      // agent trusts), so only local/agent content may opt into script execution.
       const el = (id) => document.getElementById(id)
       const pathInput = el('path')
       const pageEl = el('page')
@@ -221,9 +225,12 @@
       const state = {
         mode: 'rendered', // 'rendered' | 'source'
         raw: '', // the current source text (HTML or Markdown)
-        label: 'empty', // where it came from (a path, 'agent', 'markdown', …)
-        fileChannel: null // the file:<path> channel we're currently subscribed to, if any
+        label: 'empty', // where it came from (a path, a URL, 'agent', …)
+        channel: null, // the file:<path> / url:<href> channel we're subscribed to, if any
+        remote: false // current content arrived from a url: channel → its scripts never run
       }
+
+      const isUrl = (s) => /^https?:\/\//i.test(s)
 
       let toastTimer = null
       function toast(msg) {
@@ -348,9 +355,11 @@
             if (target) target.scrollIntoView({ behavior: 'smooth' })
             return
           }
-          if (/^https?:\/\//i.test(href)) {
+          if (isUrl(href)) {
+            // Follow the link through the host-side url: fetch — basic click-through browsing.
             e.preventDefault()
-            toast('External navigation needs the webview upgrade — link not followed: ' + href)
+            pathInput.value = href
+            loadSource(href)
           }
           // relative/other links fall through; there is no page to navigate to in-doc.
         })
@@ -364,7 +373,7 @@
           pageEl.classList.add('hidden')
         } else {
           pageEl.innerHTML = html
-          if (runScriptsCb.checked) runScripts(pageEl)
+          if (runScriptsCb.checked && !state.remote) runScripts(pageEl)
           interceptLinks(pageEl)
           pageEl.classList.remove('hidden')
           sourceEl.classList.add('hidden')
@@ -432,7 +441,7 @@
         const stream = streamCb.checked ? '<b>state→agent ON</b>' : 'state→agent off'
         statusEl.innerHTML =
           state.label === 'empty'
-            ? 'empty — push content or load a file'
+            ? 'empty — set a source (file or URL) or push content'
             : state.label + ' · ' + chars + ' chars · ' + state.mode + ' · ' + stream
       }
 
@@ -443,41 +452,54 @@
         stateTimer = setTimeout(captureState, 300)
       }).observe(pageEl, { subtree: true, childList: true, characterData: true, attributes: true })
 
-      // ---- Local file loading (DataBus file: source) ----
-      function loadFile(path) {
-        const rel = (path || '').trim()
-        if (!rel) return
-        if (state.fileChannel) {
-          try {
-            window.atelier.data.unsubscribe(state.fileChannel)
-          } catch (_) {
-            /* ignore */
-          }
+      // ---- Source loading (DataBus file:/url: channels) ----
+      function dropChannel() {
+        if (!state.channel) return
+        try {
+          window.atelier.data.unsubscribe(state.channel)
+        } catch (_) {
+          /* ignore */
         }
-        const channel = 'file:' + rel
-        state.fileChannel = channel
+        state.channel = null
+      }
+
+      // `input` is a cwd-relative file path (live-tailed) or an http(s) URL (one-shot host fetch;
+      // loading the same URL again refetches, because the channel is re-opened).
+      function loadSource(input) {
+        const src = (input || '').trim()
+        if (!src) return
+        dropChannel()
+        const remote = isUrl(src)
+        const channel = (remote ? 'url:' : 'file:') + src
+        state.channel = channel
+        state.remote = remote
+        if (remote) toast('Fetching ' + src + ' …')
         window.atelier.data
           .subscribe(channel, (data) => {
             if (data && typeof data === 'object' && 'error' in data) {
-              setContent('# Could not load\n\n' + String(data.error), rel)
+              setContent('# Could not load\n\n' + String(data.error), src)
               return
             }
-            // render() auto-detects: an HTML-looking file renders as HTML, otherwise as Markdown.
-            setContent(typeof data === 'string' ? data : String(data), rel)
+            // render() auto-detects: HTML-looking content renders as HTML, otherwise as Markdown.
+            setContent(typeof data === 'string' ? data : String(data), src)
           })
           .catch((e) =>
-            setContent('# Load failed\n\n' + (e && e.message ? e.message : String(e)), rel)
+            setContent('# Load failed\n\n' + (e && e.message ? e.message : String(e)), src)
           )
-        window.atelier.storage.set('path', rel)
+        // The last-loaded source doubles as the restore key AND the "already consumed" marker
+        // that keeps a stale `source` context value from overriding newer input on reload.
+        window.atelier.storage.set('path', src)
       }
 
       // ---- Wiring ----
-      el('load').addEventListener('click', () => loadFile(pathInput.value))
+      el('load').addEventListener('click', () => loadSource(pathInput.value))
       pathInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') loadFile(pathInput.value)
+        if (e.key === 'Enter') loadSource(pathInput.value)
       })
       el('clear').addEventListener('click', () => {
-        state.fileChannel = null
+        dropChannel()
+        state.remote = false
+        window.atelier.storage.set('path', '')
         setContent('', 'empty')
       })
       el('snapshot').addEventListener('click', takeSnapshot)
@@ -500,12 +522,24 @@
       el('mode-rendered').addEventListener('click', () => setMode('rendered'))
       el('mode-source').addEventListener('click', () => setMode('source'))
 
-      // The agent pushed new content (host fires a 'context' event for the 'content' export).
+      // Agent input (host fires a 'context' event when the agent writes an export).
+      // `source` → load that path/URL; `content` → show the pushed fragment directly.
       window.atelier.on('context', async (p) => {
-        if (!p || p.key !== 'content') return
+        if (!p || (p.key !== 'content' && p.key !== 'source')) return
         try {
-          const v = await window.atelier.context.get('content')
-          if (typeof v === 'string' && v) setContent(v, 'agent')
+          const v = await window.atelier.context.get(p.key)
+          if (typeof v !== 'string' || !v) return
+          if (p.key === 'source') {
+            pathInput.value = v.trim()
+            loadSource(v)
+          } else {
+            // A direct push replaces whatever was loaded — stop tailing it and clear the restore
+            // key so the pushed content (not the old source) is what a reload brings back.
+            dropChannel()
+            state.remote = false
+            window.atelier.storage.set('path', '')
+            setContent(v, 'agent')
+          }
         } catch (_) {
           /* ignore */
         }
@@ -526,17 +560,28 @@
             el('mode-rendered').classList.remove('on')
             el('mode-source').classList.add('on')
           }
-          // Prefer agent-pushed content; otherwise reload the last file.
-          const pushed = await window.atelier.context.get('content')
-          if (typeof pushed === 'string' && pushed) setContent(pushed, 'agent')
-          else if (typeof savedPath === 'string' && savedPath) {
-            pathInput.value = savedPath
-            loadFile(savedPath)
+          // Restore order: a `source` the agent set that we have NOT yet consumed (≠ saved path,
+          // e.g. it arrived while this pane was disposed) wins; then the last-loaded source; then
+          // agent-pushed content; then the welcome page. Exact recency between a source-set and a
+          // content-push that both happened while disposed is unknowable — source wins by policy.
+          const last = typeof savedPath === 'string' ? savedPath : ''
+          const src = await window.atelier.context.get('source')
+          const wanted = typeof src === 'string' ? src.trim() : ''
+          if (wanted && wanted !== last) {
+            pathInput.value = wanted
+            loadSource(wanted)
+          } else if (last) {
+            pathInput.value = last
+            loadSource(last)
           } else {
-            setContent(
-              '# Browser\n\nThis surface renders HTML or Markdown the agent pushes, or a local file you load.\n\n- The agent pushes via its `set_browser__content` tool.\n- Load a project file with the path box above.\n- Your live view goes back to the agent as the **page state**; hit **Snapshot** for a frozen capture.',
-              'welcome'
-            )
+            const pushed = await window.atelier.context.get('content')
+            if (typeof pushed === 'string' && pushed) setContent(pushed, 'agent')
+            else {
+              setContent(
+                '# Browser\n\nThis surface renders a file, a fetched URL, or HTML/Markdown the agent pushes.\n\n- The agent points it at a file or URL via `set_browser__source` (or pushes a small fragment via `set_browser__content`).\n- Load a project file or an https:// URL with the box above.\n- Your live view goes back to the agent as the **page state**; hit **Snapshot** for a frozen capture.',
+                'welcome'
+              )
+            }
           }
           updateStatus()
         } catch (_) {

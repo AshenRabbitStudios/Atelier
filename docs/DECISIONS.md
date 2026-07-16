@@ -158,3 +158,18 @@ toolsearch|webfetch|websearch` start collapsed in the chat (they're just retriev
   event subscriptions, and the per-remount hydration crutch. Elapsed clock anchors on
   `turnStartedAt` (main-tracked, in UiStateSnapshot; mirrored by the reducer on status
   transitions) instead of a mount-time ref.
+
+- Browser plugin input is a LOCATION, not a blob: new agent-writable `source` export takes a
+  cwd-relative path (live-tailed file: channel) or an http(s) URL; `content` stays as a
+  small-fragment fallback. Files beat blobs: no token cap, live reload, and the artifact
+  persists in the repo.
+- URL fetching is a DataBus source in main (`url:<href>`, one-shot, 15s/2MB/textual-only),
+  NOT a pane-side fetch (sandbox has no network) and NOT an embedded webview (nested webviews
+  don't work inside sandboxed plugin frames; readable-text-back-to-agent is the point).
+- New `net:fetch` permission gates `url:` subscriptions separately from `data:subscribe` —
+  network reach is a different capability class than reading the conversation's own files
+  (invariant #3). Enforced at the PluginPane RPC boundary like the rest.
+- Scripts in url-fetched content never execute in the Browser pane (even with "Run scripts"
+  on): remote JS could drive the atelier bridge (context.set → text the agent trusts).
+  External links in rendered content now click through via the url: fetch instead of a
+  "needs webview" toast.

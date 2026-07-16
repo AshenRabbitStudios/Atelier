@@ -1,21 +1,29 @@
 {
   "id": "browser",
   "name": "Browser",
-  "version": "0.1.0",
-  "description": "A pane the user views: push HTML or Markdown into it to render for them, then read back the page state and a text snapshot of what they see. Use it to show rich output (reports, previews, rendered pages) rather than dumping it into chat.",
+  "version": "0.2.0",
+  "description": "A pane the user views. Preferred use: write a viewable file (.html/.md) in the cwd, then set 'source' to its path — the pane live-reloads it as you edit. 'source' also takes http(s) URLs (host-fetched). Read back what the user sees via the page state and snapshot outputs.",
   "icon": "M8 1.6a6.4 6.4 0 100 12.8A6.4 6.4 0 008 1.6zM1.7 8h12.6M8 1.7c1.8 1.8 2.8 4 2.8 6.3S9.8 12.5 8 14.3M8 1.7C6.2 3.5 5.2 5.7 5.2 8s1 4.5 2.8 6.3",
   "kind": "panel",
   "entry": "index.html",
-  "permissions": ["context", "data:subscribe", "storage"],
+  "permissions": ["context", "data:subscribe", "storage", "net:fetch"],
   "defaultDock": "right",
   "contextExports": [
+    {
+      "key": "source",
+      "label": "Browser source",
+      "format": "text",
+      "maxTokens": 200,
+      "inject": false,
+      "description": "PRIMARY input — set this to what the Browser pane should load: a file path relative to the conversation cwd (e.g. 'reports/summary.html') or an http(s) URL. Preferred flow: write your HTML/Markdown to a file, then set this to its path — no token cap, and the pane live-reloads the file on every edit. URLs are fetched once by the host (15s / 2MB caps, text only) and rendered without executing their scripts; setting the same URL again refreshes it."
+    },
     {
       "key": "content",
       "label": "Browser content",
       "format": "markdown",
       "maxTokens": 8000,
       "inject": false,
-      "description": "Send full HTML or Markdown here to render it in the Browser pane for the user. If it starts with '<' it is treated as HTML, otherwise as Markdown. The user views and navigates it; you read what they see back via the 'Browser page state' and 'Browser snapshot' outputs."
+      "description": "Direct-push fallback for SMALL, self-contained HTML or Markdown fragments (hard cap ~8k tokens; each push spends that from context). For anything substantial, write a file and set 'source' to its path instead. If the value starts with '<' it is treated as HTML, otherwise as Markdown."
     },
     {
       "key": "page",

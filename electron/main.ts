@@ -37,7 +37,7 @@ import {
 } from './shared/events.js'
 import type { DiscoveredPlugin } from './shared/plugins.js'
 import { PluginRegistry } from './plugin/PluginRegistry.js'
-import { DataBus, createFileSource } from './plugin/DataBus.js'
+import { DataBus, createFileSource, createUrlSource } from './plugin/DataBus.js'
 import { PluginBackendManager, type BackendTransport } from './plugin/PluginBackendManager.js'
 import { buildPluginToolServers } from './plugin/pluginTools.js'
 import { buildEnvironmentBriefing, buildAtelierToolServer } from './plugin/introspection.js'
@@ -183,7 +183,7 @@ const dataBus = new DataBus(
   (msg) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.dataMessage, msg)
   },
-  [createFileSource(resolveWithinCwd)]
+  [createFileSource(resolveWithinCwd), createUrlSource()]
 )
 
 function createWindow(): void {

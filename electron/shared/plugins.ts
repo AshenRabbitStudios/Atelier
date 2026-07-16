@@ -13,9 +13,16 @@ export const PLUGIN_PERMISSIONS = [
   'agent:send',
   'storage',
   'tools',
-  'context'
+  'context',
+  'net:fetch'
 ] as const
 export type PluginPermission = (typeof PLUGIN_PERMISSIONS)[number]
+
+// Channel-namespace prefix for the DataBus URL source. Network reach is a capability class of its
+// own, so subscribing to a `url:` channel additionally requires the `net:fetch` permission — plain
+// `data:subscribe` only grants conversation-scoped sources (files, bash taps). Shared here because
+// the renderer (PluginPane) enforces the gate and main (DataBus) owns the source.
+export const URL_CHANNEL_PREFIX = 'url:'
 
 export const PluginKind = z.enum(['panel', 'tool', 'both'])
 

@@ -5,7 +5,9 @@ import { join } from 'node:path'
 import {
   DataBus,
   createFileSource,
+  createUrlSource,
   FILE_PREFIX,
+  URL_PREFIX,
   type DataMessage,
   type DataSource,
   type SourceHandle
@@ -157,5 +159,109 @@ describe('createFileSource', () => {
     await expect(bus.subscribe(CONV, 'plugin-a', FILE_PREFIX + '../secret')).rejects.toThrow(
       /outside the conversation folder/
     )
+  })
+})
+
+describe('createUrlSource', () => {
+  const response = (body: string, init?: { status?: number; headers?: Record<string, string> }) =>
+    new Response(body, {
+      status: init?.status ?? 200,
+      headers: { 'content-type': 'text/html', ...init?.headers }
+    })
+
+  it('fetches the URL once and emits the body text', async () => {
+    const fetchImpl = vi.fn(async () => response('<h1>hi</h1>'))
+    const sink = vi.fn<(m: DataMessage) => void>()
+    const bus = new DataBus(sink, [createUrlSource(fetchImpl)])
+
+    await bus.subscribe(CONV, 'plugin-a', URL_PREFIX + 'https://example.com/page')
+    await waitFor(() => sink.mock.calls.length > 0)
+    expect(sink.mock.calls[0][0].data).toBe('<h1>hi</h1>')
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://example.com/page',
+      expect.objectContaining({ redirect: 'follow' })
+    )
+  })
+
+  it('rejects a non-http(s) or malformed URL at subscribe time', async () => {
+    const fetchImpl = vi.fn(async () => response(''))
+    const bus = new DataBus(vi.fn(), [createUrlSource(fetchImpl)])
+    await expect(
+      bus.subscribe(CONV, 'plugin-a', URL_PREFIX + 'file:///etc/passwd')
+    ).rejects.toThrow(/must be http\(s\)/)
+    await expect(bus.subscribe(CONV, 'plugin-a', URL_PREFIX + 'not a url')).rejects.toThrow(
+      /not a valid URL/
+    )
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('emits { error } on an HTTP error status', async () => {
+    const fetchImpl = vi.fn(async () => response('gone', { status: 404 }))
+    const sink = vi.fn<(m: DataMessage) => void>()
+    const bus = new DataBus(sink, [createUrlSource(fetchImpl)])
+
+    await bus.subscribe(CONV, 'plugin-a', URL_PREFIX + 'https://example.com/missing')
+    await waitFor(() => sink.mock.calls.length > 0)
+    expect(sink.mock.calls[0][0].data).toMatchObject({ error: expect.stringContaining('404') })
+  })
+
+  it('emits { error } for a non-textual content type', async () => {
+    const fetchImpl = vi.fn(async () =>
+      response('...', { headers: { 'content-type': 'image/png' } })
+    )
+    const sink = vi.fn<(m: DataMessage) => void>()
+    const bus = new DataBus(sink, [createUrlSource(fetchImpl)])
+
+    await bus.subscribe(CONV, 'plugin-a', URL_PREFIX + 'https://example.com/pic.png')
+    await waitFor(() => sink.mock.calls.length > 0)
+    expect(sink.mock.calls[0][0].data).toMatchObject({
+      error: expect.stringContaining('image/png')
+    })
+  })
+
+  it('emits { error } when the declared content-length exceeds the cap', async () => {
+    const fetchImpl = vi.fn(async () =>
+      response('x', { headers: { 'content-length': String(50_000_000) } })
+    )
+    const sink = vi.fn<(m: DataMessage) => void>()
+    const bus = new DataBus(sink, [createUrlSource(fetchImpl)])
+
+    await bus.subscribe(CONV, 'plugin-a', URL_PREFIX + 'https://example.com/huge')
+    await waitFor(() => sink.mock.calls.length > 0)
+    expect(sink.mock.calls[0][0].data).toMatchObject({
+      error: expect.stringContaining('too large')
+    })
+  })
+
+  it('emits { error } when the fetch itself fails', async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new Error('ECONNREFUSED')
+    })
+    const sink = vi.fn<(m: DataMessage) => void>()
+    const bus = new DataBus(sink, [createUrlSource(fetchImpl)])
+
+    await bus.subscribe(CONV, 'plugin-a', URL_PREFIX + 'https://example.com/down')
+    await waitFor(() => sink.mock.calls.length > 0)
+    expect(sink.mock.calls[0][0].data).toMatchObject({ error: 'ECONNREFUSED' })
+  })
+
+  it('does not emit after the channel is closed (unsubscribe aborts the fetch)', async () => {
+    let resolveFetch: ((r: Response) => void) | null = null
+    const fetchImpl = vi.fn(
+      (_url: string | URL | Request, init?: RequestInit) =>
+        new Promise<Response>((resolve, reject) => {
+          resolveFetch = resolve
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')))
+        })
+    )
+    const sink = vi.fn<(m: DataMessage) => void>()
+    const bus = new DataBus(sink, [createUrlSource(fetchImpl as unknown as typeof fetch)])
+
+    await bus.subscribe(CONV, 'plugin-a', URL_PREFIX + 'https://example.com/slow')
+    bus.unsubscribe(CONV, 'plugin-a', URL_PREFIX + 'https://example.com/slow')
+    resolveFetch?.(response('late'))
+    await new Promise((r) => setTimeout(r, 20)) // give a stray emit the chance to fire
+    expect(sink).not.toHaveBeenCalled()
   })
 })

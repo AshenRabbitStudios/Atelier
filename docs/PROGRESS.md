@@ -597,3 +597,23 @@ full partial text present immediately, elapsed clock continuous; type a draft, s
 back → draft intact; scroll up in a long chat, switch away/back → same scroll position; clear
 chat still empties the view; edit/fork, background viewer, and "needs approval" cards all still
 behave.
+
+## 2026-07-16 — Browser plugin: agent-set source (file path or URL), host-side URL fetch
+
+User-reported: agent could only push content blobs (8k cap) into the Browser pane, and URLs
+typed into the path box were resolved as cwd-relative FILE paths (`http://google.com` →
+ENOENT). Rework: (1) new agent-writable `source` context export — a cwd-relative file path
+(live-tailed) or an http(s) URL; preferred flow is now "write a viewable file, point source at
+it". (2) New DataBus `url:` source in main — one-shot fetch, 15s timeout, 2MB cap, textual
+content types only, `{error}` shape parity with the file source, abort + closed-guard on
+close. (3) New `net:fetch` permission gating `url:` subscriptions at the PluginPane boundary.
+(4) Pane: URL detection in the box, `source` context handling, restore order
+(unconsumed source > last-loaded > pushed content > welcome), external links click through via
+url: fetch, scripts in url-fetched content never execute (bridge-abuse guard).
+
+needs human spot-check in-app: (a) agent sets `source` to a repo .md/.html → renders, then
+edit the file → pane live-updates; (b) agent sets `source` to an https URL → fetches and
+renders text (no scripts), page state export shows its visible text; (c) URL in the path box
+works the same; bad URL/404 shows a readable error, not ENOENT; (d) plugin without `net:fetch`
+subscribing to url: is rejected (permission error surfaced); (e) content push still works and
+survives reload; (f) external link click inside rendered content navigates via fetch.

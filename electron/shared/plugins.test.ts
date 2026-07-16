@@ -39,6 +39,16 @@ describe('ManifestSchema', () => {
     expect(r.success).toBe(false)
   })
 
+  it('accepts the net:fetch permission', () => {
+    const r = ManifestSchema.safeParse({
+      id: 'x',
+      name: 'x',
+      version: '1',
+      permissions: ['net:fetch']
+    })
+    expect(r.success).toBe(true)
+  })
+
   it('fills contextExport defaults (format/maxTokens)', () => {
     const r = ManifestSchema.safeParse({
       id: 'x',

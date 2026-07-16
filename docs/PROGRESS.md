@@ -617,3 +617,23 @@ renders text (no scripts), page state export shows its visible text; (c) URL in 
 works the same; bad URL/404 shows a readable error, not ENOENT; (d) plugin without `net:fetch`
 subscribing to url: is rejected (permission error surfaced); (e) content push still works and
 survives reload; (f) external link click inside rendered content navigates via fetch.
+
+## 2026-07-16 — Browser plugin: images render (remote rewrite + local mediated read)
+
+User-reported: images displayed as broken links. Cause: content renders in-document under
+the pane's opaque origin (atelier-plugin://browser/), so relative/local <img> src resolved
+to the plugin folder → 404 (and remote pages' relative images 404 the same way). Fix (both
+cases): (1) remote url:-sourced content — pane rewrites relative img src/srcset to absolute
+against the page URL. (2) local-file/agent-authored content — new mediated cwd binary read:
+`atelier.data.readAsset(path)` → `plugin:read-asset` IPC → `createAssetReader` (electron/
+plugin/assets.ts), image-ext allowlist + 10MB cap, cwd-scoped via the same resolver as the
+file: source; the pane fetches each relative image and swaps in a data: URL. Reuses the
+`data:subscribe` permission (no new capability). Snapshot HTML now collapses inlined data:
+URIs so they don't eat the budget.
+
+needs human spot-check in-app: (a) agent writes an .html/.md referencing a sibling PNG +
+set_browser__source to it → image renders; edit the image on disk, reload → updates; (b)
+fetch a remote page with relative images (set_browser__source to an https URL) → images
+load; (c) a missing local image shows a titled broken marker, not a crash; (d) content push
+with a relative image resolves from cwd root; (e) an absolute https image in local content
+still loads directly.

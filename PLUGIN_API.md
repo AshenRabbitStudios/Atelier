@@ -87,6 +87,10 @@ interface AtelierHost {
     subscribe(channel: string, cb: (payload: unknown) => void): () => void
     publish(channel: string, payload: unknown): Promise<void> // needs "data:publish"
     history(channel: string, limit?: number): Promise<unknown[]>
+    // Read a cwd-scoped image referenced by rendered content as a bounded data: URL — the binary
+    // sibling of a file: subscribe (a sandboxed pane can't fetch a cwd file as an <img> subresource).
+    // Image types only, size-capped; needs the same "data:subscribe" capability.
+    readAsset(path: string): Promise<{ dataUrl: string } | { error: string }>
   }
 
   // agent — observe and drive agent instances (needs "agent:read" / "agent:send")

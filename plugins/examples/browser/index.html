@@ -227,10 +227,98 @@
         raw: '', // the current source text (HTML or Markdown)
         label: 'empty', // where it came from (a path, a URL, 'agent', …)
         channel: null, // the file:<path> / url:<href> channel we're subscribed to, if any
-        remote: false // current content arrived from a url: channel → its scripts never run
+        remote: false, // current content arrived from a url: channel → its scripts never run
+        base: '' // the source path/URL images resolve against ('' for pushed content / welcome)
       }
 
       const isUrl = (s) => /^https?:\/\//i.test(s)
+      // A src we should NOT touch: already absolute, a data/blob URI, or the plugin's own scheme.
+      const isResolvedSrc = (u) => /^(https?:|data:|blob:|atelier-plugin:|#)/i.test(u)
+
+      // posix-join a base dir with a relative ref, collapsing . and .. ; a leading '/' means the
+      // cwd root. The host still enforces the cwd bound, so this only needs to be reasonable.
+      function joinPath(baseDir, ref) {
+        let dir = baseDir
+        if (ref[0] === '/') {
+          ref = ref.slice(1)
+          dir = ''
+        }
+        const out = []
+        for (const p of (dir ? dir.split('/') : []).concat(ref.split('/'))) {
+          if (p === '' || p === '.') continue
+          if (p === '..') out.pop()
+          else out.push(p)
+        }
+        return out.join('/')
+      }
+
+      const dirOf = (p) => {
+        const i = p.replace(/\\/g, '/').lastIndexOf('/')
+        return i < 0 ? '' : p.slice(0, i)
+      }
+
+      function absolutizeSrcset(srcset, base) {
+        return srcset
+          .split(',')
+          .map((part) => {
+            const seg = part.trim()
+            if (!seg) return ''
+            const sp = seg.indexOf(' ')
+            const url = sp < 0 ? seg : seg.slice(0, sp)
+            const desc = sp < 0 ? '' : seg.slice(sp)
+            if (isResolvedSrc(url)) return seg
+            try {
+              return new URL(url, base).href + desc
+            } catch (_) {
+              return seg
+            }
+          })
+          .filter(Boolean)
+          .join(', ')
+      }
+
+      function annotateBroken(img, why) {
+        img.setAttribute('title', 'image unavailable: ' + (why || 'not found'))
+        img.setAttribute('data-atelier-broken', '1')
+      }
+
+      // Make images load despite the in-doc render's opaque origin. Remote pages: rewrite relative
+      // URLs to absolute against the page URL (the network loads them). Local/agent content: fetch
+      // each relative image through the host bridge (cwd-scoped) and swap in a data: URL.
+      async function resolveImages(container) {
+        const imgs = Array.from(container.querySelectorAll('img'))
+        if (state.remote) {
+          for (const img of imgs) {
+            const src = img.getAttribute('src')
+            if (src && !isResolvedSrc(src)) {
+              try {
+                img.src = new URL(src, state.base).href
+              } catch (_) {
+                /* leave it */
+              }
+            }
+            const ss = img.getAttribute('srcset')
+            if (ss) img.setAttribute('srcset', absolutizeSrcset(ss, state.base))
+          }
+          for (const s of container.querySelectorAll('source[srcset]')) {
+            s.setAttribute('srcset', absolutizeSrcset(s.getAttribute('srcset'), state.base))
+          }
+          return
+        }
+        const baseDir = dirOf(state.base)
+        for (const img of imgs) {
+          const src = img.getAttribute('src')
+          if (!src || isResolvedSrc(src) || !img.isConnected) continue
+          try {
+            const r = await window.atelier.data.readAsset(joinPath(baseDir, src))
+            if (!img.isConnected) continue // a newer render replaced it while we awaited
+            if (r && r.dataUrl) img.src = r.dataUrl
+            else annotateBroken(img, r && r.error)
+          } catch (e) {
+            annotateBroken(img, e && e.message)
+          }
+        }
+      }
 
       let toastTimer = null
       function toast(msg) {
@@ -375,6 +463,7 @@
           pageEl.innerHTML = html
           if (runScriptsCb.checked && !state.remote) runScripts(pageEl)
           interceptLinks(pageEl)
+          void resolveImages(pageEl)
           pageEl.classList.remove('hidden')
           sourceEl.classList.add('hidden')
         }
@@ -416,7 +505,10 @@
 
       function takeSnapshot() {
         const d = describe()
-        const html = (state.mode === 'source' ? '' : pageEl.innerHTML).slice(0, 8000)
+        // Collapse inlined data: URIs (resolved images) so they don't eat the HTML budget.
+        const html = (state.mode === 'source' ? '' : pageEl.innerHTML)
+          .replace(/data:[^"')\s]{64,}/g, 'data:[inlined]')
+          .slice(0, 8000)
         let s = 'SNAPSHOT @ ' + new Date().toISOString() + '\nSOURCE: ' + state.label
         s += '\n\nVISIBLE TEXT:\n' + d.text.slice(0, 3000)
         if (d.links.length) s += '\n\nINTERACTIVE:\n' + d.links.join('\n')
@@ -473,6 +565,7 @@
         const channel = (remote ? 'url:' : 'file:') + src
         state.channel = channel
         state.remote = remote
+        state.base = src // images in this content resolve against the source path/URL
         if (remote) toast('Fetching ' + src + ' …')
         window.atelier.data
           .subscribe(channel, (data) => {
@@ -499,6 +592,7 @@
       el('clear').addEventListener('click', () => {
         dropChannel()
         state.remote = false
+        state.base = ''
         window.atelier.storage.set('path', '')
         setContent('', 'empty')
       })
@@ -537,6 +631,7 @@
             // key so the pushed content (not the old source) is what a reload brings back.
             dropChannel()
             state.remote = false
+            state.base = '' // relative images in a pushed fragment resolve from the cwd root
             window.atelier.storage.set('path', '')
             setContent(v, 'agent')
           }

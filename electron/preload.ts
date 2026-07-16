@@ -82,6 +82,8 @@ const api: AtelierAPI = {
       ipcRenderer.invoke(IPC.pluginDataUnsubscribe, { conversationId, pluginId, channel }),
     dataPublish: (conversationId, pluginId, channel, data) =>
       ipcRenderer.invoke(IPC.pluginDataPublish, { conversationId, pluginId, channel, data }),
+    readAsset: (conversationId, pluginId, path) =>
+      ipcRenderer.invoke(IPC.pluginReadAsset, { conversationId, pluginId, path }),
     onChanged: (cb) => {
       const listener = (_e: IpcRendererEvent, plugins: DiscoveredPlugin[]) => cb(plugins)
       ipcRenderer.on(IPC.pluginsChanged, listener)

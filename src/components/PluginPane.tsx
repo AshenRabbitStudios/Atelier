@@ -200,6 +200,14 @@ export function PluginPane({
             await window.atelier.plugins.dataPublish(conv, pluginId, String(args[0]), args[1])
             return reply(d.id, true)
           }
+          if (d.method === 'readAsset') {
+            // A cwd file read, like the file: source — gated by the same capability.
+            if (!permissions.includes('data:subscribe')) {
+              return reply(d.id, false, undefined, 'permission "data:subscribe" not granted')
+            }
+            const result = await window.atelier.plugins.readAsset(conv, pluginId, String(args[0]))
+            return reply(d.id, true, result)
+          }
           return reply(d.id, false, undefined, `unknown data method "${d.method}"`)
         }
         reply(d.id, false, undefined, `unknown namespace "${d.ns}"`)

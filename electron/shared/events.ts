@@ -398,6 +398,14 @@ export const PluginDataPublishSchema = z.object({
   data: z.unknown()
 })
 
+// Read a cwd-scoped binary asset (an image referenced by rendered content) as a data: URL.
+// Same conversation/plugin scoping as the data channels; `path` is cwd-relative and bounded host-side.
+export const PluginReadAssetSchema = z.object({
+  conversationId: z.string().min(1),
+  pluginId: z.string().min(1),
+  path: z.string().min(1)
+})
+
 // ---- Auth safety (billing) ----
 
 export interface AuthStatus {
@@ -455,6 +463,7 @@ export const IPC = {
   pluginDataSubscribe: 'plugin:data-subscribe',
   pluginDataUnsubscribe: 'plugin:data-unsubscribe',
   pluginDataPublish: 'plugin:data-publish',
+  pluginReadAsset: 'plugin:read-asset',
   authStatus: 'auth:status',
   appDefaultCwd: 'app:default-cwd',
   appPickFolder: 'app:pick-folder',
@@ -576,6 +585,11 @@ export interface AtelierAPI {
       channel: string,
       data: unknown
     ): Promise<void>
+    readAsset(
+      conversationId: string,
+      pluginId: string,
+      path: string
+    ): Promise<{ dataUrl: string } | { error: string }>
     onChanged(cb: (plugins: DiscoveredPlugin[]) => void): () => void
     onContextChanged(cb: (e: ContextChangedEvent) => void): () => void
     onDataMessage(cb: (e: DataMessageEvent) => void): () => void

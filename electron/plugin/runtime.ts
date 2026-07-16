@@ -88,7 +88,10 @@ export const RUNTIME_JS = String.raw`
         return call('data', 'unsubscribe', [channel])
       },
       // Publish a value onto a channel for other subscribers. Needs permission "data:publish".
-      publish: function (channel, value) { return call('data', 'publish', [channel, value]) }
+      publish: function (channel, value) { return call('data', 'publish', [channel, value]) },
+      // Read a cwd-scoped image (referenced by rendered content) as a { dataUrl } | { error }.
+      // The binary sibling of a file: subscribe; needs the same "data:subscribe" permission.
+      readAsset: function (path) { return call('data', 'readAsset', [path]) }
     },
     on: function (event, cb) {
       if (listeners[event]) listeners[event].push(cb)

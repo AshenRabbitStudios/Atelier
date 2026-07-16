@@ -32,12 +32,14 @@ import {
   PluginContextSetSchema,
   PluginDataChannelSchema,
   PluginDataPublishSchema,
+  PluginReadAssetSchema,
   type AgentEvent,
   type AuthStatus
 } from './shared/events.js'
 import type { DiscoveredPlugin } from './shared/plugins.js'
 import { PluginRegistry } from './plugin/PluginRegistry.js'
 import { DataBus, createFileSource, createUrlSource } from './plugin/DataBus.js'
+import { createAssetReader } from './plugin/assets.js'
 import { PluginBackendManager, type BackendTransport } from './plugin/PluginBackendManager.js'
 import { buildPluginToolServers } from './plugin/pluginTools.js'
 import { buildEnvironmentBriefing, buildAtelierToolServer } from './plugin/introspection.js'
@@ -185,6 +187,10 @@ const dataBus = new DataBus(
   },
   [createFileSource(resolveWithinCwd), createUrlSource()]
 )
+
+// Binary sibling of the file: source: read a cwd-scoped image as a data: URL for a pane that can't
+// fetch it as a subresource (opaque origin, no conversation context in the request). Same scoping.
+const readCwdAsset = createAssetReader(resolveWithinCwd)
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -485,6 +491,11 @@ function registerIpc(): void {
   ipcMain.handle(IPC.pluginDataPublish, (_e, payload) => {
     const { conversationId, channel, data } = PluginDataPublishSchema.parse(payload)
     dataBus.publish(conversationId, channel, data)
+  })
+
+  ipcMain.handle(IPC.pluginReadAsset, (_e, payload) => {
+    const { conversationId, path } = PluginReadAssetSchema.parse(payload)
+    return readCwdAsset(conversationId, path)
   })
 }
 

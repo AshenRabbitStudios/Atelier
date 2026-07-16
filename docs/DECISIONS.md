@@ -173,3 +173,16 @@ toolsearch|webfetch|websearch` start collapsed in the chat (they're just retriev
   on): remote JS could drive the atelier bridge (context.set → text the agent trusts).
   External links in rendered content now click through via the url: fetch instead of a
   "needs webview" toast.
+
+- Browser images render via URL resolution against the source, because content renders
+  in-doc under the pane's own opaque origin (atelier-plugin://<id>/) so any relative/local
+  <img> resolves to the plugin folder and 404s. Two cases: remote-fetched pages rewrite
+  relative src/srcset to absolute against the page URL (pane-side, network loads them);
+  local-file/agent-authored content fetches each relative image through a new mediated
+  host read and swaps in a data: URL.
+- Local image reads go through the bridge (new `atelier.data.readAsset(path)` →
+  `plugin:read-asset` IPC → createAssetReader), NOT a new global privileged scheme: a raw
+  <img> subresource GET carries no conversation id, so the host couldn't cwd-scope it; the
+  bridge already knows the conversation. Reuses resolveWithinCwd; gated by the existing
+  `data:subscribe` (same capability that reads cwd text via file:) — no new permission.
+  Bounded to image extensions + a 10MB cap so it can't become a general file channel.

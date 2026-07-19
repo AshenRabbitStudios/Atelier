@@ -162,6 +162,9 @@ export interface AgentInstance {
  */
 export interface UiStateSnapshot {
   status: AgentStatus
+  /** Version of `status` (monotonic per instance) — apply only if >= the last seen seq,
+   *  so a snapshot and a push can never race each other backwards. */
+  statusSeq: number
   permissionMode: PermissionMode
   pending: PermissionRequest[]
   questions: QuestionRequest[]
@@ -171,6 +174,8 @@ export interface UiStateSnapshot {
   tokens: { output: number; input?: number }
   /** Epoch-ms the in-flight run started (null when idle) — the elapsed clock's anchor. */
   turnStartedAt: number | null
+  /** The facts `status` derives from (docs/STATUS_LOCKSTEP.md) — introspection/debugging. */
+  facts: { queued: number; released: boolean; lastSdkEventAt: number | null }
 }
 
 /** A persisted conversation as listed in the dropdown (open + closed). */
@@ -222,7 +227,8 @@ export type AgentEvent =
       durationMs?: number
       isError: boolean
     }
-  | { instanceId: string; kind: 'status'; status: AgentStatus }
+  // `seq` versions the status per instance (monotonic); receivers ignore stale payloads.
+  | { instanceId: string; kind: 'status'; status: AgentStatus; seq: number }
   | { instanceId: string; kind: 'tokens'; output: number; input?: number }
   | {
       instanceId: string

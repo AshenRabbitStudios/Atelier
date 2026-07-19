@@ -35,6 +35,7 @@ import {
   type UsageWindow
 } from '../shared/events.js'
 import type { ConversationPluginState } from '../shared/plugins.js'
+import { TurnLedger, deriveStatus } from './turnLedger.js'
 import { readTranscript, editMessageText, parentUuidOf, childUuidOf } from './sessionStore.js'
 import { BackgroundRegistry } from './backgroundTasks.js'
 import { bashResponseText, type BashPublish } from './bashTap.js'
@@ -139,6 +140,9 @@ const AUTO_RESUME_PROMPT = 'Tokens are back — resume where you left off.'
 const AUTO_RESUME_MAX_MS = 8 * 24 * 60 * 60 * 1000
 // Small cushion past the reported reset so a little clock skew doesn't trigger an instant re-reject.
 const AUTO_RESUME_BUFFER_MS = 8000
+// After Stop, how long to wait for the SDK's aborted result before force-settling the turn and
+// rebinding — Stop must never be able to wedge the status (docs/STATUS_LOCKSTEP.md).
+const INTERRUPT_GRACE_MS = 10_000
 
 interface StreamEvent {
   type: string
@@ -185,7 +189,6 @@ class Session {
   permissionMode: PermissionMode = 'default'
   pluginState: Record<string, ConversationPluginState> = {}
   sessionId?: string
-  status: AgentStatus = 'idle'
   readonly createdAt: number
   /** Called whenever persistent state changes, so the manager can save the manifest. */
   onChange?: () => void
@@ -205,10 +208,19 @@ class Session {
   private resumeTimer: ReturnType<typeof setTimeout> | null = null
   // Epoch-ms of the scheduled auto-resume wake-up (null = none); mirrored into uiState().
   private autoResumeAtMs: number | null = null
-  // Turns started (send/fork) minus turns finished (result). This — not the input queue, which the
-  // SDK drains eagerly — is what says whether the agent is still working, so a message queued
-  // behind a running turn keeps the status truthful until ITS result arrives.
-  private turnsInFlight = 0
+  // Turn ledger: holds every accepted user message and releases AT MOST ONE into the SDK at a
+  // time (the next only after the previous settles). Busyness is a fact this process owns —
+  // status derives from it instead of being inferred from counters (docs/STATUS_LOCKSTEP.md).
+  private ledger = new TurnLedger()
+  // Unrecoverable failure (restart budget exhausted / auth error). Cleared by a new send (retry).
+  private wedged = false
+  // Last derived status that was emitted, and its monotonic version. `sync()` is the only writer.
+  private lastStatus: AgentStatus = 'idle'
+  private statusSeq = 0
+  // Epoch-ms of the last SDK message processed — the watchdog's staleness signal + debug fact.
+  private lastSdkEventAtMs = 0
+  // Bounded Stop recovery: force-settles the turn if the aborted result never arrives.
+  private interruptGraceTimer: ReturnType<typeof setTimeout> | null = null
   // When the current run of work began (first transition to 'working'; survives queued turns).
   private turnStartedAtMs: number | null = null
   // The instruction string baked into the live query's systemPrompt. Compared on each send so we
@@ -260,7 +272,7 @@ class Session {
 
   constructor(
     opts: CreateOpts & { permissionMode?: PermissionMode },
-    private emit: (e: AgentEvent) => void,
+    private emitRaw: (e: AgentEvent) => void,
     restore?: RestoreData,
     hooks?: {
       context?: ContextProvider
@@ -509,7 +521,10 @@ class Session {
     void this.pump(token, this.q)
   }
 
-  /** Tear down the live query and start a fresh one (resume/fork/switch all use this). */
+  /** Tear down the live query and start a fresh one (resume/fork/switch all use this).
+   *  Owns the ledger swap: the in-flight turn (if any) died with the old query and is settled
+   *  here, so no rebind path can leave the status stale; QUEUED turns are ours and survive —
+   *  the fresh bind releases the next one. */
   private rebind(opts?: { resumeAt?: string; fork?: boolean }): void {
     try {
       this.q.close()
@@ -518,9 +533,12 @@ class Session {
     }
     this.background.clear() // the torn-down query owned any running subagents/tasks
     this.emitBackground()
-    this.turnsInFlight = 0 // ...and any in-flight turns died with it
+    this.ledger.settle() // the in-flight turn (if any) will never produce a result
+    this.clearInterruptGrace()
     this.input = new InputQueue()
     this.start(opts)
+    this.maybeRelease() // queued turns continue on the fresh query
+    this.sync()
   }
 
   /**
@@ -537,12 +555,12 @@ class Session {
         kind: 'error',
         message: 'Agent stopped after repeated errors. Close and reopen this instance.'
       })
-      this.setStatus('error')
+      this.wedged = true // sticky 'error'; a new send clears it (user retry)
+      this.sync()
       return
     }
     this.restarts++
-    this.rebind()
-    this.setStatus('idle')
+    this.rebind() // settles the dead turn, keeps the queue, syncs status
   }
 
   // ---- Editable history / branches ----
@@ -562,7 +580,8 @@ class Session {
     this.branches = []
     this.currentMessageId = ''
     this.pendingFork = undefined
-    this.setStatus('idle')
+    this.ledger.clear() // the pipeline belonged to the abandoned session
+    this.sync()
     this.onChange?.()
     // Defer the (potentially heavy) query teardown+rebuild off this IPC handler so the main
     // process can forward queued keyboard/mouse input first — a synchronous rebuild here freezes
@@ -593,9 +612,9 @@ class Session {
       forkAnchorUuid: parent
     }
     this.rebind({ resumeAt: parent ?? uuid, fork: true })
-    this.turnsInFlight = 1 // the fresh bind starts with exactly this regeneration in flight
-    this.setStatus('working')
-    this.input.push(newText)
+    this.ledger.enqueue(newText) // the regeneration is an ordinary turn on the fresh bind
+    this.maybeRelease()
+    this.sync()
     return this.listBranches()
   }
 
@@ -887,6 +906,7 @@ class Session {
     }
     return {
       status: this.status,
+      statusSeq: this.statusSeq,
       permissionMode: this.permissionMode,
       pending,
       questions,
@@ -894,28 +914,21 @@ class Session {
       autoResumeAt: this.autoResumeAtMs,
       autoResumeEnabled: this.autoResume,
       tokens: { output: this.turnOutputTokens + this.curMsgOutTokens, input: this.turnInputTokens },
-      turnStartedAt: this.turnStartedAtMs
+      turnStartedAt: this.turnStartedAtMs,
+      facts: {
+        queued: this.ledger.depth,
+        released: this.ledger.released !== null,
+        lastSdkEventAt: this.lastSdkEventAtMs || null
+      }
     }
   }
 
   send(text: string): void {
     this.interrupted = false
-    this.turnsInFlight++
-    // Fresh token count for this query (the live "N tokens" readout).
-    this.turnInputTokens = 0
-    this.turnOutputTokens = 0
-    this.curMsgOutTokens = 0
-    this.emitTokens()
-    // If the standing instruction changed since the live query started, rebind first so the new
-    // systemPrompt takes effect this turn. Resume preserves history; only this turn re-reads the
-    // (now-changed) prefix uncached. No change → no rebind → the prefix stays cached.
-    const want = (this.instructionProvider?.(this.id, this.pluginState) ?? '').trim()
-    if (want !== this.appliedInstruction) this.rebind()
-    this.setStatus('working')
-    // Prepend the pinned context-plugin state so the agent sees its model/memory/plan each turn.
-    // The block is stripped from the displayed transcript by sessionStore (kept out of history).
-    const ctx = this.contextProvider?.(this.id, this.pluginState) ?? ''
-    this.input.push(ctx ? `${ctx}\n\n${text}` : text)
+    this.wedged = false // a user retry clears a sticky error
+    this.ledger.enqueue(text)
+    this.maybeRelease()
+    this.sync()
   }
 
   async interrupt(): Promise<void> {
@@ -925,18 +938,40 @@ class Session {
     } catch (err) {
       this.emit({ instanceId: this.id, kind: 'error', message: errMsg(err) })
     }
+    // The SDK should deliver an aborted result for the in-flight turn. If it never comes,
+    // force-settle and rebind after a bounded grace — Stop must never wedge the status.
+    if (this.ledger.released && !this.interruptGraceTimer) {
+      this.interruptGraceTimer = setTimeout(() => {
+        this.interruptGraceTimer = null
+        if (this.closed || !this.ledger.released) return
+        this.emit({
+          instanceId: this.id,
+          kind: 'error',
+          message: 'Stop did not complete cleanly — reconnecting to the session.'
+        })
+        this.ledger.clear()
+        this.rebind()
+      }, INTERRUPT_GRACE_MS)
+    }
+  }
+
+  private clearInterruptGrace(): void {
+    if (!this.interruptGraceTimer) return
+    clearTimeout(this.interruptGraceTimer)
+    this.interruptGraceTimer = null
   }
 
   async close(): Promise<void> {
     this.closed = true
     this.clearResumeTimer()
+    this.clearInterruptGrace()
     this.input.end()
     try {
       this.q.close()
     } catch {
       /* already closed */
     }
-    this.setStatus('closed')
+    this.sync()
   }
 
   toInstance(): AgentInstance {
@@ -951,13 +986,55 @@ class Session {
     }
   }
 
-  private setStatus(status: AgentStatus): void {
+  /** Status is DERIVED from single-writer facts — never stored, never assigned per-path. */
+  get status(): AgentStatus {
+    return deriveStatus({ closed: this.closed, wedged: this.wedged, busy: this.ledger.busy })
+  }
+
+  /** Deliver an event without letting a broken channel corrupt a state transition: emission
+   *  is best-effort (uiState resync is the renderer's recovery path), transitions are not. */
+  private emit(e: AgentEvent): void {
+    try {
+      this.emitRaw(e)
+    } catch {
+      /* renderer gone — state must not depend on delivery */
+    }
+  }
+
+  /** The single status emission point: re-derive, anchor the elapsed clock, and push the
+   *  change (seq-stamped) if it moved. Called after every fact mutation. */
+  private sync(): void {
+    const status = this.status
     // Anchor the elapsed clock: set on the first transition to 'working', kept across queued
     // turns within the same run, cleared when the run ends.
     if (status === 'working') this.turnStartedAtMs ??= Date.now()
     else this.turnStartedAtMs = null
-    this.status = status
-    this.emit({ instanceId: this.id, kind: 'status', status })
+    if (status !== this.lastStatus) {
+      this.lastStatus = status
+      this.statusSeq++
+      this.emit({ instanceId: this.id, kind: 'status', status, seq: this.statusSeq })
+    }
+  }
+
+  /** Hand the next queued turn to the SDK — only when nothing is in flight. The standing
+   *  instruction is applied here (a rebind between turns can never kill a live one), and the
+   *  per-turn context block is captured at release time so a queued turn gets fresh state. */
+  private maybeRelease(): void {
+    if (this.closed || this.ledger.released !== null || this.ledger.depth === 0) return
+    const want = (this.instructionProvider?.(this.id, this.pluginState) ?? '').trim()
+    if (want !== this.appliedInstruction) this.rebind() // safe: no turn in flight (recurses once, then no-ops)
+    const turn = this.ledger.release()
+    if (!turn) return // a recursive release (via rebind) already took it
+    // Fresh token count for this turn (the live "N tokens" readout).
+    this.turnInputTokens = 0
+    this.turnOutputTokens = 0
+    this.curMsgOutTokens = 0
+    this.emitTokens()
+    this.lastSdkEventAtMs = Date.now()
+    // Prepend the pinned context-plugin state so the agent sees its model/memory/plan each turn.
+    // The block is stripped from the displayed transcript by sessionStore (kept out of history).
+    const ctx = this.contextProvider?.(this.id, this.pluginState) ?? ''
+    this.input.push(ctx ? `${ctx}\n\n${turn.text}` : turn.text)
   }
 
   private async pump(token: number, q: Query): Promise<void> {
@@ -970,8 +1047,7 @@ class Session {
       if (token !== this.activeToken) return // this query was intentionally closed
       // Terminal turn error (e.g. unavailable model) — surface it, then recover.
       this.emit({ instanceId: this.id, kind: 'error', message: errMsg(err) })
-      this.setStatus('error')
-      this.restart()
+      this.restart() // rebind settles the dead turn and re-derives status
       return
     }
     // The stream ENDED without an error. For the live binding that means the CLI process went
@@ -983,7 +1059,6 @@ class Session {
       kind: 'error',
       message: 'Agent process ended unexpectedly — reconnecting to the session.'
     })
-    this.setStatus('error')
     this.restart()
   }
 
@@ -1036,6 +1111,7 @@ class Session {
   }
 
   private handle(msg: SDKMessage): void {
+    this.lastSdkEventAtMs = Date.now() // any SDK message = liveness (watchdog + debug fact)
     // Messages produced by a background subagent are tagged with the spawning Task call's
     // tool_use id. Route them to the task-activity feed (the picker's live view) and keep them
     // OUT of the main transcript stream.
@@ -1162,13 +1238,17 @@ class Session {
         } else {
           this.restarts = 0 // a clean (or cleanly-stopped) turn means we're healthy
         }
-        // Stay 'working' while queued turns remain in flight. Counted via turnsInFlight, not the
-        // input queue — the SDK drains the queue eagerly, so a queued message is usually already
-        // inside the CLI (invisible to hasPending) when the running turn's result lands. A user
-        // Stop clears the whole pipeline: queued messages don't reliably survive an interrupt.
-        if (aborted) this.turnsInFlight = 0
-        else this.turnsInFlight = Math.max(0, this.turnsInFlight - 1)
-        this.setStatus(this.turnsInFlight > 0 ? 'working' : 'idle')
+        // Settle the in-flight turn; an aborted result (user Stop) clears the whole pipeline.
+        // A result with NO turn in flight breaks the ledger's 1:1 send↔result invariant —
+        // log it loudly instead of clamping it away (docs/STATUS_LOCKSTEP.md).
+        if (aborted) {
+          this.ledger.clear()
+        } else if (!this.ledger.settle()) {
+          console.error(`[status-invariant] result arrived with no turn in flight (${this.id})`)
+        }
+        this.clearInterruptGrace()
+        this.maybeRelease() // next queued turn (if any) goes out now
+        this.sync()
         this.onChange?.() // bump updatedAt; persist any new branch from this turn
         break
       }
@@ -1181,8 +1261,8 @@ class Session {
             message: 'Request blocked: usage limit reached for your plan.',
             detail: info
           })
-          this.turnsInFlight = 0 // the rejected request's turn(s) will produce no result
-          this.setStatus('idle')
+          this.ledger.clear() // the rejected turn (and anything queued) will produce no result
+          this.sync()
           // If the user opted in, wake up at the reset time and resume — no polling meanwhile.
           if (this.autoResume && typeof info.resetsAt === 'number') {
             this.scheduleAutoResume(info.resetsAt)
@@ -1198,7 +1278,8 @@ class Session {
             message: `Auth error: ${msg.error}`,
             detail: msg
           })
-          this.setStatus('error')
+          this.wedged = true // sticky until the user retries (send clears it)
+          this.sync()
         }
         break
       }

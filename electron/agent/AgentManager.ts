@@ -1276,6 +1276,7 @@ class Session {
         if (aborted) {
           this.ledger.clear()
         } else if (!this.ledger.settle()) {
+          // eslint-disable-next-line no-console
           console.error(`[status-invariant] result arrived with no turn in flight (${this.id})`)
         }
         this.clearInterruptGrace()

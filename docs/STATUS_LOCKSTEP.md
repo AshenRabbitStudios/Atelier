@@ -87,7 +87,7 @@ reconciliation bounds the lifetime of any missed signal.
    the UI (queued-message chips / cancel become possible later).
 2. **Derived status, single writer.**
    `derive() = closed → 'closed' | wedged → 'error' | (released ∨ queue.length) →
-   'working' | 'idle'`. All `setStatus` call sites are deleted; mutators change facts,
+'working' | 'idle'`. All `setStatus` call sites are deleted; mutators change facts,
    then call `sync()` = derive + emit-if-changed. Emission is stamped with a
    **monotonic `seq`**; `uiState()` carries the same `seq` plus the facts themselves
    (released turn id, queue depth, lastSdkEventAt).

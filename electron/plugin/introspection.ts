@@ -2,6 +2,7 @@ import { tool, createSdkMcpServer, type Options } from '@anthropic-ai/claude-age
 import { z } from 'zod'
 import type { PluginRegistry } from './PluginRegistry.js'
 import type { ConversationPluginState, Manifest } from '../shared/plugins.js'
+import { pluginAuthoringGuide } from './pluginAuthoringGuide.js'
 
 // Host-level environment self-awareness (docs/ENVIRONMENT_AWARENESS.md). Every Atelier agent
 // instance is otherwise blind to the fact that it runs inside Atelier: the per-conversation context
@@ -54,7 +55,8 @@ export function buildEnvironmentBriefing(registry: PluginRegistry, cwd?: string)
     '\n\n' +
     'To find out which of these are enabled for this conversation, what tools and context documents ' +
     'a plugin contributes, and how to use it, call the `list_plugins` and `describe_plugin` tools ' +
-    '(the built-in `atelier` tool server, always available to you).\n' +
+    '(the built-in `atelier` tool server, always available to you). To author a new plugin, call ' +
+    '`plugin_authoring_guide` first for the manifest contract, host API, and rules.\n' +
     '</atelier-environment>'
   )
 }
@@ -116,7 +118,11 @@ export function describePlugin(
       'Context documents (each is a persistent doc; you update it via its set_* tool):\n' +
         m.contextExports
           .map((e) => {
-            const flags = e.inject === false ? ' [push-only: not fed back to you]' : ''
+            const flags = e.readonly
+              ? ' [read-only: user-authored, injected but you have no tool to change it]'
+              : e.inject === false
+                ? ' [push-only: not fed back to you]'
+                : ''
             const desc = e.description ? ` — ${e.description}` : ''
             return `  - "${e.label}" (key: ${e.key}, ${e.format})${flags}${desc}`
           })
@@ -162,11 +168,21 @@ export function buildAtelierToolServer(
       content: [{ type: 'text' as const, text: describePlugin(registry, pluginState, args.id) }]
     })
   )
+  const authoringGuide = tool(
+    'plugin_authoring_guide',
+    'Get the full spec for authoring an Atelier plugin: the manifest.json contract, the sandbox ' +
+      'host API (window.atelier), the hard rules, and a minimal working example. Read this BEFORE ' +
+      'creating or editing a plugin so you follow the signature and invariants exactly.',
+    {},
+    async () => ({
+      content: [{ type: 'text' as const, text: pluginAuthoringGuide() }]
+    })
+  )
   return {
     atelier: createSdkMcpServer({
       name: 'atelier',
       version: '1.0.0',
-      tools: [listPlugins, describeTool]
+      tools: [listPlugins, describeTool, authoringGuide]
     })
   }
 }

@@ -18,6 +18,7 @@ export interface ViewState {
   visibleCount: number
   viewTask: string | null
   showBackground: boolean
+  showTasks: boolean
   editing: { id: string; draft: string } | null
 }
 
@@ -29,6 +30,7 @@ const initialView: ViewState = {
   visibleCount: VISIBLE_DEFAULT,
   viewTask: null,
   showBackground: false,
+  showTasks: false,
   editing: null
 }
 

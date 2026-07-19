@@ -27,6 +27,7 @@ type Exports = {
   format: string
   maxTokens: number
   inject?: boolean
+  readonly?: boolean
 }[]
 function fakeRegistry(byId: Record<string, Exports>): PluginRegistry {
   return {
@@ -92,6 +93,27 @@ describe('buildContextBlock', () => {
     const block = buildContextBlock(REG, 'c1', { mm: pinned(['model']) })
     expect(block).toContain('Author note with no doc yet.')
   })
+
+  const NS_REG = fakeRegistry({
+    ns: [{ key: 'star', label: 'North Star', format: 'markdown', maxTokens: 500, readonly: true }]
+  })
+
+  it('injects a read-only export with user-authored framing and its guide', () => {
+    pluginStorageSet('c1', 'ns', contextStorageKey('star'), 'Ship the thing')
+    pluginStorageSet('c1', 'ns', guideStorageKey('star'), 'Prefer this over local tasks.')
+    const block = buildContextBlock(NS_REG, 'c1', { ns: pinned(['star']) })
+    expect(block).toContain('## North Star')
+    expect(block).toContain('read-only to you')
+    expect(block).toContain('Ship the thing')
+    expect(block).toContain('Prefer this over local tasks.')
+    // Never framed as a maintain-it-yourself section.
+    expect(block).not.toContain('do not edit')
+  })
+
+  it('skips a read-only export with no value, even when a guide default exists', () => {
+    pluginStorageSet('c1', 'ns', guideStorageKey('star'), 'Orient toward the star.')
+    expect(buildContextBlock(NS_REG, 'c1', { ns: pinned(['star']) })).toBe('')
+  })
 })
 
 describe('buildContextMcpServers', () => {
@@ -103,6 +125,14 @@ describe('buildContextMcpServers', () => {
     const servers = buildContextMcpServers(REG, 'c1', { mm: pinned(['model']) }, () => {})
     expect(servers?.atelier_context).toBeDefined()
     expect(servers?.atelier_context.type).toBe('sdk')
+  })
+
+  it('registers NO write-tool for a read-only export', () => {
+    const reg = fakeRegistry({
+      ns: [{ key: 'star', label: 'North Star', format: 'markdown', maxTokens: 500, readonly: true }]
+    })
+    // A read-only export is the only thing pinned → no tools → server is undefined.
+    expect(buildContextMcpServers(reg, 'c1', { ns: pinned(['star']) }, () => {})).toBeUndefined()
   })
 
   it('the set_ tool persists the value and fires onChange (the push trigger)', async () => {

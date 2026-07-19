@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { URL_CHANNEL_PREFIX } from '@shared/plugins'
+import { BROWSER_READ_SCRIPT } from '@shared/browserRead'
 import type { DockPosition } from '@shared/plugins'
 
 // Host side of one mounted plugin: a sandboxed iframe loaded over atelier-plugin://, plus the
@@ -20,6 +21,21 @@ interface RpcMessage {
   ns?: string
   method?: string
   args?: unknown[]
+}
+
+// The subset of Electron's <webview> element the browser surface uses. Typed locally so the
+// renderer keeps zero imports from 'electron' (architecture invariant: renderer talks IPC only).
+interface WebviewEl extends HTMLElement {
+  src: string
+  loadURL(url: string): Promise<void>
+  goBack(): void
+  goForward(): void
+  canGoBack(): boolean
+  canGoForward(): boolean
+  reload(): void
+  stop(): void
+  getURL(): string
+  executeJavaScript(code: string): Promise<unknown>
 }
 
 // Theme tokens pushed into the plugin frame so its body can read as native (DESIGN_SYSTEM.md §4).
@@ -54,6 +70,7 @@ export function PluginPane({
   onSetTitle
 }: Props): React.JSX.Element {
   const frameRef = useRef<HTMLIFrameElement>(null)
+  const wrapRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const frame = frameRef.current
@@ -101,6 +118,87 @@ export function PluginPane({
     // Channels this pane subscribed to (channel -> the conversation it was scoped to), so we can
     // release them in cleanup even after the active conversation has changed.
     const subscribedChannels = new Map<string, string>()
+
+    // ---- Host-owned browser surface (permission "browser:embed") ----
+    // A real Chromium <webview>, DOM-composited over this pane (so docking/hiding/resize come for
+    // free) and driven ONLY via RPC. The guest page runs in its own process with zero privileges
+    // (main hardens every attach) and has no path to the atelier bridge. Created lazily on the
+    // first open(); requires webviewTag, which is enabled at window creation.
+    let webview: WebviewEl | null = null
+    let webviewReady = false
+    let pendingBounds: { x: number; y: number; w: number; h: number } | null = null
+
+    const applyBounds = (el: WebviewEl): void => {
+      if (!pendingBounds) return
+      el.style.left = `${pendingBounds.x}px`
+      el.style.top = `${pendingBounds.y}px`
+      el.style.width = `${pendingBounds.w}px`
+      el.style.height = `${pendingBounds.h}px`
+    }
+
+    const pushBrowserEvent = (payload: Record<string, unknown>): void => {
+      const nav =
+        webview && webviewReady
+          ? { canGoBack: webview.canGoBack(), canGoForward: webview.canGoForward() }
+          : { canGoBack: false, canGoForward: false }
+      frame.contentWindow?.postMessage(
+        { __atelierEvent: true, event: 'browser', payload: { ...payload, ...nav } },
+        '*'
+      )
+    }
+
+    const ensureWebview = (url: string): WebviewEl => {
+      if (webview) return webview
+      const wrap = wrapRef.current
+      if (!wrap) throw new Error('pane container not mounted')
+      const el = document.createElement('webview') as WebviewEl
+      if (typeof el.loadURL !== 'function') {
+        el.remove()
+        throw new Error('browser surface unavailable — restart Atelier to enable webview support')
+      }
+      el.className = 'plugin-webview'
+      // Cookies/session persist per plugin, never shared with the app session.
+      el.setAttribute('partition', `persist:atelier-browser:${pluginId}`)
+      // Without allowpopups, window.open is blocked BEFORE main's setWindowOpenHandler — _blank
+      // links would silently do nothing. With it, the handler denies the OS window and navigates
+      // in place instead (verified by scripts/verify-webview.mjs).
+      el.setAttribute('allowpopups', '')
+      el.setAttribute('src', url)
+      el.addEventListener('dom-ready', () => {
+        webviewReady = true
+      })
+      el.addEventListener('did-start-loading', () => pushBrowserEvent({ type: 'loading' }))
+      el.addEventListener('did-stop-loading', () =>
+        pushBrowserEvent({ type: 'loaded', url: webviewReady ? el.getURL() : url })
+      )
+      el.addEventListener('did-fail-load', (e) => {
+        const f = e as unknown as {
+          isMainFrame?: boolean
+          errorDescription?: string
+          validatedURL?: string
+        }
+        if (f.isMainFrame === false) return
+        pushBrowserEvent({
+          type: 'failed',
+          url: f.validatedURL,
+          error: f.errorDescription || 'load failed'
+        })
+      })
+      const onNav = (e: Event): void => {
+        const n = e as unknown as { url?: string }
+        pushBrowserEvent({ type: 'nav', url: n.url })
+      }
+      el.addEventListener('did-navigate', onNav)
+      el.addEventListener('did-navigate-in-page', onNav)
+      el.addEventListener('page-title-updated', (e) => {
+        const t = e as unknown as { title?: string }
+        pushBrowserEvent({ type: 'title', title: t.title })
+      })
+      applyBounds(el)
+      wrap.appendChild(el)
+      webview = el
+      return el
+    }
 
     const onMessage = async (e: MessageEvent): Promise<void> => {
       if (e.source !== frame.contentWindow) return // only this plugin's own frame
@@ -210,6 +308,76 @@ export function PluginPane({
           }
           return reply(d.id, false, undefined, `unknown data method "${d.method}"`)
         }
+        if (d.ns === 'browser') {
+          if (!permissions.includes('browser:embed')) {
+            return reply(d.id, false, undefined, 'permission "browser:embed" not granted')
+          }
+          if (d.method === 'open') {
+            const url = String(args[0] ?? '')
+            if (!/^https?:\/\//i.test(url)) {
+              return reply(d.id, false, undefined, 'browser.open takes an http(s) URL')
+            }
+            const el = ensureWebview(url) // throws (→ error reply) when webview is unavailable
+            el.style.display = 'flex'
+            if (webviewReady)
+              el.loadURL(url).catch(() => {}) // rejection surfaces as did-fail-load
+            else el.setAttribute('src', url)
+            return reply(d.id, true)
+          }
+          if (d.method === 'close') {
+            if (webview) {
+              if (webviewReady) webview.stop()
+              webview.style.display = 'none'
+            }
+            return reply(d.id, true)
+          }
+          if (d.method === 'setBounds') {
+            const r = args[0] as { x?: number; y?: number; w?: number; h?: number } | undefined
+            pendingBounds = {
+              x: Math.max(0, Number(r?.x) || 0),
+              y: Math.max(0, Number(r?.y) || 0),
+              w: Math.max(0, Number(r?.w) || 0),
+              h: Math.max(0, Number(r?.h) || 0)
+            }
+            if (webview) applyBounds(webview)
+            return reply(d.id, true)
+          }
+          if (
+            d.method === 'back' ||
+            d.method === 'forward' ||
+            d.method === 'reload' ||
+            d.method === 'stop'
+          ) {
+            if (!webview || !webviewReady) {
+              return reply(d.id, false, undefined, 'no browser surface open')
+            }
+            if (d.method === 'back') webview.goBack()
+            else if (d.method === 'forward') webview.goForward()
+            else if (d.method === 'reload') webview.reload()
+            else webview.stop()
+            return reply(d.id, true)
+          }
+          if (d.method === 'read') {
+            if (!webview || !webviewReady) {
+              return reply(d.id, false, undefined, 'no browser surface open')
+            }
+            const opts = (args[0] ?? {}) as { includeHtml?: boolean }
+            const page = (await webview.executeJavaScript(BROWSER_READ_SCRIPT)) as Record<
+              string,
+              unknown
+            >
+            if (opts.includeHtml === true) {
+              const html = (await webview.executeJavaScript(
+                'document.documentElement.outerHTML.slice(0, 8000)'
+              )) as string
+              page.html = html
+            }
+            page.canGoBack = webview.canGoBack()
+            page.canGoForward = webview.canGoForward()
+            return reply(d.id, true, page)
+          }
+          return reply(d.id, false, undefined, `unknown browser method "${d.method}"`)
+        }
         reply(d.id, false, undefined, `unknown namespace "${d.ns}"`)
       } catch (err) {
         reply(d.id, false, undefined, err instanceof Error ? err.message : String(err))
@@ -226,16 +394,21 @@ export function PluginPane({
       for (const [channel, conv] of subscribedChannels) {
         void window.atelier.plugins.dataUnsubscribe(conv, pluginId, channel)
       }
+      // Tear down the browser surface with its pane; the guest process dies with the element.
+      webview?.remove()
+      webview = null
     }
   }, [pluginId, permissions, getConversationId, onDock, onSetTitle])
 
   return (
-    <iframe
-      ref={frameRef}
-      className="plugin-frame"
-      src={`atelier-plugin://${pluginId}/`}
-      sandbox="allow-scripts"
-      title={pluginId}
-    />
+    <div ref={wrapRef} className="plugin-pane-wrap">
+      <iframe
+        ref={frameRef}
+        className="plugin-frame"
+        src={`atelier-plugin://${pluginId}/`}
+        sandbox="allow-scripts"
+        title={pluginId}
+      />
+    </div>
   )
 }

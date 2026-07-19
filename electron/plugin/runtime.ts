@@ -10,7 +10,7 @@ export const RUNTIME_JS = String.raw`
   var pluginId = location.hostname
   var pending = new Map()
   var seq = 0
-  var listeners = { load: [], unload: [], reload: [], context: [] }
+  var listeners = { load: [], unload: [], reload: [], context: [], browser: [] }
   var dataListeners = {} // channel -> [cb] for atelier.data.subscribe
 
   function call(ns, method, args) {
@@ -92,6 +92,22 @@ export const RUNTIME_JS = String.raw`
       // Read a cwd-scoped image (referenced by rendered content) as a { dataUrl } | { error }.
       // The binary sibling of a file: subscribe; needs the same "data:subscribe" permission.
       readAsset: function (path) { return call('data', 'readAsset', [path]) }
+    },
+    browser: {
+      // A live, host-owned Chromium surface composited over this pane (permission "browser:embed").
+      // The plugin only drives it and reads extracted state; the page can never reach this bridge.
+      // Nav events arrive via on('browser', cb) with payloads like
+      // { type:'nav'|'loading'|'loaded'|'failed'|'title', url, title, canGoBack, canGoForward, error }.
+      open: function (url) { return call('browser', 'open', [url]) },
+      close: function () { return call('browser', 'close', []) },
+      back: function () { return call('browser', 'back', []) },
+      forward: function () { return call('browser', 'forward', []) },
+      reload: function () { return call('browser', 'reload', []) },
+      stop: function () { return call('browser', 'stop', []) },
+      // Where the surface sits, in this pane's viewport coordinates ({ x, y, w, h }).
+      setBounds: function (rect) { return call('browser', 'setBounds', [rect]) },
+      // Extract the live page's { url, title, text, links, html? } for the context exports.
+      read: function (opts) { return call('browser', 'read', [opts || {}]) }
     },
     on: function (event, cb) {
       if (listeners[event]) listeners[event].push(cb)

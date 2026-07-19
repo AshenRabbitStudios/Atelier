@@ -1,7 +1,7 @@
 import { join, dirname, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { existsSync } from 'node:fs'
-import { app, BrowserWindow, ipcMain, dialog, shell, utilityProcess } from 'electron'
+import { app, BrowserWindow, Menu, ipcMain, dialog, shell, utilityProcess } from 'electron'
 import { z } from 'zod'
 import { AgentManager } from './agent/AgentManager.js'
 import {
@@ -204,9 +204,16 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/preload.mjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: false,
+      spellcheck: true,
+      // Enables the <webview> tag the renderer uses for the host-owned browser surface
+      // (permission "browser:embed"). Every attach is hardened in installWebviewGuard.
+      webviewTag: true
     }
   })
+
+  installSpellcheckMenu(mainWindow)
+  installWebviewGuard(mainWindow)
 
   const devUrl = process.env.ELECTRON_RENDERER_URL
   if (devUrl) {
@@ -219,6 +226,66 @@ function createWindow(): void {
 
   mainWindow.on('closed', () => {
     mainWindow = null
+  })
+}
+
+// Hardening for the host-owned browser surface (<webview>, permission "browser:embed"). The guest
+// page runs arbitrary remote JS, so every attach is forced down to zero privilege regardless of
+// what the renderer asked for: no preload, no node, OS sandbox on, isolated world, http(s)-only.
+// Popups never open OS windows — a window.open/_blank becomes an in-place navigation instead.
+function installWebviewGuard(win: BrowserWindow): void {
+  win.webContents.on('will-attach-webview', (event, webPreferences, params) => {
+    delete webPreferences.preload
+    webPreferences.nodeIntegration = false
+    webPreferences.contextIsolation = true
+    webPreferences.sandbox = true
+    const src = params.src ?? ''
+    if (src && !/^(https?:|about:blank)/i.test(src)) event.preventDefault()
+  })
+  win.webContents.on('did-attach-webview', (_e, guest) => {
+    guest.setWindowOpenHandler(({ url }) => {
+      // Deferred: navigating the guest from inside its own open-handler (before the deny is
+      // returned) can wedge the pending window creation.
+      if (/^https?:/i.test(url)) setImmediate(() => void guest.loadURL(url))
+      return { action: 'deny' }
+    })
+  })
+}
+
+// Right-click menu for editable fields: spellcheck suggestions + standard clipboard actions.
+// Electron ships no default context menu, so without this the built-in spellchecker underlines
+// misspellings but offers no way to correct them. Only shown over editable content.
+function installSpellcheckMenu(win: BrowserWindow): void {
+  win.webContents.on('context-menu', (_e, params) => {
+    if (!params.isEditable) return
+    const wc = win.webContents
+    const items: Electron.MenuItemConstructorOptions[] = []
+
+    if (params.misspelledWord) {
+      for (const suggestion of params.dictionarySuggestions) {
+        items.push({ label: suggestion, click: () => wc.replaceMisspelling(suggestion) })
+      }
+      if (params.dictionarySuggestions.length === 0) {
+        items.push({ label: 'No suggestions', enabled: false })
+      }
+      items.push(
+        { type: 'separator' },
+        {
+          label: 'Add to dictionary',
+          click: () => wc.session.addWordToSpellCheckerDictionary(params.misspelledWord)
+        },
+        { type: 'separator' }
+      )
+    }
+
+    items.push(
+      { role: 'cut', enabled: params.editFlags.canCut },
+      { role: 'copy', enabled: params.editFlags.canCopy },
+      { role: 'paste', enabled: params.editFlags.canPaste },
+      { role: 'selectAll' }
+    )
+
+    Menu.buildFromTemplate(items).popup({ window: win })
   })
 }
 

@@ -93,6 +93,30 @@ interface AtelierHost {
     readAsset(path: string): Promise<{ dataUrl: string } | { error: string }>
   }
 
+  // browser — a live, HOST-OWNED Chromium surface composited over this pane (needs
+  // "browser:embed"). The page runs real JS in its own zero-privilege guest process (no preload,
+  // no node, sandboxed, popups denied, http(s)-only) and has NO path to this bridge; the plugin
+  // only sends commands and receives extracted state. Nav events arrive via on('browser', cb):
+  // { type: 'nav'|'loading'|'loaded'|'failed'|'title', url?, title?, error?, canGoBack, canGoForward }.
+  browser: {
+    open(url: string): Promise<void> // http(s) only; creates the surface on first call
+    close(): Promise<void> // hide the surface (its session survives for a later open)
+    back(): Promise<void>
+    forward(): Promise<void>
+    reload(): Promise<void>
+    stop(): Promise<void>
+    setBounds(rect: { x: number; y: number; w: number; h: number }): Promise<void> // pane coords
+    read(opts?: { includeHtml?: boolean }): Promise<{
+      url: string
+      title: string
+      text: string // visible text, capped
+      links: string[] // interactive elements, capped
+      html?: string // capped outerHTML when includeHtml
+      canGoBack: boolean
+      canGoForward: boolean
+    }>
+  }
+
   // agent — observe and drive agent instances (needs "agent:read" / "agent:send")
   agent: {
     list(): Promise<{ id: string; title: string; cwd: string; status: string }[]>
@@ -134,6 +158,10 @@ Declared in the manifest, enforced by the host. Minimum useful set:
 - `net:fetch` — subscribe to `url:` channels (host-side HTTP fetch). Split from
   `data:subscribe` because network reach is a different capability class than reading the
   conversation's own files.
+- `browser:embed` — a live host-owned Chromium surface over the pane (`atelier.browser.*`).
+  Split from `net:fetch` because executing a remote page's JS is a different capability class
+  than fetching its text. The surface is host-composited and hardened; the plugin sandbox never
+  holds the webview itself.
 - `agent:read`, `agent:send` — observe / drive agent instances.
 - `storage` — per-plugin persisted KV.
 - `tools` — register agent tools (requires a `backend` module).

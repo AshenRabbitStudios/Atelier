@@ -74,6 +74,31 @@
         margin-left: auto;
       }
 
+      /* Clear-agent-state control — sits at the far right of the tab bar, not a tab itself. */
+      .tab-clear {
+        appearance: none;
+        align-self: center;
+        margin-left: 8px;
+        padding: 4px 9px;
+        border: 1px solid var(--border, #252b37);
+        border-radius: 4px;
+        background: transparent;
+        color: var(--faint, #5e6677);
+        font-family: var(--font, system-ui, sans-serif);
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        cursor: pointer;
+        transition:
+          color 0.12s,
+          border-color 0.12s;
+      }
+      .tab-clear:hover {
+        color: #e0533a;
+        border-color: #e0533a;
+      }
+
       /* ── Panels ──────────────────────────────────────────────────────── */
 
       .panel {
@@ -392,11 +417,41 @@
   </head>
   <body>
     <div class="tabbar" id="tabbar">
+      <button class="tab" type="button" data-tab="north-star">North Star</button>
       <button class="tab" type="button" data-tab="model">Mental model</button>
       <button class="tab" type="button" data-tab="slots">Working memory</button>
       <button class="tab" type="button" data-tab="plan">Plan</button>
       <button class="tab sep" type="button" data-tab="problems">Problems</button>
+      <button
+        class="tab-clear"
+        id="clear-agent"
+        type="button"
+        title="Delete everything the agent wrote (mental model, working memory, plan, problems). Your North Star and the usage guides are kept."
+      >
+        Clear
+      </button>
     </div>
+
+    <!-- North Star (user-authored; read-only to the agent — no set_ tool is registered for it) -->
+    <section class="panel" data-key="north-star">
+      <div class="head">
+        North Star — the one objective all effort points toward
+        <span class="sync-indicator"></span>
+      </div>
+      <textarea
+        class="doc-editor"
+        spellcheck="false"
+        placeholder="Set the single overriding goal for this conversation. The agent reads it every turn and orients its work toward it, but cannot edit it. Leave empty for no north star."
+      ></textarea>
+      <details class="guide">
+        <summary>Usage instructions (read-only to the agent)</summary>
+        <textarea
+          class="guide-editor"
+          spellcheck="false"
+          placeholder="Fixed notes on how the agent should treat the north star. The agent sees these every turn but never edits them."
+        ></textarea>
+      </details>
+    </section>
 
     <!-- Mental model -->
     <section class="panel" data-key="model">
@@ -473,6 +528,11 @@
       // guide:<key> stays author-only. See docs/CONTEXT_SYSTEM.md.
 
       const DEBOUNCE_MS = 400
+
+      // Reset handlers for the AGENT-authored docs only (mental model, working memory, plan,
+      // problems). Each wire fn registers one; the "Clear" button runs them all. The North Star and
+      // the per-section usage guides are the USER's — they are deliberately never registered here.
+      const clearers = []
 
       function panel(key) {
         return document.querySelector('.panel[data-key="' + key + '"]')
@@ -601,6 +661,20 @@
             // silent — host may not be ready yet
           }
         })
+
+        // A pane's own context.set does NOT echo back as a 'context' event, so a reset must clear the
+        // DOM directly (not just write ''). North Star opts out via clearable:false.
+        if (opts.clearable !== false) {
+          clearers.push(async () => {
+            clearTimeout(dt)
+            apply('')
+            try {
+              await window.atelier.context.set(key, '')
+            } catch (_) {
+              /* ignore */
+            }
+          })
+        }
       }
 
       // ── Working memory (10 fixed salience slots) ──────────────────────
@@ -691,6 +765,18 @@
             }
           } catch (_) {
             // ignore
+          }
+        })
+
+        clearers.push(async () => {
+          clearTimeout(writeTimer)
+          const empty = Array(NUM_SLOTS).fill('')
+          applySlots(empty)
+          lastKnownRaw = serialize(empty)
+          try {
+            await window.atelier.context.set(key, '')
+          } catch (_) {
+            /* ignore */
           }
         })
       }
@@ -861,6 +947,18 @@
             // ignore
           }
         })
+
+        clearers.push(async () => {
+          clearTimeout(writeTimer)
+          problems = []
+          lastKnownRaw = ''
+          render()
+          try {
+            await window.atelier.context.set(key, '')
+          } catch (_) {
+            /* ignore */
+          }
+        })
       }
 
       // ── Tabs ──────────────────────────────────────────────────────────
@@ -875,14 +973,37 @@
         activate('model')
       }
 
+      // ── Clear all agent-authored state ─────────────────────────────────
+      function setupClear() {
+        const btn = document.getElementById('clear-agent')
+        if (!btn) return
+        btn.addEventListener('click', async () => {
+          const ok = window.confirm(
+            'Delete everything the agent wrote — mental model, working memory, plan, and problems?\n\n' +
+              'Your North Star and the usage guides are kept. This cannot be undone.'
+          )
+          if (!ok) return
+          for (const clear of clearers) {
+            try {
+              await clear()
+            } catch (_) {
+              /* keep clearing the rest */
+            }
+          }
+        })
+      }
+
       // ── Boot ───────────────────────────────────────────────────────────
       window.atelier.on('load', async () => {
         setupTabs()
+        setupClear()
         await Promise.all([
+          wireTextareaDoc(panel('north-star'), 'north-star', { clearable: false }),
           wireTextareaDoc(panel('model'), 'model', {}),
           wireWorkingMemory(panel('slots'), 'slots'),
           wireTextareaDoc(panel('plan'), 'plan', { checklist: true }),
           wireProblems(panel('problems'), 'problems'),
+          wireGuide(panel('north-star'), 'guide:north-star'),
           wireGuide(panel('model'), 'guide:model'),
           wireGuide(panel('slots'), 'guide:slots'),
           wireGuide(panel('plan'), 'guide:plan'),

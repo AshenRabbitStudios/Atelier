@@ -143,6 +143,10 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
   }
 
   const busy = state.status === 'working'
+  // Split the tracked work: subagents are genuinely-running background processes; tasks
+  // (TaskCreate) are agent to-do items and get a separate, spinner-less bar.
+  const subagents = state.background.filter((t) => t.kind === 'subagent')
+  const tasks = state.background.filter((t) => t.kind === 'task')
 
   // Run a 1s clock while working so the elapsed readout updates. The start time is store
   // state (anchored by main), so the clock survives tab switches instead of restarting.
@@ -413,39 +417,59 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
         </div>
       )}
 
-      {state.background.length > 0 && (
+      {/* Background subagents (Task tool calls) — genuinely running work, with a spinner. Agent
+          tasks (TaskCreate) are NOT background work; they get their own bar below. */}
+      {subagents.length > 0 && (
         <div className="background">
           <button
             className="background-bar"
             onClick={() => store.setView({ showBackground: !view.showBackground })}
-            title="Background subagents and tasks running for this conversation"
+            title="Background subagents running for this conversation"
           >
             <span className="spinner" />
-            <span className="background-count">
-              {state.background.length} running in the background
-            </span>
+            <span className="background-count">{subagents.length} running in the background</span>
             <span className="background-caret">{view.showBackground ? '▾' : '▸'}</span>
           </button>
           {view.showBackground && (
             <ul className="background-list">
-              {state.background.map((t) => (
+              {subagents.map((t) => (
                 <li key={`${t.kind}:${t.id}`}>
                   <button
                     className="background-item"
-                    disabled={t.kind !== 'subagent'}
-                    title={
-                      t.kind === 'subagent'
-                        ? 'View this subagent’s live activity'
-                        : 'No live view for this task kind'
-                    }
+                    title="View this subagent’s live activity"
                     onClick={() => store.setView({ viewTask: t.id, showBackground: false })}
                   >
-                    <span className={`background-kind background-kind-${t.kind}`}>
-                      {t.kind === 'subagent' ? 'agent' : 'task'}
-                    </span>
+                    <span className="background-kind background-kind-subagent">agent</span>
                     <span className="background-label">{t.label}</span>
                     {t.detail && <span className="background-detail">{t.detail}</span>}
                   </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {/* Agent task list (TaskCreate) — planned/in-flight work items, not background processes. No
+          spinner; collapsible bar docked just above the composer, below the background set. */}
+      {tasks.length > 0 && (
+        <div className="tasks">
+          <button
+            className="tasks-bar"
+            onClick={() => store.setView({ showTasks: !view.showTasks })}
+            title="Task list for this conversation"
+          >
+            <span className="tasks-count">
+              {tasks.length} task{tasks.length === 1 ? '' : 's'}
+            </span>
+            <span className="tasks-caret">{view.showTasks ? '▾' : '▸'}</span>
+          </button>
+          {view.showTasks && (
+            <ul className="tasks-list">
+              {tasks.map((t) => (
+                <li key={`${t.kind}:${t.id}`} className="tasks-item">
+                  <span className="tasks-label">{t.label}</span>
+                  {t.detail && <span className="tasks-detail">{t.detail}</span>}
                 </li>
               ))}
             </ul>

@@ -84,6 +84,7 @@ interface PinnedExport {
   format: string
   maxTokens: number
   inject: boolean
+  readonly: boolean
   description?: string
 }
 
@@ -105,6 +106,7 @@ function pinnedExports(
         format: ex.format,
         maxTokens: ex.maxTokens,
         inject: ex.inject !== false,
+        readonly: ex.readonly === true,
         description: ex.description
       })
     }
@@ -135,6 +137,18 @@ export function buildContextBlock(
       pluginValueOrDefault(registry, conversationId, ex.pluginId, guideStorageKey(ex.key)),
       cap
     )
+    // A read-only export (e.g. the north star) is a user directive: inject it ONLY when the user
+    // has actually set a value (an empty one is not a directive), and frame it as fixed and yours-
+    // to-follow rather than yours-to-maintain. Its guide, if any, becomes the directive's intent.
+    if (ex.readonly) {
+      if (!value) continue
+      const intent = guide ? `${guide}\n\n` : ''
+      sections.push(
+        `## ${ex.label}\n_Set by the user; read-only to you — you cannot edit it. ` +
+          `Orient your work toward it._\n${intent}${value}`.trimEnd()
+      )
+      continue
+    }
     if (!value && !guide) continue
     const head = guide
       ? `_How to use this section — fixed instructions from the author. Follow them; do not edit ` +
@@ -206,6 +220,9 @@ export function buildContextMcpServers(
   onChange: (pluginId: string, key: string) => void
 ): Options['mcpServers'] | undefined {
   const tools = pinnedExports(registry, pluginState).flatMap((ex) => {
+    // Read-only exports are user-authored: inject the value but register no write-tool, so the
+    // agent is steered by it yet cannot change it.
+    if (ex.readonly) return []
     const base = `${sanitize(ex.pluginId)}__${sanitize(ex.key)}`
     const injectionNote = ex.inject
       ? `It is shown back to you as context every turn — `

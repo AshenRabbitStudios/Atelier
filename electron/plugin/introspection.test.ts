@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { buildEnvironmentBriefing, listPluginsText, describePlugin } from './introspection.js'
+import { pluginAuthoringGuide } from './pluginAuthoringGuide.js'
+import { PLUGIN_PERMISSIONS, DOCK_POSITIONS } from '../shared/plugins.js'
 import type { PluginRegistry } from './PluginRegistry.js'
 import type { ConversationPluginState, DiscoveredPlugin, Manifest } from '../shared/plugins.js'
 
@@ -123,5 +125,25 @@ describe('describePlugin', () => {
   it('handles unknown and invalid ids without throwing', () => {
     expect(describePlugin(REG, {}, 'nope')).toContain('No plugin with id "nope"')
     expect(describePlugin(REG, {}, 'broken')).toContain('manifest is invalid: bad manifest')
+  })
+})
+
+describe('pluginAuthoringGuide', () => {
+  const guide = pluginAuthoringGuide()
+
+  it('covers the manifest contract, host API, rules, and an example', () => {
+    expect(guide).toContain('manifest.json')
+    expect(guide).toContain('contextExports')
+    expect(guide).toContain('window.atelier')
+    expect(guide).toContain('Hard rules')
+    expect(guide).toContain('Minimal example')
+    expect(guide).toContain('atelier-plugin://__runtime__/atelier.js')
+    // The read-only export flag (the north-star mechanism) is documented.
+    expect(guide).toContain('readonly')
+  })
+
+  it('stays in sync with the real permission and dock enums', () => {
+    for (const p of PLUGIN_PERMISSIONS) expect(guide).toContain(`"${p}"`)
+    for (const d of DOCK_POSITIONS) expect(guide).toContain(`"${d}"`)
   })
 })

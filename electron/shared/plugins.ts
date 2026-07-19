@@ -14,7 +14,11 @@ export const PLUGIN_PERMISSIONS = [
   'storage',
   'tools',
   'context',
-  'net:fetch'
+  'net:fetch',
+  // A live, host-owned Chromium surface (Electron <webview>) composited over the pane and driven
+  // via `atelier.browser.*`. The page runs real JS in its own guest process; the plugin only sends
+  // commands and receives extracted state — page content can never reach the atelier bridge.
+  'browser:embed'
 ] as const
 export type PluginPermission = (typeof PLUGIN_PERMISSIONS)[number]
 
@@ -45,6 +49,12 @@ export const ContextExportSchema = z.object({
   // (e.g. a large scene the agent sends to a pane but doesn't want re-fed to itself). Default true
   // preserves the original sync behavior. Injection is thus per-export, not all-or-nothing.
   inject: z.boolean().default(true),
+  // When true, the export is READ-ONLY to the agent: its value is injected into context each turn
+  // (so the agent is steered by it) but NO `set_`/`edit_` write-tool is registered — only the pane
+  // (i.e. the user) can change it. The mirror image of a push-only export. Used for a user-authored
+  // directive like the cognition "north star". Injected only when non-empty. Default false keeps the
+  // normal read-write behavior.
+  readonly: z.boolean().default(false),
   // Optional extra guidance appended to the agent's `set_<plugin>__<key>` write-tool description —
   // e.g. the exact JSON shape a command export expects. Lets a push-only channel be self-documenting
   // so the agent doesn't have to infer the payload format.

@@ -1,5 +1,35 @@
 # PROGRESS.md — Atelier build log
 
+## Live browser surface — `browser:embed` + `atelier.browser.*` (2026-07-19, uncommitted)
+
+- **New shared plugin verb: a host-owned real-Chromium surface.** Permission `browser:embed`
+  (electron/shared/plugins.ts; authoring guide auto-syncs from the enum) + `atelier.browser.*`
+  runtime namespace (`open/close/back/forward/reload/stop/setBounds/read` + `on('browser')` nav
+  events). `PluginPane` composites an Electron `<webview>` as a DOM sibling of the plugin iframe
+  (wrapper div, bounds in pane coords from the plugin) and mediates every call; readback is
+  host-side `executeJavaScript` extracting url/title/visible-text/interactive-elements (+capped
+  HTML on request). Main hardens every attach (zero-privilege guest, http(s)-only, popups→in-place)
+  — see DECISIONS 2026-07-19.
+- **Browser plugin upgraded (0.3.0):** URL sources go live in the surface (real JS + real nav;
+  webview-first back/forward layered over the source-history stack; page/snapshot exports from
+  `browser.read()`); file/agent-pushed content unchanged in-doc. If the surface is unavailable or
+  denied it falls back to the legacy static `url:` fetch render.
+- **RESTART REQUIRED:** `webviewTag:true` is read at window creation — a running instance keeps the
+  fallback until Atelier is restarted.
+- **MACHINE-VERIFIED (2026-07-19, `npx electron scripts/verify-webview.mjs` — 12/12 + https
+  bonus):** webview attaches under `webviewTag:true`; guard-hardened guest has no node globals;
+  the production readback script (shared `electron/shared/browserRead.ts`) extracts
+  title/text/links (incl. hrefs + input placeholders) from a live page; `window.open` opens NO OS
+  window and navigates in place; guest history back/forward works; non-http `src` attach is
+  prevented; a real https site (example.com) loads and reads back. Findings folded into the code:
+  webview needs `allowpopups` (else `window.open` dies before the handler) and the open-handler
+  must `setImmediate` the in-place `loadURL`.
+- **NEEDS HUMAN SPOT-CHECK (integrated pane behavior only):** after restart —
+  (a) `set_browser__source` → google.com renders live in the pane; (b) in-surface clicks track in
+  the address bar, nav buttons, and `page` export; (c) Snapshot returns text+links+HTML; (d) file↔URL
+  switching shows/hides the surface at the right bounds (toolbar visible; resize/dock/tab-hide
+  tracks); (e) pre-restart the pane falls back to the static fetch without erroring.
+
 ## Status
 
 - **Current phase:** P4 — Data channels + tool-contributing plugins + ambient Bash tap.
@@ -660,3 +690,71 @@ working through all of them, goes idle after the LAST reply, and each queued tur
 recovers (no eternal working); (d) Stop mid-turn → idle (or an error + recovery within
 ~10s); (e) switch away/back to a busy conversation → clock and status keep continuity;
 (f) the previously wedged conversation reads idle after relaunch.
+
+## 2026-07-18 — bugs.txt sweep: TaskCreate/spellcheck fixes + cognition/browser/plugin features
+
+Worked the user's `bugs.txt` (now gitignored). Two bugs + three features shipped; Feature 4
+part (a) shipped, part (b) designed and deferred. Full suite green (150 tests), typecheck +
+lint + format:check clean. Not committed (awaiting user).
+
+**Bugs (done, removed from bugs.txt):**
+
+- **TaskCreate tasks miscategorized as background work.** `state.background` mixes
+  `kind:'subagent'` (real running processes) and `kind:'task'` (TaskCreate to-do items); the
+  renderer showed both under one spinner'd "running in the background" bar. Split in
+  `ChatPanel.tsx`: subagents keep the spinner'd background bar; tasks get their own collapsible
+  `.tasks` bar docked directly above the composer, below the background set, with NO spinner.
+  Added `showTasks` to `ViewState`.
+- **No spellcheck right-click suggestions in the composer.** Chromium was underlining
+  misspellings but Electron ships no default context menu. Added `webPreferences.spellcheck:true`
+  - `installSpellcheckMenu` in `main.ts` (a `context-menu` handler over editable content:
+    `dictionarySuggestions` → `replaceMisspelling`, "Add to dictionary", cut/copy/paste/select-all).
+
+**Features:**
+
+- **F1 North Star (cognition).** Generic `readonly:true` context-export flag (schema + contextTools
+  - introspection) — injected, no write-tool, user-only, non-empty-gated. Cognition gets a
+    `north-star` export (first, readonly) + a North Star tab. See DECISIONS 2026-07-18.
+- **F2 Clear button (cognition).** Header "Clear" → confirm → wipes the four agent docs (model/
+  slots/plan/problems) via per-section clearers that reset DOM + write ''. North Star + guides kept.
+- **F3 Browser nav.** back/forward/reload/stop with an in-pane history stack. See DECISIONS.
+- **F4a `plugin_authoring_guide` tool.** Always-on `atelier`-server tool returning the plugin
+  contract/API/rules/example; enums synced to the real schema (tested).
+
+needs human spot-check in-app (headless can't cover the GUI): (a) trigger a TaskCreate → a
+spinner-less task bar appears above the composer, below any background bar; collapsible;
+subagents still show the spinner'd bar. (b) right-click a misspelled word in the composer →
+suggestions + Add to dictionary. (c) set a North Star in the cognition pane → it appears in the
+agent's `<atelier-context>` framed read-only and first; clear it → the section disappears; the
+agent has no set_/edit_ tool for it. (d) cognition "Clear" → model/slots/plan/problems empty in
+both the pane and the agent's context; North Star + guides intact. (e) browser: load two sources,
+Back/Forward move between them, Reload refetches, Stop cancels an in-flight URL fetch; buttons
+disable correctly at the ends and when idle. (f) `plugin_authoring_guide` returns the full brief.
+
+**F4 part (b) — conversation-local plugin authoring — DEFERRED (needs a product+security call):**
+
+Goal: a conversation authors a plugin visible only to itself, not global / not other conversations.
+Blockers that make this a real decision, not a mechanical add:
+
+1. **Registry is global + pervasive.** `PluginRegistry` is a single id-keyed catalog scanning
+   `/plugins`, and `registry.get(id)` is called all over `main.ts` (context block, MCP servers,
+   asset serving, introspection). Per-conversation plugins mean either (i) a per-conversation
+   registry overlay merged into every resolution site, or (ii) scoping every call by conversation.
+   Both are wide changes; a half-slice leaves dead/confusing code. There is no small reversible
+   slice that delivers value on its own.
+2. **On-disk location is a product choice.** "folder-specific" suggests `<cwd>/.atelier/plugins/<id>`
+   (tied to the working directory — travels with the repo, visible to git). Alternative:
+   per-conversation userData. These have different sharing/leak semantics and different answers to
+   "what happens when two conversations open the same cwd" (then it's not really conversation-local).
+3. **Trust model.** An agent authoring a plugin folder that then loads sandboxed code + registers
+   tools into the GUI is a meaningful capability escalation (self-authored tools/panels). CLAUDE.md
+   invariants (capability-bounded plugins; backends as child processes, never in-process hot-reload)
+   still hold, but whether the agent may do this unprompted, or only on explicit user action / with a
+   confirmation, is the user's call.
+
+Recommended most-reversible design if we proceed: discover `<cwd>/.atelier/plugins` as a SECOND
+source, merged read-only into ONLY that conversation's available-plugins list (id collisions with
+global lose to global or are flagged), enable-state stays per-conversation as today, assets served
+by resolving the conversation's local dir first. Gate creation behind an explicit user action or a
+per-plugin confirmation. The `plugin_authoring_guide` tool (shipped) is the agent-facing half and is
+useful regardless of where (b) lands.

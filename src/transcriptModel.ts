@@ -32,6 +32,9 @@ export interface Message {
 export interface TranscriptState {
   messages: Message[]
   status: AgentStatus
+  // Version of `status` (main's monotonic seq). Status/anchor updates apply only when at least
+  // this new, so a push and a resync snapshot can never race the display backwards.
+  statusSeq: number
   sessionId?: string
   model?: string
   effort?: EffortLevel
@@ -68,6 +71,7 @@ export interface AgentError {
 export const initialState: TranscriptState = {
   messages: [],
   status: 'idle',
+  statusSeq: 0,
   tools: [],
   pending: [],
   questions: [],
@@ -110,20 +114,23 @@ function toBlocks(blocks: TranscriptBlock[]): Block[] {
 
 export function reduce(state: TranscriptState, action: Action): TranscriptState {
   if (action.type === 'hydrate') {
-    // Mount-time resync to main's authoritative live state. Push events only reach mounted
-    // panels, so a remounted panel starts from this snapshot (busy state, pending approval
-    // cards, permission mode) instead of initialState defaults that may all be lies.
+    // Resync to main's authoritative live state (store creation, panel mount, window focus,
+    // and periodically while working — docs/STATUS_LOCKSTEP.md). Status and its clock anchor
+    // apply only when the snapshot is at least as new as the last seen seq, so a snapshot
+    // captured just before a status push can't regress the display.
     const s = action.snapshot
+    const fresh = s.statusSeq >= state.statusSeq
     return {
       ...state,
-      status: s.status,
+      ...(fresh
+        ? { status: s.status, statusSeq: s.statusSeq, turnStartedAt: s.turnStartedAt }
+        : {}),
       permissionMode: s.permissionMode,
       pending: s.pending,
       questions: s.questions,
       background: s.background,
       autoResumeAt: s.autoResumeAt,
       autoResumeEnabled: s.autoResumeEnabled,
-      turnStartedAt: s.turnStartedAt,
       liveTokens: s.tokens
     }
   }
@@ -200,9 +207,11 @@ function applyEvent(state: TranscriptState, e: AgentEvent): TranscriptState {
     case 'status':
       // Anchor the elapsed clock on the first transition to working; keep it across queued
       // turns within the run (main mirrors this — hydrate carries the authoritative value).
+      if (e.seq < state.statusSeq) return state // stale push (a newer resync already landed)
       return {
         ...state,
         status: e.status,
+        statusSeq: e.seq,
         turnStartedAt: e.status === 'working' ? (state.turnStartedAt ?? Date.now()) : null
       }
     case 'tokens':

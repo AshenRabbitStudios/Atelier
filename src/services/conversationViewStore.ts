@@ -103,12 +103,22 @@ export class ConversationViewStore {
     }
   }
 
-  /** Initial sync with main's authoritative live state (also heals a renderer crash-reload). */
-  hydrate = (): void => {
+  /**
+   * Pull main's authoritative live state (uiState only — cheap). Idempotent and seq-gated by
+   * the reducer, so it can run repeatedly: on store creation, panel mount, window focus, and
+   * on an interval while working. Any missed push has a bounded lifetime, never a permanent
+   * one (docs/STATUS_LOCKSTEP.md).
+   */
+  resync = (): void => {
     void window.atelier.agent
       .uiState(this.instanceId)
       .then((s) => this.dispatch({ type: 'hydrate', snapshot: s }))
       .catch(() => {})
+  }
+
+  /** Full sync: live state + canonical transcript (store creation, reset, crash-reload). */
+  hydrate = (): void => {
+    this.resync()
     void this.loadCanonical()
   }
 
@@ -131,12 +141,26 @@ let wired = false
  * one per open conversation (and ChatPanel ensures one on mount), while events for
  * closed/dropped conversations fall through harmlessly instead of resurrecting zombie stores.
  */
+// Resync every 'working' store this often: a missed idle push heals within one period.
+const RESYNC_WORKING_MS = 30_000
+
 function wire(): void {
   if (wired) return
   wired = true
   window.atelier.agent.onEvent((e) => {
     stores.get(e.instanceId)?.dispatch({ type: 'event', event: e })
   })
+  // Level-triggered reconciliation on top of the push stream: pushes are the fast path, but a
+  // missed one must self-correct. Focus resyncs ALL stores (a hidden wedged tab heals without
+  // being visited); the interval covers 'working' stores while the window stays focused.
+  window.addEventListener('focus', () => {
+    for (const s of stores.values()) s.resync()
+  })
+  setInterval(() => {
+    for (const s of stores.values()) {
+      if (s.getTranscript().status === 'working') s.resync()
+    }
+  }, RESYNC_WORKING_MS)
 }
 
 /** The store for a conversation, created (and hydrated from main) on first use. */

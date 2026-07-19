@@ -39,6 +39,13 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
   // 1s re-render tick while working — the elapsed clock's ANCHOR lives in state.turnStartedAt.
   const [, setNowTick] = useState(0)
 
+  // Re-sync to main's authoritative live state on every (re)mount. The store keeps reducing
+  // pushes while hidden, but a missed one must have a bounded lifetime — a remount is one of
+  // the reconciliation points (seq-gated, so a stale snapshot can't regress the display).
+  useEffect(() => {
+    store.resync()
+  }, [store])
+
   // Current model/effort for the header controls (system_init may predate the store).
   useEffect(() => {
     void window.atelier.agent

@@ -3,6 +3,8 @@ import type { AgentEvent, UiStateSnapshot } from '@shared/events'
 
 const snapshot = (over: Partial<UiStateSnapshot> = {}): UiStateSnapshot => ({
   status: 'idle',
+  statusSeq: 0,
+  facts: { queued: 0, released: false, lastSdkEventAt: null },
   permissionMode: 'default',
   pending: [],
   questions: [],
@@ -17,10 +19,15 @@ const snapshot = (over: Partial<UiStateSnapshot> = {}): UiStateSnapshot => ({
 // The store reads window.atelier lazily; stub it BEFORE importing the module so wire()
 // captures our fake onEvent. `routeEvent` is what main's push becomes in these tests.
 let routeEvent: ((e: AgentEvent) => void) | null = null
+// Captured window listeners (wire() registers a focus resync — tests can fire it).
+const winListeners = new Map<string, () => void>()
 const uiState = vi.fn(async () => snapshot())
 const transcript = vi.fn(async () => [])
 const forkPoints = vi.fn(async () => ({}))
 ;(globalThis as unknown as { window: unknown }).window = {
+  addEventListener: (name: string, cb: () => void) => {
+    winListeners.set(name, cb)
+  },
   atelier: {
     agent: {
       onEvent: (cb: (e: AgentEvent) => void) => {
@@ -36,10 +43,12 @@ const forkPoints = vi.fn(async () => ({}))
 
 const { storeFor, dropStore, dropAllStores } = await import('./conversationViewStore')
 
+let nextSeq = 0
 const statusEvent = (instanceId: string, status: 'working' | 'idle'): AgentEvent => ({
   instanceId,
   kind: 'status',
-  status
+  status,
+  seq: ++nextSeq
 })
 
 beforeEach(() => {
@@ -123,6 +132,14 @@ describe('conversationViewStore', () => {
     expect(a.getView().viewTask).toBeNull()
     expect(a.getView().editing).toBeNull()
     await vi.waitFor(() => expect(uiState).toHaveBeenCalledTimes(2)) // creation + reset
+  })
+
+  it('window focus resyncs every store (a hidden wedged tab heals without being visited)', async () => {
+    storeFor('a')
+    storeFor('b')
+    await vi.waitFor(() => expect(uiState).toHaveBeenCalledTimes(2)) // creation hydrates
+    winListeners.get('focus')!()
+    await vi.waitFor(() => expect(uiState).toHaveBeenCalledTimes(4)) // +1 per store
   })
 
   it('reconciles to the on-disk transcript after a result event', async () => {

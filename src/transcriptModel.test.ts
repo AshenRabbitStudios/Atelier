@@ -4,6 +4,8 @@ import { initialState, reduce, type TranscriptState } from './transcriptModel'
 
 const snapshot = (over: Partial<UiStateSnapshot> = {}): UiStateSnapshot => ({
   status: 'working',
+  statusSeq: 1,
+  facts: { queued: 0, released: true, lastSdkEventAt: null },
   permissionMode: 'bypassPermissions',
   pending: [
     {
@@ -63,13 +65,21 @@ describe('hydrate (mount-time resync to main)', () => {
   })
 
   it('hydrates an idle snapshot over a stale working display', () => {
-    let s = ev(initialState, { instanceId: 'i', kind: 'status', status: 'working' })
+    let s = ev(initialState, { instanceId: 'i', kind: 'status', status: 'working', seq: 1 })
     s = reduce(s, {
       type: 'hydrate',
-      snapshot: snapshot({ status: 'idle', pending: [], tokens: { output: 0 } })
+      snapshot: snapshot({ status: 'idle', statusSeq: 2, pending: [], tokens: { output: 0 } })
     })
     expect(s.status).toBe('idle')
     expect(s.pending).toHaveLength(0)
+  })
+
+  it('a stale snapshot cannot regress status (but still refreshes cards/tokens)', () => {
+    // A resync captured just before the idle transition arrives after the idle push.
+    let s = ev(initialState, { instanceId: 'i', kind: 'status', status: 'idle', seq: 5 })
+    s = reduce(s, { type: 'hydrate', snapshot: snapshot({ status: 'working', statusSeq: 4 }) })
+    expect(s.status).toBe('idle') // seq 4 < 5 — status untouched
+    expect(s.pending).toHaveLength(1) // non-versioned live state still applied
   })
 
   it('carries the turn clock anchor and auto-resume flag from the snapshot', () => {
@@ -82,18 +92,33 @@ describe('hydrate (mount-time resync to main)', () => {
   })
 })
 
+describe('status seq gating (pushes and resyncs cannot race backwards)', () => {
+  it('ignores a status push older than the last applied version', () => {
+    let s = ev(initialState, { instanceId: 'i', kind: 'status', status: 'idle', seq: 3 })
+    s = ev(s, { instanceId: 'i', kind: 'status', status: 'working', seq: 2 }) // stale
+    expect(s.status).toBe('idle')
+    expect(s.statusSeq).toBe(3)
+  })
+
+  it('applies equal-seq idempotently (a resync repeating the last push is harmless)', () => {
+    let s = ev(initialState, { instanceId: 'i', kind: 'status', status: 'working', seq: 2 })
+    s = ev(s, { instanceId: 'i', kind: 'status', status: 'working', seq: 2 })
+    expect(s.status).toBe('working')
+  })
+})
+
 describe('turn clock (elapsed anchor survives remounts)', () => {
   it('anchors on the first transition to working and keeps it across repeats', () => {
-    let s = ev(initialState, { instanceId: 'i', kind: 'status', status: 'working' })
+    let s = ev(initialState, { instanceId: 'i', kind: 'status', status: 'working', seq: 1 })
     expect(s.turnStartedAt).not.toBeNull()
     const anchor = s.turnStartedAt
-    s = ev(s, { instanceId: 'i', kind: 'status', status: 'working' }) // queued turn, same run
+    s = ev(s, { instanceId: 'i', kind: 'status', status: 'working', seq: 2 }) // same run
     expect(s.turnStartedAt).toBe(anchor)
   })
 
   it('clears the anchor when the run ends', () => {
-    let s = ev(initialState, { instanceId: 'i', kind: 'status', status: 'working' })
-    s = ev(s, { instanceId: 'i', kind: 'status', status: 'idle' })
+    let s = ev(initialState, { instanceId: 'i', kind: 'status', status: 'working', seq: 1 })
+    s = ev(s, { instanceId: 'i', kind: 'status', status: 'idle', seq: 2 })
     expect(s.turnStartedAt).toBeNull()
   })
 

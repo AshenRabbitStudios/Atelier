@@ -186,3 +186,19 @@ toolsearch|webfetch|websearch` start collapsed in the chat (they're just retriev
   bridge already knows the conversation. Reuses resolveWithinCwd; gated by the existing
   `data:subscribe` (same capability that reads cwd text via file:) — no new permission.
   Bounded to image extensions + a 10MB cap so it can't become a general file channel.
+- Agent busy status is DERIVED, never assigned: a TurnLedger releases at most one user
+  turn into the SDK at a time (the next only after the previous settles), and status is a
+  pure function of closed/wedged/ledger.busy, emitted seq-stamped from a single sync()
+  point. Chosen over patching the turnsInFlight counter because two iterations proved
+  edge-triggered inference unfalsifiable: any missed/extra transition wedged the display
+  permanently (docs/STATUS_LOCKSTEP.md). Consequences accepted: a message queued behind a
+  running turn now waits for the turn to END (it can no longer interject mid-turn inside
+  the CLI — deliberate, it was the 1:1-breaking path), and queued turns get their context
+  block captured at RELEASE time (fresher than capture-at-send).
+- Renderer reconciliation is level-triggered on top of pushes: resync (uiState pull,
+  seq-gated) on store creation, panel mount, window focus (ALL stores — a hidden wedged
+  tab heals unvisited), and every 30s while a store shows working. Encoded as tests
+  because the aaf5a5d hydrate-on-remount guarantee silently regressed once already.
+- Transient errors no longer flash status=error; they surface in the error list while
+  status re-derives (working/idle). Sticky error is reserved for restart-budget-exhausted
+  and auth failures (wedged flag), cleared by the next send.

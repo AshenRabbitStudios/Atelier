@@ -637,3 +637,26 @@ fetch a remote page with relative images (set_browser__source to an https URL) �
 load; (c) a missing local image shows a titled broken marker, not a crash; (d) content push
 with a relative image resolves from cwd root; (e) an absolute https image in local content
 still loads directly.
+
+## 2026-07-18 — Status lockstep: the busy indicator can no longer lie
+
+User-reported (third iteration): conversations show "working"/"Running <tool>…" hours
+after the turn finished. Live forensics (a conversation wedged 4.7h with a cleanly
+completed transcript) + root-cause: status was edge-triggered inference — a stored field
+plus a hand-maintained turnsInFlight counter compensated per-path — with no invariant, no
+introspection, and no reconciliation, so one missed transition lied forever. Six defects
+(B1–B6) and the full design are in docs/STATUS_LOCKSTEP.md. Rebuilt in 4 commits:
+TurnLedger (at most one turn inside the SDK; sends↔turns 1:1 by construction) + status
+derived from single-writer facts, seq-stamped from one sync() point; rebind now owns the
+ledger swap (no rebind path can leave status stale); Stop gets a bounded grace rebind;
+renderer applies status by seq and resyncs on store creation / panel mount / window focus /
+30s-while-working; a 12-minute stall watchdog (guarded by pending cards + background work)
+bounds unknown-unknowns; uiState carries statusSeq + the derivation facts.
+
+needs human spot-check in-app: (a) run a turn to completion → header goes idle within a
+second of the reply ending; (b) queue 2–3 messages while a turn runs → status stays
+working through all of them, goes idle after the LAST reply, and each queued turn runs;
+(c) mid-turn setEffort / plugin toggle / branch switch → the running turn stops but status
+recovers (no eternal working); (d) Stop mid-turn → idle (or an error + recovery within
+~10s); (e) switch away/back to a busy conversation → clock and status keep continuity;
+(f) the previously wedged conversation reads idle after relaunch.

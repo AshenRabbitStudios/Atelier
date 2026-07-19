@@ -143,6 +143,10 @@ const AUTO_RESUME_BUFFER_MS = 8000
 // After Stop, how long to wait for the SDK's aborted result before force-settling the turn and
 // rebinding — Stop must never be able to wedge the status (docs/STATUS_LOCKSTEP.md).
 const INTERRUPT_GRACE_MS = 10_000
+// Watchdog: check cadence, and how long the SDK may be silent mid-turn before the turn is
+// presumed dead. Must exceed the longest legitimately silent tool (Bash caps at 10 minutes).
+const STALL_CHECK_MS = 60_000
+const STALL_KILL_MS = 12 * 60_000
 
 interface StreamEvent {
   type: string
@@ -221,6 +225,8 @@ class Session {
   private lastSdkEventAtMs = 0
   // Bounded Stop recovery: force-settles the turn if the aborted result never arrives.
   private interruptGraceTimer: ReturnType<typeof setTimeout> | null = null
+  // Watchdog for unknown-unknowns: any missed terminal signal self-corrects within bound.
+  private stallTimer: ReturnType<typeof setInterval> | null = null
   // When the current run of work began (first transition to 'working'; survives queued turns).
   private turnStartedAtMs: number | null = null
   // The instruction string baked into the live query's systemPrompt. Compared on each send so we
@@ -299,6 +305,28 @@ class Session {
     if (restore?.sessionId) this.sessionId = restore.sessionId
     if (restore?.branches) this.branches = restore.branches
     this.start() // resumes this.sessionId (the active branch) when restoring
+    // Per-instance watchdog; cancelled in close() so a closed conversation can't be rebound.
+    this.stallTimer = setInterval(() => this.checkStall(), STALL_CHECK_MS)
+  }
+
+  /**
+   * Bounded staleness for unknown-unknowns: a turn is in flight but the SDK has been silent
+   * longer than any legitimate tool run, with nothing blocked on the user and no background
+   * work — presume the turn died and rebind (which settles it and re-derives status). This
+   * turns "a missed terminal signal wedges the status forever" into "corrected within the
+   * watchdog bound" (docs/STATUS_LOCKSTEP.md).
+   */
+  private checkStall(): void {
+    if (this.closed || !this.ledger.released) return
+    if (this.pending.size > 0) return // blocked on a user decision — legitimately quiet
+    if (this.background.list().length > 0) return // background work has its own cadence
+    if (Date.now() - this.lastSdkEventAtMs < STALL_KILL_MS) return
+    this.emit({
+      instanceId: this.id,
+      kind: 'error',
+      message: 'No agent activity for 12 minutes — presuming the turn died and reconnecting.'
+    })
+    this.rebind() // settles the dead turn, keeps queued ones, re-derives status
   }
 
   toManifest(): ConversationManifest {
@@ -965,6 +993,10 @@ class Session {
     this.closed = true
     this.clearResumeTimer()
     this.clearInterruptGrace()
+    if (this.stallTimer) {
+      clearInterval(this.stallTimer)
+      this.stallTimer = null
+    }
     this.input.end()
     try {
       this.q.close()

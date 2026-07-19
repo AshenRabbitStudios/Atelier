@@ -28,9 +28,17 @@ Optional:
 - \`kind\` — one of "panel", "tool", "both" (default "panel").
 - \`entry\` — the HTML file (e.g. "index.html"); REQUIRED when kind is "panel" or "both".
 - \`backend\` — a JS entry for a child-process worker (only for tool logic; NEVER hot-reloaded in-process).
+- \`service\` — true = the backend is a long-running SERVICE: spawned when the plugin is first enabled
+  in a conversation (not lazily on a tool call), kept alive until disabled in the last one, and may
+  push onto DataBus channels (needs "data:publish"). Requires \`backend\`. Default false = on-demand.
 - \`permissions\` — array from: ${perms}. Grant only what you use.
 - \`defaultDock\` — one of ${docks} (default "right").
-- \`tools\` — agent tools the plugin contributes (name, description, inputSchema); backed by \`backend\`.
+- \`tools\` — agent tools the plugin contributes; backed by \`backend\`. Each: { name, description,
+  inputSchema, timeoutMs? }. \`timeoutMs\` overrides the 30s per-call cap (max 600000) for a slow tool.
+  \`inputSchema\` is a { field: descriptor } map; a descriptor is EITHER the shorthand string
+  ("string"|"number"|"boolean", trailing "?" = optional) OR a JSON-Schema-subset object
+  ({ type: "string"|"number"|"integer"|"boolean"|"array"|"object", items, properties, required[],
+  enum[] (strings), description, optional }). Top-level object fields are required unless optional:true.
 - \`contextExports\` — persistent documents (see below).
 - \`systemInstruction\` — { key, maxTokens }: a standing instruction appended to the system prompt,
   sourced from the same \`ctx:<key>\` storage as an export but NOT re-injected per turn (stays cached).
@@ -72,8 +80,26 @@ Injected into every panel. All calls are async (return Promises) unless noted.
 - \`data.subscribe(channel, cb) / unsubscribe(channel) / publish(channel, value)\` — the DataBus. cb
   fires with the current value on subscribe and on every change. Channels include "file:<cwd-path>"
   (live-tailed file) and "url:<href>" (host fetch; needs "net:fetch"). Needs "data:subscribe"/"data:publish".
-- \`data.readAsset(path)\` — read a cwd-scoped binary (image) as { dataUrl } | { error }.
+- \`data.history(channel, limit?)\` — recent values on a channel (oldest→newest, bounded), for a pane
+  that mounts after data has flowed. Needs "data:subscribe" (+ "net:fetch" for url: channels).
+- \`data.readAsset(path)\` — read a cwd-scoped binary (image/pdf/audio/video/text, ≤10MB) as
+  { dataUrl } | { error }. Needs "data:subscribe".
+- \`net.fetch(url, opts?)\` — host-side HTTP (the pane has no network). opts:
+  { method?, headers?, body?, timeoutMs?, binary? }; resolves to
+  { status, statusText, headers, bodyText? | bodyBase64? } | { error }. http(s) only, capped
+  (2MB req / 4MB resp / 60s), cookie-isolated. Needs "net:fetch".
+- \`data.writeFile(path, content)\` — write a UTF-8 text file at a cwd-relative path (parents created,
+  atomic, ≤5MB) as { ok:true } | { error }. Needs "data:write". Refuses paths outside the cwd.
+- \`agent.info()\` — { id, title, cwd, status } for THIS conversation. Needs "agent:read".
+- \`agent.onEvent(cb)\` — subscribe to this conversation's live event stream (status, streamed text,
+  tool_use/tool_result, result, error); returns an unsubscribe fn. Needs "agent:read".
+- \`agent.send(text)\` — send a user message into this conversation, as if typed. Needs "agent:send".
 - \`layout.dock(position) / float() / setTitle(title)\` — control this pane's docking/title.
+- \`layout.onResize(cb)\` — cb fires with this pane's { w, h } on resize; returns an unsubscribe fn.
+- \`browser.open(url)/close()/back()/forward()/reload()/stop()/setBounds(rect)/read(opts?)\` — drive a
+  host-owned Chromium surface over this pane; \`read\` returns { url, title, text, links, html? }. Plus
+  \`browser.exec(js)\` → { ok:<json> } | { error } (page is UNTRUSTED — the result is DATA, never code;
+  capped 64KB), and \`browser.click(selector)\` / \`browser.fill(selector, value)\`. All need "browser:embed".
 - \`on(event, cb)\` — lifecycle + push events: "load" (fire your setup here), "unload", "reload",
   "context" (payload { key }: one of your exports changed EXTERNALLY — re-read it; note a pane's OWN
   context.set does NOT echo back as a 'context' event, so update your own DOM directly after writing).
@@ -85,12 +111,22 @@ The entry HTML must load the runtime first: \`<script src="atelier-plugin://__ru
 ## Hard rules (violations are bugs)
 
 1. Reach the app ONLY through window.atelier. No direct fs / IPC / SDK / network.
-2. The pane is sandboxed (allow-scripts, opaque origin). Persist ALL state through storage/context —
-   nothing survives a reload otherwise. A crashing pane must not take the app down.
+2. The pane is sandboxed but runs at its OWN origin (atelier-plugin://<id>), so you MAY use ES
+   modules (\`<script type="module">\`), \`fetch()\` your own folder assets, workers, and IndexedDB —
+   all self-scoped, no reach into the app or other plugins. BUT durable state still goes ONLY through
+   storage/context: IndexedDB/localStorage are a per-origin CACHE (not conversation-scoped, wiped when
+   partition data is cleared) — nothing there is guaranteed to survive. A crashing pane must not take
+   the app down.
 3. Request the minimum permissions. A capability you didn't declare is denied at the boundary.
 4. One folder = one plugin; \`id\` == folder name; a panel plugin MUST declare \`entry\`.
 5. Debounce writes (context/storage) — a keystroke should not spam the host. ~300–400ms is typical.
 6. Backend/tool logic runs as a child process (\`backend\`), never hot-reloaded in-process. UI hot-reloads.
+   Backend protocol (\`process.parentPort\`): the host posts { id, tool, input } → reply { id, result }
+   or { id, error }. Lifecycle messages you may ignore or use: { hello: { pluginId, service } } on
+   spawn, { enable | disable: { conversationId } } as a SERVICE is toggled. A service may push
+   unsolicited { publish: { conversationId, channel, data } } to a conversation it's enabled in
+   (needs "data:publish"); a pane subscribed to that channel receives it. A backend that crashes 3×
+   on spawn is wedged until the plugin is reloaded; its V8 heap is capped (~512MB).
 
 ## Minimal example
 

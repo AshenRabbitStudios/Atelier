@@ -82,6 +82,12 @@ const api: AtelierAPI = {
       ipcRenderer.invoke(IPC.pluginDataUnsubscribe, { conversationId, pluginId, channel }),
     dataPublish: (conversationId, pluginId, channel, data) =>
       ipcRenderer.invoke(IPC.pluginDataPublish, { conversationId, pluginId, channel, data }),
+    dataHistory: (conversationId, pluginId, channel, limit) =>
+      ipcRenderer.invoke(IPC.pluginDataHistory, { conversationId, pluginId, channel, limit }),
+    writeFile: (conversationId, pluginId, path, content) =>
+      ipcRenderer.invoke(IPC.pluginWriteFile, { conversationId, pluginId, path, content }),
+    netFetch: (conversationId, pluginId, url, opts) =>
+      ipcRenderer.invoke(IPC.pluginNetFetch, { conversationId, pluginId, url, opts }),
     readAsset: (conversationId, pluginId, path) =>
       ipcRenderer.invoke(IPC.pluginReadAsset, { conversationId, pluginId, path }),
     onChanged: (cb) => {

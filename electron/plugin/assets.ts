@@ -1,19 +1,20 @@
 import { readFile, stat } from 'node:fs/promises'
 
 // Read-only, cwd-scoped BINARY asset reads for a plugin pane — the subresource analog of the
-// DataBus file: text channel. A sandboxed pane renders content in-document under its own opaque
-// origin (atelier-plugin://<id>/), so an <img> with a relative/local src resolves against the
+// DataBus file: text channel. A sandboxed pane renders content in-document under its own origin
+// (atelier-plugin://<id>/), so an <img>/<embed> with a relative/local src resolves against the
 // plugin folder and 404s; and a raw subresource GET carries no conversation id, so the host can't
 // scope it. Instead the pane asks the host (over the mediated bridge, which knows the conversation)
-// to read a referenced image and hands back a bounded data: URL it can swap in.
+// to read a referenced asset and hands back a bounded data: URL it can swap in.
 //
 // Same cwd-scoping and same capability gate (data:subscribe) as reading a text file via the file:
-// source — this is just the binary case. Restricted to image types + a size cap so it can't be
-// turned into a general file-exfiltration channel beyond what data:subscribe already permits.
+// source. Any type is allowed (images, pdf, audio/video, text) up to a size cap — the image-only
+// restriction was an anti-exfiltration guard that is obsolete under the corrected framing (a pane
+// can already read any text via file: channels; DECISIONS 2026-07-19).
 
 export const MAX_ASSET_BYTES = 10_000_000
 
-const IMAGE_MIME: Record<string, string> = {
+const ASSET_MIME: Record<string, string> = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
@@ -22,7 +23,16 @@ const IMAGE_MIME: Record<string, string> = {
   '.avif': 'image/avif',
   '.bmp': 'image/bmp',
   '.ico': 'image/x-icon',
-  '.svg': 'image/svg+xml'
+  '.svg': 'image/svg+xml',
+  '.pdf': 'application/pdf',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.ogg': 'audio/ogg',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+  '.txt': 'text/plain',
+  '.json': 'application/json',
+  '.csv': 'text/csv'
 }
 
 export type AssetResult = { dataUrl: string } | { error: string }
@@ -42,8 +52,7 @@ export function createAssetReader(
   resolvePath: (conversationId: string, rel: string) => string | null
 ): (conversationId: string, rel: string) => Promise<AssetResult> {
   return async (conversationId, rel) => {
-    const mime = IMAGE_MIME[extOf(rel)]
-    if (!mime) return { error: `unsupported image type for "${rel}"` }
+    const mime = ASSET_MIME[extOf(rel)] ?? 'application/octet-stream'
     const abs = resolvePath(conversationId, rel)
     if (!abs) return { error: `asset "${rel}" is outside the conversation folder` }
     try {

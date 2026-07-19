@@ -1,5 +1,46 @@
 # PROGRESS.md — Atelier build log
 
+## Plugin capability roadmap Phases 0–6 (2026-07-19, uncommitted)
+
+Design: `docs/roadmap/`. Framing: sandbox = fault containment + coupling contract (DECISIONS
+2026-07-19). Phases 0–6 all landed and gate-green (194 tests, up from 153). Per-phase detail in
+DECISIONS. Phase 7 (workspace-local plugins) deliberately NOT done — it needs two product
+decisions from the user (docs/roadmap/07-workspace-plugins.md, D1/D2).
+
+**Phase 6 (browser drive) — NEEDS HUMAN SPOT-CHECK:** run `npx electron scripts/verify-webview.mjs`
+(GUI harness, now includes exec/fill/click drive cases + the nav-guard mirror). In-app: a
+`browser:embed` plugin can `fill` + `click` on a live page and `read` the outcome.
+
+**New plugin capabilities available to author against (Phases 1–6):** `agent.info/onEvent/send`,
+`data.history`, `data.writeFile` (`data:write`), `layout.onResize`, `net.fetch` (`net:fetch`),
+any-mime `readAsset`, `service:true` backends with DataBus publish + rich tool schemas +
+`timeoutMs`, `browser.exec/click/fill`, and ES-module/same-origin panes. See PLUGIN_API.md +
+`plugin_authoring_guide`.
+
+**Phase 4 (backend services) — NEEDS HUMAN SPOT-CHECK (headless can't cover):** add a `service:true`
+example plugin (a backend that publishes a heartbeat onto a channel its pane subscribes to) and
+verify: enable → pane ticks; disable → child process dies (no orphan PID); re-enable → resumes; a
+tool with `timeoutMs:120000` survives a 60s handler; reloading one plugin doesn't kill another's
+backend. (Manager logic itself is unit-tested with an injected transport — 14 tests.)
+
+**Phase 2 (same-origin panes) — NEEDS HUMAN SPOT-CHECK (headless can't cover):**
+
+- **Process-isolation question (open — verify in-app).** Under the fault-containment mandate a
+  `while(true)` in pane JS must not hang the whole app. With `allow-same-origin` the frame runs at
+  origin `atelier-plugin://<id>`, a distinct site, so Chromium site isolation SHOULD give it its own
+  renderer process (OOPIF) — but this is unverified. To check: run the app, open a plugin, run a
+  busy loop in its console (or a temp plugin), and watch whether the app UI keeps responding +
+  whether a separate PID appears (Task Manager / `app.getAppMetrics()`). If it hangs the app, file
+  the fix (host panes in `<webview>` — the host API is postMessage-only so the sandbox tech is
+  swappable, PLUGIN_API §9); do NOT migrate speculatively.
+- **Verify matrix (open a plugin that exercises each):** `<script type="module">` with a relative
+  `import` loads; `fetch('./x.json')` resolves from the plugin folder; `indexedDB.open` works;
+  postMessage relay + theme + `pluginId` detection still work.
+- **Regression spot-check:** every existing example still loads/functions (cognition, browser,
+  bash-stream, hologram, data-table, cartographer) — the sandbox attribute change is app-wide.
+- Optional follow-up (deferred): rebuild hologram as native ES modules + drop the esbuild bundle,
+  only once the verify matrix is green.
+
 ## Live browser surface — `browser:embed` + `atelier.browser.*` (2026-07-19, uncommitted)
 
 - **New shared plugin verb: a host-owned real-Chromium surface.** Permission `browser:embed`

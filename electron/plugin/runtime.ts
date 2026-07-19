@@ -10,7 +10,7 @@ export const RUNTIME_JS = String.raw`
   var pluginId = location.hostname
   var pending = new Map()
   var seq = 0
-  var listeners = { load: [], unload: [], reload: [], context: [], browser: [] }
+  var listeners = { load: [], unload: [], reload: [], context: [], browser: [], agent: [], resize: [] }
   var dataListeners = {} // channel -> [cb] for atelier.data.subscribe
 
   function call(ns, method, args) {
@@ -67,7 +67,32 @@ export const RUNTIME_JS = String.raw`
     layout: {
       dock: function (position) { return call('layout', 'dock', [position]) },
       float: function () { return call('layout', 'dock', ['float']) },
-      setTitle: function (title) { return call('layout', 'setTitle', [title]) }
+      setTitle: function (title) { return call('layout', 'setTitle', [title]) },
+      // Fires with this pane's { w, h } on resize/dock changes. No permission (a pane may always
+      // know its own size). Returns an unsubscribe.
+      onResize: function (cb) {
+        listeners.resize.push(cb)
+        return function () {
+          var i = listeners.resize.indexOf(cb)
+          if (i >= 0) listeners.resize.splice(i, 1)
+        }
+      }
+    },
+    agent: {
+      // Info about THIS pane's conversation: { id, title, cwd, status }. Needs "agent:read".
+      info: function () { return call('agent', 'info', []) },
+      // Subscribe to this conversation's AgentEvent stream (status, text deltas, tool_use/result,
+      // result, error — the same union the chat consumes). Needs "agent:read". Returns unsubscribe.
+      onEvent: function (cb) {
+        listeners.agent.push(cb)
+        call('agent', 'events', [])
+        return function () {
+          var i = listeners.agent.indexOf(cb)
+          if (i >= 0) listeners.agent.splice(i, 1)
+        }
+      },
+      // Send a user message into this conversation, exactly as if typed. Needs "agent:send".
+      send: function (text) { return call('agent', 'send', [text]) }
     },
     context: {
       // A context document (this plugin's contextExports). get/set the full value; the agent
@@ -89,9 +114,21 @@ export const RUNTIME_JS = String.raw`
       },
       // Publish a value onto a channel for other subscribers. Needs permission "data:publish".
       publish: function (channel, value) { return call('data', 'publish', [channel, value]) },
+      // Recent values on a channel (oldest→newest, bounded), for a pane that mounts after data
+      // has already flowed. Needs "data:subscribe" (+ "net:fetch" for url: channels).
+      history: function (channel, limit) { return call('data', 'history', [channel, limit]) },
       // Read a cwd-scoped image (referenced by rendered content) as a { dataUrl } | { error }.
       // The binary sibling of a file: subscribe; needs the same "data:subscribe" permission.
-      readAsset: function (path) { return call('data', 'readAsset', [path]) }
+      readAsset: function (path) { return call('data', 'readAsset', [path]) },
+      // Write a UTF-8 text file at a cwd-relative path (parents created). Needs "data:write".
+      // Returns { ok:true } | { error }. Refuses paths outside the conversation cwd.
+      writeFile: function (path, content) { return call('data', 'writeFile', [path, content]) }
+    },
+    net: {
+      // Host-side HTTP request (the pane has no network of its own). Needs "net:fetch".
+      // opts: { method?, headers?, body?, timeoutMs?, binary? }. Resolves to
+      // { status, statusText, headers, bodyText? | bodyBase64? } | { error }.
+      fetch: function (url, opts) { return call('net', 'fetch', [url, opts || {}]) }
     },
     browser: {
       // A live, host-owned Chromium surface composited over this pane (permission "browser:embed").
@@ -107,7 +144,13 @@ export const RUNTIME_JS = String.raw`
       // Where the surface sits, in this pane's viewport coordinates ({ x, y, w, h }).
       setBounds: function (rect) { return call('browser', 'setBounds', [rect]) },
       // Extract the live page's { url, title, text, links, html? } for the context exports.
-      read: function (opts) { return call('browser', 'read', [opts || {}]) }
+      read: function (opts) { return call('browser', 'read', [opts || {}]) },
+      // Drive the page. The page is UNTRUSTED — treat every result as data, never as code.
+      // exec runs JS in the page and returns { ok:<json> } | { error } (result capped at 64KB).
+      exec: function (js) { return call('browser', 'exec', [js]) },
+      // Convenience over exec: click the first match / set an input's value (+ input/change events).
+      click: function (selector) { return call('browser', 'click', [selector]) },
+      fill: function (selector, value) { return call('browser', 'fill', [selector, value]) }
     },
     on: function (event, cb) {
       if (listeners[event]) listeners[event].push(cb)

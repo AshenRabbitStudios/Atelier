@@ -32,14 +32,23 @@ import {
   PluginContextSetSchema,
   PluginDataChannelSchema,
   PluginDataPublishSchema,
+  PluginDataHistorySchema,
+  PluginWriteFileSchema,
+  PluginNetFetchSchema,
   PluginReadAssetSchema,
   type AgentEvent,
   type AuthStatus
 } from './shared/events.js'
-import type { DiscoveredPlugin } from './shared/plugins.js'
+import {
+  URL_CHANNEL_PREFIX,
+  type DiscoveredPlugin,
+  type PluginPermission
+} from './shared/plugins.js'
 import { PluginRegistry } from './plugin/PluginRegistry.js'
 import { DataBus, createFileSource, createUrlSource } from './plugin/DataBus.js'
 import { createAssetReader } from './plugin/assets.js'
+import { createFileWriter } from './plugin/fileWrite.js'
+import { createNetFetcher } from './plugin/netFetch.js'
 import { PluginBackendManager, type BackendTransport } from './plugin/PluginBackendManager.js'
 import { buildPluginToolServers } from './plugin/pluginTools.js'
 import { buildEnvironmentBriefing, buildAtelierToolServer } from './plugin/introspection.js'
@@ -117,10 +126,15 @@ const PLUGINS_DIR = process.env.ATELIER_PLUGINS_DIR ?? join(process.cwd(), 'plug
 const plugins = new PluginRegistry(PLUGINS_DIR, sendPlugins)
 
 // P4 S3: plugin-contributed tool backends run as isolated Electron utility processes (never in
-// main — CLAUDE.md). One child per plugin, spawned on first tool call; the in-process MCP tool just
-// forwards to it. `serviceName` must be [a-zA-Z0-9._-]; plugin ids already match.
+// main — CLAUDE.md). One child per plugin, spawned on first tool call (or on enable for a service);
+// the in-process MCP tool just forwards to it. `serviceName` must be [a-zA-Z0-9._-]; plugin ids
+// already match. `--max-old-space-size` caps the child's V8 heap so a runaway backend can't exhaust
+// memory (containment — ARCH_REVIEW_2026-07-19 P1 #12).
 function utilityBackendTransport(backendPath: string, pluginId: string): BackendTransport {
-  const child = utilityProcess.fork(backendPath, [], { serviceName: `atelier-plugin-${pluginId}` })
+  const child = utilityProcess.fork(backendPath, [], {
+    serviceName: `atelier-plugin-${pluginId}`,
+    execArgv: ['--max-old-space-size=512']
+  })
   return {
     postMessage: (msg) => child.postMessage(msg),
     onMessage: (cb) => {
@@ -134,7 +148,16 @@ function utilityBackendTransport(backendPath: string, pluginId: string): Backend
     }
   }
 }
-const backends = new PluginBackendManager(utilityBackendTransport)
+// onPublish routes a service backend's unsolicited push to the DataBus, gated by the plugin's
+// declared data:publish permission (the manager already confines it to an enabled conversation).
+const backends = new PluginBackendManager(
+  utilityBackendTransport,
+  undefined,
+  (pluginId, conversationId, channel, data) => {
+    if (!pluginPermitted(conversationId, pluginId, 'data:publish')) return
+    dataBus.publish(conversationId, channel, data)
+  }
+)
 
 // Context-document plugins (docs/CONTEXT_SYSTEM.md): inject each conversation's pinned exports as
 // per-turn context, and register one update tool per export. Both resolve against the registry.
@@ -191,6 +214,29 @@ const dataBus = new DataBus(
 // Binary sibling of the file: source: read a cwd-scoped image as a data: URL for a pane that can't
 // fetch it as a subresource (opaque origin, no conversation context in the request). Same scoping.
 const readCwdAsset = createAssetReader(resolveWithinCwd)
+
+// Write sibling of the file: source — a pane-produced artifact, atomically written and bounded to
+// the conversation cwd by the same resolver (permission data:write).
+const writeCwdFile = createFileWriter(resolveWithinCwd)
+
+// Host-side HTTP for panes (permission net:fetch): a real request verb (method/headers/body/binary,
+// capped, cookie-isolated) beyond the one-shot url: DataBus channel.
+const netFetch = createNetFetcher()
+
+// Main-side enforcement of a plugin's declared coupling contract: a privileged handler confirms the
+// plugin is enabled for the conversation AND declares the permission, instead of trusting the
+// renderer relay's check alone (ARCH_REVIEW_2026-07-19 P0 #1). New verbs are built with this from
+// the start; the pre-existing data/storage/context handlers are retrofitted separately.
+function pluginPermitted(
+  conversationId: string,
+  pluginId: string,
+  permission: PluginPermission
+): boolean {
+  const manifest = plugins.get(pluginId)?.manifest
+  if (!manifest) return false
+  if (!agents.pluginStateFor(conversationId)[pluginId]?.enabled) return false
+  return manifest.permissions.includes(permission)
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -249,6 +295,15 @@ function installWebviewGuard(win: BrowserWindow): void {
       if (/^https?:/i.test(url)) setImmediate(() => void guest.loadURL(url))
       return { action: 'deny' }
     })
+    // will-attach only hardens the INITIAL src; page JS / meta-refresh / a server redirect can
+    // still send the guest to file:// or any other scheme afterward. Confine every subsequent
+    // navigation to http(s) too (ARCH_REVIEW_2026-07-19 P0 #2). The guest stays sandboxed/no-node
+    // regardless, so this is surface reduction, not the sole containment.
+    const blockNonHttp = (details: Electron.Event & { url: string }): void => {
+      if (details.url && !/^https?:\/\//i.test(details.url)) details.preventDefault()
+    }
+    guest.on('will-navigate', blockNonHttp)
+    guest.on('will-redirect', blockNonHttp)
   })
 }
 
@@ -508,13 +563,25 @@ function registerIpc(): void {
       manifest.tools.length > 0 &&
       manifest.permissions.includes('tools')
     )
-    if (!enabled && hasTools) backends.stop(pluginId) // free the child process on disable
+    // A service backend follows conversation enablement: spawn on enable, drop on the last disable.
+    const backendDir = plugins.dirOf(pluginId)
+    const isService = !!(manifest?.service && manifest.backend && backendDir)
+    if (isService) {
+      const backendPath = join(backendDir, manifest!.backend!)
+      if (enabled) backends.startService(pluginId, backendPath, conversationId)
+      else backends.stopService(pluginId, conversationId)
+    } else if (!enabled && hasTools) {
+      backends.stop(pluginId) // on-demand tool backend: free the child process on disable
+    }
     agents.setPluginEnabled(conversationId, pluginId, enabled, exportKeys, hasTools)
   })
 
   ipcMain.handle(IPC.pluginsReload, (_e, payload) => {
-    PluginIdSchema.parse(payload)
-    backends.stopAll() // a reloaded plugin's backend must re-spawn from the fresh module, never reuse
+    const { pluginId } = PluginIdSchema.parse(payload)
+    // Reset ONLY the reloaded plugin's backend (fresh module + cleared crash/wedge state, re-spawned
+    // if it's a still-enabled service) — reloading one plugin must not kill unrelated backends
+    // mid-call (ARCH_REVIEW_2026-07-19 P1 #11).
+    backends.reset(pluginId)
     plugins.scan() // re-read manifests; the renderer remounts affected panes
     sendPlugins(plugins.list())
   })
@@ -558,6 +625,36 @@ function registerIpc(): void {
   ipcMain.handle(IPC.pluginDataPublish, (_e, payload) => {
     const { conversationId, channel, data } = PluginDataPublishSchema.parse(payload)
     dataBus.publish(conversationId, channel, data)
+  })
+
+  ipcMain.handle(IPC.pluginDataHistory, (_e, payload) => {
+    const { conversationId, pluginId, channel, limit } = PluginDataHistorySchema.parse(payload)
+    if (!pluginPermitted(conversationId, pluginId, 'data:subscribe')) {
+      throw new Error('permission "data:subscribe" not granted')
+    }
+    if (
+      channel.startsWith(URL_CHANNEL_PREFIX) &&
+      !pluginPermitted(conversationId, pluginId, 'net:fetch')
+    ) {
+      throw new Error('permission "net:fetch" not granted')
+    }
+    return dataBus.getHistory(conversationId, channel, limit)
+  })
+
+  ipcMain.handle(IPC.pluginWriteFile, (_e, payload) => {
+    const { conversationId, pluginId, path, content } = PluginWriteFileSchema.parse(payload)
+    if (!pluginPermitted(conversationId, pluginId, 'data:write')) {
+      throw new Error('permission "data:write" not granted')
+    }
+    return writeCwdFile(conversationId, path, content)
+  })
+
+  ipcMain.handle(IPC.pluginNetFetch, (_e, payload) => {
+    const { conversationId, pluginId, url, opts } = PluginNetFetchSchema.parse(payload)
+    if (!pluginPermitted(conversationId, pluginId, 'net:fetch')) {
+      throw new Error('permission "net:fetch" not granted')
+    }
+    return netFetch(url, opts)
   })
 
   ipcMain.handle(IPC.pluginReadAsset, (_e, payload) => {

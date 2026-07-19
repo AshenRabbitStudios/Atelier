@@ -21,6 +21,77 @@ describe('jsonSchemaToZodShape', () => {
     const shape = jsonSchemaToZodShape({ x: 'weird' })
     expect(shape.x.safeParse({ anything: true }).success).toBe(true)
   })
+
+  it('accepts a JSON-Schema-subset object descriptor: nested object with required fields', () => {
+    const shape = jsonSchemaToZodShape({
+      opts: {
+        type: 'object',
+        properties: { name: { type: 'string' }, count: { type: 'number' } },
+        required: ['name']
+      }
+    })
+    expect(shape.opts.safeParse({ name: 'x', count: 2 }).success).toBe(true)
+    expect(shape.opts.safeParse({ name: 'x' }).success).toBe(true) // count optional
+    expect(shape.opts.safeParse({ count: 2 }).success).toBe(false) // name required
+  })
+
+  it('supports arrays, string enums, and top-level optional', () => {
+    const shape = jsonSchemaToZodShape({
+      tags: { type: 'array', items: { type: 'string' } },
+      mode: { type: 'string', enum: ['fast', 'slow'] },
+      note: { type: 'string', optional: true }
+    })
+    expect(shape.tags.safeParse(['a', 'b']).success).toBe(true)
+    expect(shape.tags.safeParse(['a', 1]).success).toBe(false)
+    expect(shape.mode.safeParse('fast').success).toBe(true)
+    expect(shape.mode.safeParse('nope').success).toBe(false)
+    expect(shape.note.safeParse(undefined).success).toBe(true) // top-level optional
+    expect(shape.mode.safeParse(undefined).success).toBe(false) // required by default
+  })
+
+  it('caps nesting depth, degrading a too-deep node to unknown (never throws)', () => {
+    // 6 levels of nested object — beyond the depth cap; the deepest becomes z.unknown().
+    const deep = {
+      type: 'object',
+      properties: {
+        a: {
+          type: 'object',
+          properties: {
+            b: {
+              type: 'object',
+              properties: { c: { type: 'object', properties: { d: { type: 'object' } } } }
+            }
+          }
+        }
+      }
+    }
+    expect(() => jsonSchemaToZodShape({ x: deep })).not.toThrow()
+    const shape = jsonSchemaToZodShape({ x: deep })
+    expect(shape.x.safeParse({ a: { b: { c: { d: { anything: true } } } } }).success).toBe(true)
+  })
+
+  it('passes a per-tool timeoutMs through to invoke', async () => {
+    const registry = fakeRegistry({
+      demo: {
+        manifest: toolManifest({
+          tools: [
+            { name: 'slow', description: 'slow', inputSchema: { x: 'string' }, timeoutMs: 120000 }
+          ]
+        }),
+        dir: '/p/demo'
+      }
+    })
+    const invoke = vi.fn().mockResolvedValue('done')
+    const tools = buildPluginTools(registry, { demo: { enabled: true, pinnedExports: [] } }, invoke)
+    await tools[0].handler({ x: 'y' }, undefined)
+    expect(invoke).toHaveBeenCalledWith(
+      'demo',
+      join('/p/demo', 'backend.cjs'),
+      'slow',
+      { x: 'y' },
+      120000
+    )
+  })
 })
 
 // A minimal fake registry returning the manifests/dirs we feed it.
@@ -61,7 +132,8 @@ describe('buildPluginTools / buildPluginToolServers', () => {
       'demo',
       join('/plugins/demo', 'backend.cjs'),
       'reverse_text',
-      { text: 'abc' }
+      { text: 'abc' },
+      undefined // no per-tool timeoutMs on this manifest
     )
     expect(out.content[0]).toEqual({ type: 'text', text: 'cba' })
 

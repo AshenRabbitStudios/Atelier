@@ -9,6 +9,10 @@ export type DockPosition = (typeof DOCK_POSITIONS)[number]
 export const PLUGIN_PERMISSIONS = [
   'data:subscribe',
   'data:publish',
+  // Write a UTF-8 text file inside the conversation cwd (`atelier.data.writeFile`). A distinct
+  // coupling class from reading/observing — mutating the workspace — so a plugin declares it apart
+  // from data:subscribe.
+  'data:write',
   'agent:read',
   'agent:send',
   'storage',
@@ -31,10 +35,15 @@ export const URL_CHANNEL_PREFIX = 'url:'
 export const PluginKind = z.enum(['panel', 'tool', 'both'])
 
 // An agent tool a plugin contributes (registered on the SDK in P4; declared now for the manifest).
+// `inputSchema` is a `{ field: descriptor }` map where a descriptor is EITHER the legacy shorthand
+// string ("string"|"number"|"boolean", trailing "?" = optional) OR a JSON-Schema-subset object
+// ({ type, items, properties, required, enum, description, optional }). `timeoutMs` overrides the
+// default 30s per-call cap for a long-running tool (e.g. a build).
 export const PluginToolSchema = z.object({
   name: z.string().min(1),
   description: z.string().min(1),
-  inputSchema: z.record(z.string(), z.unknown()).optional()
+  inputSchema: z.record(z.string(), z.unknown()).optional(),
+  timeoutMs: z.number().int().positive().max(600000).optional()
 })
 
 // A pinnable context export (injected into agent context in P4; declared now so persistence is
@@ -86,6 +95,11 @@ export const ManifestSchema = z.object({
   kind: PluginKind.default('panel'),
   entry: z.string().min(1).optional(), // required when kind includes "panel" — checked in registry
   backend: z.string().min(1).optional(),
+  // When true the backend is a long-running SERVICE: spawned when the plugin is first enabled in a
+  // conversation (not lazily on a tool call) and kept alive until it's disabled in the last one. A
+  // service may push onto DataBus channels (needs `data:publish`). Requires `backend` (checked in
+  // the registry). Default false = an on-demand tool responder (spawn on first call, idle otherwise).
+  service: z.boolean().default(false),
   permissions: z.array(z.enum(PLUGIN_PERMISSIONS)).default([]),
   defaultDock: z.enum(DOCK_POSITIONS).default('right'),
   tools: z.array(PluginToolSchema).default([]),

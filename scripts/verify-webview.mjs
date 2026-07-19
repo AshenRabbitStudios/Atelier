@@ -97,7 +97,37 @@ async function main() {
       if (/^https?:/i.test(url)) setImmediate(() => void guest.loadURL(url))
       return { action: 'deny' }
     })
+    // Post-attach nav guard (Phase 0 / main.ts installWebviewGuard): confine every navigation to
+    // http(s) so page JS / redirects can't reach file:// etc.
+    const blockNonHttp = (details) => {
+      if (details.url && !/^https?:\/\//i.test(details.url)) details.preventDefault()
+    }
+    guest.on('will-navigate', blockNonHttp)
+    guest.on('will-redirect', blockNonHttp)
   })
+
+  // Mirror of the browserRead.ts drive builders (keep in sync by hand, like the guard above).
+  const execScript = (js) =>
+    '(async function () { try { var __r = await eval(' +
+    JSON.stringify(js) +
+    "); var __s; try { __s = JSON.stringify(__r); } catch (e) { return { error: 'not serializable' }; } " +
+    "if (__s === undefined) return { ok: null }; if (__s.length > 65536) return { error: 'too large' }; " +
+    'return { ok: JSON.parse(__s) }; } catch (e) { return { error: (e && e.message) ? e.message : String(e) }; } })()'
+  const clickScript = (sel) =>
+    '(function () { var el = document.querySelector(' +
+    JSON.stringify(sel) +
+    "); if (!el) return { error: 'no match' }; el.click(); return { ok: true }; })()"
+  const fillScript = (sel, val) =>
+    '(function () { var el = document.querySelector(' +
+    JSON.stringify(sel) +
+    "); if (!el) return { error: 'no match' }; " +
+    "var d = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value'); " +
+    'if (d && d.set) d.set.call(el, ' +
+    JSON.stringify(val) +
+    '); else el.value = ' +
+    JSON.stringify(val) +
+    "; el.dispatchEvent(new Event('input', { bubbles: true })); " +
+    "el.dispatchEvent(new Event('change', { bubbles: true })); return { ok: true }; })()"
 
   const hostHtml = `<!doctype html><html><body style="margin:0">
     <webview id="wv" src="${base}/page1" allowpopups style="width:780px;height:560px"></webview>
@@ -169,6 +199,35 @@ async function main() {
   } catch (err) {
     console.log(`SKIP (bonus) https check — ${err && err.message ? err.message : err}`)
   }
+
+  // 8. Drive verbs (Phase 6): exec / fill / click on the local fixture.
+  await guest.loadURL(`${base}/page1`)
+  await withTimeout(once(guest, 'did-finish-load'), 8000, 'reload page1 for drive tests')
+  const execRes = await guest.executeJavaScript(execScript('document.title'))
+  record(execRes && execRes.ok === 'Fixture Page', 'exec returns page data as { ok }')
+  const execErr = await guest.executeJavaScript(execScript('throw new Error("boom")'))
+  record(
+    execErr && /boom/.test(execErr.error || ''),
+    'exec surfaces a thrown error as { error }',
+    execErr && execErr.error
+  )
+  const fillRes = await guest.executeJavaScript(fillScript('input', 'typed value'))
+  const readback = await guest.executeJavaScript('document.querySelector("input").value')
+  record(
+    fillRes && fillRes.ok === true && readback === 'typed value',
+    'fill sets an input value + fires events',
+    readback
+  )
+  const noMatch = await guest.executeJavaScript(clickScript('#nope'))
+  record(noMatch && /no match/.test(noMatch.error || ''), 'click on no match returns { error }')
+  const clickNav = once(guest, 'did-navigate')
+  const clickRes = await guest.executeJavaScript(clickScript('a'))
+  await withTimeout(clickNav, 8000, 'click navigation')
+  record(
+    clickRes && clickRes.ok === true && guest.getURL().endsWith('/page2'),
+    'click follows a link',
+    guest.getURL()
+  )
 
   const failed = results.filter((r) => !r.ok).length
   console.log(`\n${results.length - failed}/${results.length} passed`)

@@ -126,6 +126,9 @@ export class PluginRegistry {
     if ((manifest.kind === 'panel' || manifest.kind === 'both') && !manifest.entry) {
       return { id: folderId, dir, valid: false, error: 'a panel plugin must declare "entry"' }
     }
+    if (manifest.service && !manifest.backend) {
+      return { id: folderId, dir, valid: false, error: 'a service plugin must declare "backend"' }
+    }
     return { id: manifest.id, dir, valid: true, manifest }
   }
 

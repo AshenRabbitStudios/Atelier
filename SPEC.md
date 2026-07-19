@@ -30,8 +30,12 @@ web docking ecosystem, and web-native plugins.
   the host via postMessage RPC (PLUGIN_API.md). Isolation = crash containment + clean
   hot-reload.
 
-Security: `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true` for plugin
-webviews. The renderer cannot touch fs/process/SDK directly — only through the bridge.
+Isolation mechanics: `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`
+for plugin webviews. The renderer cannot touch fs/process/SDK directly — only through the
+bridge. This is fault containment and a clean coupling contract (plugins are user- or
+agent-authored, not adversarial); the only genuinely untrusted content is what arrives
+from the outside web (the embedded browser surface, fetched URLs), which IS treated as
+hostile.
 
 ## 3. The chat interface (core)
 

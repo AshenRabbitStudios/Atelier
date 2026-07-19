@@ -44,10 +44,14 @@ export interface DataSource {
   ): SourceHandle | Promise<SourceHandle>
 }
 
+// Per-channel history depth kept in memory (replayed on demand via `getHistory`). Bounds memory
+// for a chatty channel (e.g. bash-stream chunks) while giving a late-mounting pane recent context.
+const HISTORY_CAP = 200
+
 export class DataBus {
   private subs = new Map<string, Set<string>>() // (conv,channel) -> subscribing pluginIds
   private handles = new Map<string, SourceHandle>() // (conv,channel) -> open source
-  private last = new Map<string, unknown>() // (conv,channel) -> last value (replayed to late joiners)
+  private history = new Map<string, unknown[]>() // (conv,channel) -> bounded ring of recent values
 
   constructor(
     private sink: DataSink,
@@ -80,10 +84,18 @@ export class DataBus {
           throw err
         }
       }
-    } else if (this.last.has(k)) {
+    } else if (this.history.has(k)) {
       // A late joiner gets the channel's current value immediately, not only on the next change.
-      this.sink({ conversationId, pluginId, channel, data: this.last.get(k) })
+      const buf = this.history.get(k)!
+      this.sink({ conversationId, pluginId, channel, data: buf[buf.length - 1] })
     }
+  }
+
+  /** The recent values on a channel (oldest→newest), capped; the last `limit` if given. */
+  getHistory(conversationId: string, channel: string, limit?: number): unknown[] {
+    const buf = this.history.get(keyOf(conversationId, channel)) ?? []
+    if (limit === undefined || limit >= buf.length) return [...buf]
+    return buf.slice(buf.length - Math.max(0, limit))
   }
 
   /** Remove one subscriber; closes the backing source when the channel goes quiet. */
@@ -112,12 +124,15 @@ export class DataBus {
     this.handles.get(k)?.close()
     this.handles.delete(k)
     this.subs.delete(k)
-    this.last.delete(k)
+    this.history.delete(k)
   }
 
   private emit(conversationId: string, channel: string, data: unknown): void {
     const k = keyOf(conversationId, channel)
-    this.last.set(k, data)
+    const buf = this.history.get(k) ?? []
+    buf.push(data)
+    if (buf.length > HISTORY_CAP) buf.splice(0, buf.length - HISTORY_CAP)
+    this.history.set(k, buf)
     const set = this.subs.get(k)
     if (!set) return
     for (const pluginId of set) this.sink({ conversationId, pluginId, channel, data })

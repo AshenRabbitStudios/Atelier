@@ -4,6 +4,11 @@
 // runs fresh code — CLAUDE.md: backend logic is never hot-reloaded in-process).
 //
 // Protocol: the parent posts { id, tool, input }; reply with { id, result } or { id, error }.
+// The parent may also post lifecycle messages a backend can ignore or use: { hello: { pluginId,
+// service } } on spawn, { enable/disable: { conversationId } } as a service plugin is toggled, and
+// { bye: { conversationId } }. A SERVICE backend may push unsolicited { publish: { conversationId,
+// channel, data } } messages (needs the plugin's data:publish permission). This example is an
+// on-demand tool responder, so it just ignores the lifecycle messages.
 
 const handlers = {
   reverse_text: (input) => {
@@ -14,7 +19,9 @@ const handlers = {
 }
 
 process.parentPort.on('message', (e) => {
-  const { id, tool, input } = (e && e.data) || {}
+  const msg = (e && e.data) || {}
+  if (msg.tool === undefined) return // a lifecycle message (hello/enable/disable/bye) — nothing to do
+  const { id, tool, input } = msg
   try {
     const fn = handlers[tool]
     if (!fn) throw new Error(`unknown tool: ${tool}`)

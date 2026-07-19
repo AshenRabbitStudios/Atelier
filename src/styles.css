@@ -543,6 +543,10 @@ body {
   position: relative;
   width: 100%;
   height: 100%;
+  /* Clip the absolutely-positioned browser webview to the pane. Without this a plugin could
+     set oversized bounds and composite a live remote page over the whole app — chat, approval
+     cards, everything — a spoofing surface (ARCH_REVIEW_2026-07-19 P0 #3). */
+  overflow: hidden;
 }
 .plugin-frame {
   width: 100%;

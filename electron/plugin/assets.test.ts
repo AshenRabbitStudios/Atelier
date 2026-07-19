@@ -23,11 +23,19 @@ describe('createAssetReader', () => {
     expect(r).toEqual({ dataUrl: `data:image/png;base64,${PNG.toString('base64')}` })
   })
 
-  it('refuses a non-image extension', async () => {
-    writeFileSync(join(dir, 'secrets.env'), 'API_KEY=1')
+  it('serves a known non-image type with the right mime', async () => {
+    const bytes = Buffer.from('%PDF-1.4')
+    writeFileSync(join(dir, 'doc.pdf'), bytes)
     const read = createAssetReader((_c, rel) => join(dir, rel))
-    const r = await read(CONV, 'secrets.env')
-    expect(r).toMatchObject({ error: expect.stringContaining('unsupported image type') })
+    const r = await read(CONV, 'doc.pdf')
+    expect(r).toEqual({ dataUrl: `data:application/pdf;base64,${bytes.toString('base64')}` })
+  })
+
+  it('serves an unknown extension as application/octet-stream (no type refusal)', async () => {
+    writeFileSync(join(dir, 'blob.xyz'), Buffer.from('data'))
+    const read = createAssetReader((_c, rel) => join(dir, rel))
+    const r = await read(CONV, 'blob.xyz')
+    expect(r).toMatchObject({ dataUrl: expect.stringContaining('data:application/octet-stream') })
   })
 
   it('refuses a path the resolver rejects (out of bounds)', async () => {

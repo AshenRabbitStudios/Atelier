@@ -229,4 +229,33 @@ describe('PluginBackendManager — service lifecycle + crash budget', () => {
         .map((m) => (m.enable as { conversationId: string }).conversationId)
     ).toEqual(['conv-1'])
   })
+
+  // The real utilityProcess transport fires `exit` ASYNCHRONOUSLY after kill(), so a killed child's
+  // exit arrives once it has already been replaced/removed. These lock in the identity guard in
+  // onExit (without it, a stale exit evicts the fresh child and miscounts deliberate stops as crashes).
+  it('ignores a stale child exit that arrives after reset re-spawned (keeps the fresh child)', () => {
+    const f = backendFactory()
+    const mgr = new PluginBackendManager(f.spawn)
+    mgr.startService('p', '/b', 'conv-1') // spawned[0] = current
+    mgr.reset('p') // spawned[1] = current; spawned[0] killed
+    expect(f.spawned.length).toBe(2)
+    f.spawned[0].exit() // old child's late exit (production timing)
+    void mgr.invoke('p', '/b', 't', {}) // reuses spawned[1]; would re-spawn if it were evicted
+    expect(f.spawned.length).toBe(2)
+  })
+
+  it('does not wedge on repeated deliberate stops (their late exits are not crashes)', async () => {
+    const f = backendFactory()
+    const mgr = new PluginBackendManager(f.spawn)
+    for (let i = 0; i < 4; i++) {
+      mgr.invoke('p', '/b', 't', {}).catch(() => {}) // spawns child i (current)
+      const child = f.last()
+      mgr.stop('p') // removes child from the map, then kill()
+      child.exit() // production kill() fires this asynchronously — the stale exit
+    }
+    const p = mgr.invoke('p', '/b', 'echo', {})
+    const sent = f.last().posted.find((m) => m.tool === 'echo') as { id: number }
+    f.last().emit({ id: sent.id, result: 'ok' })
+    await expect(p).resolves.toBe('ok') // not falsely wedged
+  })
 })

@@ -189,6 +189,11 @@ export class PluginBackendManager {
     })
 
     transport.onExit(() => {
+      // The real transport's kill() fires `exit` ASYNCHRONOUSLY, so a stop()/reset() that already
+      // removed (and possibly replaced) this child will see its exit arrive late. If we are no
+      // longer the current child, this is that stale exit: do nothing — else we'd evict the fresh
+      // child from `children` and miscount a deliberate stop as a crash (false wedge).
+      if (this.children.get(pluginId) !== child) return
       this.children.delete(pluginId)
       this.failAll(child, `plugin "${pluginId}" backend exited`)
       // Crash budget: an exit within CRASH_WINDOW of spawn is a crash; enough in a row → wedge.

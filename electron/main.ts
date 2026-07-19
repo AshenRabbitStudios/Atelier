@@ -175,7 +175,10 @@ const agents = new AgentManager(
     const toolServers = buildPluginToolServers(
       plugins,
       pluginState,
-      (pluginId, backendPath, t, i) => backends.invoke(pluginId, backendPath, t, i)
+      // Forward the per-tool timeout override (5th arg) — dropping it pins every tool to the 30s
+      // default and defeats manifest `timeoutMs` (e.g. a long build).
+      (pluginId, backendPath, t, i, timeoutMs) =>
+        backends.invoke(pluginId, backendPath, t, i, timeoutMs)
     )
     // The built-in `atelier` introspection server is always present (independent of enablement) so
     // the agent can always inspect its environment; merged with the per-conversation servers.

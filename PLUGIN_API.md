@@ -184,7 +184,66 @@ interface AtelierHost {
   agent: {
     info(): Promise<{ id: string; title: string; cwd: string; status: string } | null>
     onEvent(cb: (e: unknown) => void): () => void // AgentEvent stream; returns unsubscribe
-    send(text: string): Promise<void>
+    // Bounded backfill of this conversation's normalized AgentEvent trace (oldest→newest, default
+    // 200, max 1000) — for a pane that mounts mid-conversation. Needs "agent:read". Main keeps a
+    // bounded in-memory ring (last 1000) per conversation.
+    history(limit?: number): Promise<unknown[] | { error: string }>
+    send(text: string): Promise<void> // needs "agent:send"
+    // Stage text into this conversation's chat composer at the cursor WITHOUT sending (distinct from
+    // send). Length-capped (~4KB). Needs "agent:compose". { error: 'composer not open' } if the
+    // ChatPanel for this conversation is not mounted.
+    compose(text: string): Promise<{ ok: true } | { error: string }>
+  }
+
+  // fs — read-only, cwd-scoped directory enumeration (needs "fs:list"). NON-RECURSIVE (one level
+  // per call); `ignored` is computed host-side from .gitignore + built-ins (.git/, node_modules/).
+  // Entries capped at 5000 (truncated:true). A path escaping the cwd returns { error }.
+  fs: {
+    list(dir?: string): Promise<
+      | {
+          entries: {
+            name: string
+            kind: 'file' | 'dir'
+            size?: number
+            mtime?: number
+            ignored: boolean
+          }[]
+          truncated?: boolean
+        }
+      | { error: string }
+    >
+  }
+
+  // shell — open a cwd-relative file in the OS default handler (needs "shell:open"). Re-gated to the
+  // conversation cwd (never the app's unscoped openPath); refuses an escaping path with { error }.
+  shell: {
+    openPath(path: string): Promise<{ ok: true } | { error: string }>
+  }
+
+  // os — OS-level attention (needs "os:notify"). Electron notification (silent unless sound); `tag`
+  // coalesces same-tag notifications from this plugin; host-side rate cap (≤1/plugin/3s, excess
+  // dropped with { error }). A click focuses/raises the Atelier window and fires onNotificationClick.
+  os: {
+    notify(n: {
+      title: string
+      body: string
+      sound?: boolean
+      tag?: string
+    }): Promise<{ id: string } | { error: string }>
+    onNotificationClick(cb: (e: { id: string }) => void): () => void // this plugin's notifs only
+    flashFrame(on: boolean): Promise<void>
+    setBadgeCount(n: number): Promise<void> // best-effort (no-op where unsupported)
+    isWindowFocused(): Promise<boolean>
+    onWindowFocusChange(cb: (focused: boolean) => void): () => void
+  }
+
+  // backend — call an operation on THIS plugin's OWN service backend (the plugin must declare
+  // service:true + backend). No extra permission (a pane only reaches its own backend). The host
+  // posts { id, rpc: { conversationId, op, params } }; the backend replies { id, result } | { id,
+  // error }. 30s default / 600s max timeout, like a tool. Replaces abusing the DataBus for pane→
+  // backend calls.
+  backend: {
+    call(op: string, params?: unknown, timeoutMs?: number): Promise<unknown>
   }
 
   // tools — register an agent-callable tool implemented by this plugin
@@ -230,8 +289,18 @@ Declared in the manifest, enforced by the host. Minimum useful set:
   Split from `net:fetch` because executing a remote page's JS is a different capability class
   than fetching its text. The surface is host-composited and hardened; the plugin sandbox never
   holds the webview itself.
-- `agent:read`, `agent:send` — observe / drive agent instances.
-- `storage` — per-plugin persisted KV.
+- `agent:read`, `agent:send` — observe / drive agent instances. `agent:read` also covers
+  `agent.history(limit?)` (bounded trace backfill).
+- `agent:compose` — stage text into this conversation's chat composer without sending
+  (`atelier.agent.compose`). Narrower than `agent:send` (which submits a turn).
+- `fs:list` — non-recursive, cwd-scoped directory listing (`atelier.fs.list`). Names only (with an
+  `ignored` flag) — narrower than `data:subscribe`, which tails file contents.
+- `shell:open` — open a cwd-scoped file in the OS default handler (`atelier.shell.openPath`). Hands a
+  path to the OS shell, a distinct coupling class from reading.
+- `os:notify` — OS-level attention: notifications, taskbar flash/badge, window-focus queries
+  (`atelier.os.*`).
+- `storage` — per-plugin persisted KV (pane via `atelier.storage.*`; a service backend via the
+  `{ id, storage: … }` parentPort protocol — see §5).
 - `tools` — register agent tools (requires a `backend` module).
 
 Permissions are **capability declarations**, not security enforcement: they document a
@@ -258,12 +327,25 @@ Unloading the plugin unregisters the tools.
 lazily on the first tool call, idle otherwise, killed on disable/reload. Set `"service": true`
 (requires `backend`) to make it a long-running service: spawned when the plugin is first enabled in a
 conversation, kept alive until it's disabled in the last one. The child talks to the host over
-`process.parentPort`: host → `{ id, tool, input }`, child → `{ id, result | error }`; plus lifecycle
-`{ hello: { pluginId, service } }` on spawn and `{ enable | disable: { conversationId } }` as a
-service is toggled. A service may push unsolicited `{ publish: { conversationId, channel, data } }`
-onto a DataBus channel of a conversation it's enabled in (needs `data:publish`). Containment: a
-backend that crashes within 5s of spawn 3× in a row is wedged (calls rejected) until the plugin is
-reloaded; each child's V8 heap is capped (`--max-old-space-size=512`).
+`process.parentPort`: host → `{ id, tool, input, conversationId? }`, child → `{ id, result | error }`;
+plus lifecycle `{ hello: { pluginId, service, cwd? } }` on spawn and `{ enable | disable: {
+conversationId, cwd? } }` as a service is toggled (the `cwd` and per-invoke `conversationId` let a
+backend scope its work). A service may push unsolicited `{ publish: { conversationId, channel, data }
+}` onto a DataBus channel of a conversation it's enabled in (needs `data:publish`).
+
+**Panel→backend RPC.** A pane calls its own service backend via `atelier.backend.call(op, params?,
+timeoutMs?)`: the host posts `{ id, rpc: { conversationId, op, params } }` and the backend replies
+`{ id, result } | { id, error }` (same 30s default / 600s max timeout as a tool). No extra permission
+— a pane only ever reaches its own backend. This replaces abusing the DataBus for request/response.
+
+**Backend storage.** A backend needs config the pane wrote even when the pane is closed. It reads/
+writes the SAME per-(conversation, plugin) storage by posting `{ id, storage: { op: 'get' | 'set' |
+'keys', conversationId, key?, value? } }` and awaiting the matching `{ id, result } | { id, error }`.
+Gated by the plugin's `storage` permission. (See `/plugins/examples/tool-plugin/backend.cjs` for the
+tiny correlate-by-id helper.)
+
+Containment: a backend that crashes within 5s of spawn 3× in a row is wedged (calls rejected) until
+the plugin is reloaded; each child's V8 heap is capped (`--max-old-space-size=512`).
 
 ## 6. The self-hosting loop (why the folder format matters)
 

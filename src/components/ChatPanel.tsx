@@ -12,6 +12,7 @@ import {
 } from '@shared/events'
 import type { AgentError, Block, Message } from '../transcriptModel'
 import { storeFor } from '../services/conversationViewStore'
+import { registerComposer } from '../services/composerRegistry'
 import { Markdown } from './Markdown'
 import { ToolCallView } from './ToolCall'
 
@@ -478,6 +479,7 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
       )}
 
       <Composer
+        conversationId={instanceId}
         busy={busy}
         initialDraft={store.draft}
         onDraftChange={(t) => {
@@ -576,12 +578,14 @@ function TaskViewer({
  * being disposed on a conversation switch.
  */
 function Composer({
+  conversationId,
   busy,
   initialDraft,
   onDraftChange,
   onSend,
   onInterrupt
 }: {
+  conversationId: string
   busy: boolean
   initialDraft: string
   onDraftChange: (text: string) => void
@@ -589,10 +593,35 @@ function Composer({
   onInterrupt: () => void
 }) {
   const [input, setInput] = useState(initialDraft)
+  const taRef = useRef<HTMLTextAreaElement>(null)
   const change = (t: string) => {
     setInput(t)
     onDraftChange(t)
   }
+  // A3 — register this mounted composer so `atelier.agent.compose(text)` can stage text at the
+  // cursor without sending. Insert at the current selection (fall back to append) and keep the draft
+  // store in sync. Unregisters on unmount / conversation switch so a closed composer reports "not open".
+  useEffect(() => {
+    return registerComposer(conversationId, (text) => {
+      setInput((prev) => {
+        const ta = taRef.current
+        const at = ta ? (ta.selectionStart ?? prev.length) : prev.length
+        const next = prev.slice(0, at) + text + prev.slice(ta ? (ta.selectionEnd ?? at) : at)
+        onDraftChange(next)
+        // Restore the caret just after the inserted text on the next tick.
+        if (ta) {
+          const caret = at + text.length
+          requestAnimationFrame(() => {
+            ta.focus()
+            ta.setSelectionRange(caret, caret)
+          })
+        }
+        return next
+      })
+    })
+    // onDraftChange identity is stable enough (a store setter); re-run only on conversation change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId])
   const submit = () => {
     const t = input.trim()
     if (!t) return // allowed while busy — the message queues for after the current turn
@@ -603,6 +632,7 @@ function Composer({
     <div className="composer">
       <div className="composer-field">
         <textarea
+          ref={taRef}
           value={input}
           onChange={(e) => change(e.target.value)}
           onKeyDown={(e) => {

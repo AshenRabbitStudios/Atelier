@@ -259,3 +259,96 @@ describe('PluginBackendManager — service lifecycle + crash budget', () => {
     await expect(p).resolves.toBe('ok') // not falsely wedged
   })
 })
+
+describe('PluginBackendManager — lifecycle context, RPC, and storage (A6/A7/A8)', () => {
+  it('A6: includes cwd in hello + enable and conversationId on a tool invoke', () => {
+    const f = backendFactory()
+    const mgr = new PluginBackendManager(f.spawn, undefined, undefined, (conv) =>
+      conv === 'conv-1' ? '/work/one' : null
+    )
+    mgr.startService('p', '/b', 'conv-1')
+    const posted = f.last().posted
+    expect((posted.find((m) => m.hello) as { hello: { cwd?: string } }).hello.cwd).toBe('/work/one')
+    expect((posted.find((m) => m.enable) as { enable: { cwd?: string } }).enable.cwd).toBe(
+      '/work/one'
+    )
+    void mgr.invoke('p', '/b', 't', { a: 1 }, undefined, 'conv-1')
+    const invoke = posted.find((m) => m.tool === 't') as { conversationId?: string }
+    expect(invoke.conversationId).toBe('conv-1')
+  })
+
+  it('A7: callRpc posts { rpc } and resolves the raw JSON result', async () => {
+    const f = backendFactory()
+    const mgr = new PluginBackendManager(f.spawn)
+    mgr.startService('p', '/b', 'conv-1') // a live service backend is required
+    const p = mgr.callRpc('p', 'ping', 'conv-1', { n: 2 })
+    const sent = f.last().posted.find((m) => m.rpc) as {
+      id: number
+      rpc: { conversationId: string; op: string; params: unknown }
+    }
+    expect(sent.rpc).toEqual({ conversationId: 'conv-1', op: 'ping', params: { n: 2 } })
+    f.last().emit({ id: sent.id, result: { pong: 2 } }) // structured, not a string
+    await expect(p).resolves.toEqual({ pong: 2 })
+  })
+
+  it('A7: callRpc rejects when there is no running service backend', async () => {
+    const f = backendFactory()
+    const mgr = new PluginBackendManager(f.spawn)
+    await expect(mgr.callRpc('p', 'op', 'conv-1', undefined)).rejects.toThrow(/no running service/)
+  })
+
+  it('A7: callRpc rejects on the backend error and on timeout', async () => {
+    const f = backendFactory()
+    const mgr = new PluginBackendManager(f.spawn)
+    mgr.startService('p', '/b', 'conv-1')
+    const p = mgr.callRpc('p', 'op', 'conv-1', undefined)
+    const sent = f.last().posted.find((m) => m.rpc) as { id: number }
+    f.last().emit({ id: sent.id, error: 'nope' })
+    await expect(p).rejects.toThrow('nope')
+  })
+
+  it('A8: brokers a backend storage request and replies { id, result }', async () => {
+    const f = backendFactory()
+    const calls: unknown[] = []
+    const mgr = new PluginBackendManager(
+      f.spawn,
+      undefined,
+      undefined,
+      undefined,
+      async (pid, req) => {
+        calls.push({ pid, req })
+        return req.op === 'get' ? 'stored-value' : null
+      }
+    )
+    mgr.startService('p', '/b', 'conv-1')
+    f.last().emit({ id: 7, storage: { op: 'get', conversationId: 'conv-1', key: 'k' } })
+    await Promise.resolve()
+    await Promise.resolve()
+    const reply = f.last().posted.find((m) => m.id === 7) as { id: number; result?: unknown }
+    expect(reply.result).toBe('stored-value')
+    expect(calls[0]).toEqual({ pid: 'p', req: { op: 'get', conversationId: 'conv-1', key: 'k' } })
+  })
+
+  it('A8: replies { id, error } when the storage broker rejects (e.g. permission denied)', async () => {
+    const f = backendFactory()
+    const mgr = new PluginBackendManager(f.spawn, undefined, undefined, undefined, async () => {
+      throw new Error('permission "storage" not granted')
+    })
+    mgr.startService('p', '/b', 'conv-1')
+    f.last().emit({ id: 9, storage: { op: 'set', conversationId: 'conv-1', key: 'k', value: 1 } })
+    await Promise.resolve()
+    await Promise.resolve()
+    const reply = f.last().posted.find((m) => m.id === 9) as { id: number; error?: string }
+    expect(reply.error).toContain('storage')
+  })
+
+  it('A8: refuses cleanly when no storage broker is configured', async () => {
+    const f = backendFactory()
+    const mgr = new PluginBackendManager(f.spawn)
+    mgr.startService('p', '/b', 'conv-1')
+    f.last().emit({ id: 3, storage: { op: 'keys', conversationId: 'conv-1' } })
+    await Promise.resolve()
+    const reply = f.last().posted.find((m) => m.id === 3) as { id: number; error?: string }
+    expect(reply.error).toContain('storage not available')
+  })
+})

@@ -4,7 +4,8 @@ import {
   type AgentEvent,
   type AtelierAPI,
   type ContextChangedEvent,
-  type DataMessageEvent
+  type DataMessageEvent,
+  type OsEvent
 } from './shared/events.js'
 
 // The ONLY bridge between the sandboxed renderer and the privileged main process.
@@ -90,6 +91,35 @@ const api: AtelierAPI = {
       ipcRenderer.invoke(IPC.pluginNetFetch, { conversationId, pluginId, url, opts }),
     readAsset: (conversationId, pluginId, path) =>
       ipcRenderer.invoke(IPC.pluginReadAsset, { conversationId, pluginId, path }),
+    fsList: (conversationId, pluginId, dir) =>
+      ipcRenderer.invoke(IPC.pluginFsList, { conversationId, pluginId, dir }),
+    shellOpen: (conversationId, pluginId, path) =>
+      ipcRenderer.invoke(IPC.pluginShellOpen, { conversationId, pluginId, path }),
+    notify: (conversationId, pluginId, n) =>
+      ipcRenderer.invoke(IPC.pluginNotify, { conversationId, pluginId, ...n }),
+    flashFrame: (conversationId, pluginId, on) =>
+      ipcRenderer.invoke(IPC.pluginFlashFrame, { conversationId, pluginId, on }),
+    setBadgeCount: (conversationId, pluginId, count) =>
+      ipcRenderer.invoke(IPC.pluginBadgeCount, { conversationId, pluginId, count }),
+    isWindowFocused: (conversationId, pluginId) =>
+      ipcRenderer.invoke(IPC.pluginWindowFocused, { conversationId, pluginId }),
+    agentHistory: (conversationId, pluginId, limit) =>
+      ipcRenderer.invoke(IPC.pluginAgentHistory, { conversationId, pluginId, limit }),
+    backendCall: (conversationId, pluginId, op, params, timeoutMs) =>
+      ipcRenderer.invoke(IPC.pluginBackendCall, {
+        conversationId,
+        pluginId,
+        op,
+        params,
+        timeoutMs
+      }),
+    onOsEvent: (cb) => {
+      const listener = (_e: IpcRendererEvent, evt: OsEvent) => cb(evt)
+      ipcRenderer.on(IPC.osEvent, listener)
+      return () => {
+        ipcRenderer.removeListener(IPC.osEvent, listener)
+      }
+    },
     onChanged: (cb) => {
       const listener = (): void => cb()
       ipcRenderer.on(IPC.pluginsChanged, listener)

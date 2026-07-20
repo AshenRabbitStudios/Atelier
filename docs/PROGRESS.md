@@ -896,3 +896,28 @@ Needs human spot-check (live app — supervisor):
 9. Chart interactions: hover tooltips, legend, "view as table" toggle; scatter + pie boards.
 10. Mermaid pan/zoom (wheel/drag), copy-source, download-.svg buttons.
 11. Theme: verify boards read host CSS vars in both dark and light themes.
+## Host-API addendum Tier 1 (A1–A8) — landed
+
+Implemented the full Tier-1 slice of docs/plugin-proposals/HOST-ADDENDUM.md:
+
+- A1 atelier.fs.list(dir?) — perm fs:list; cwd-scoped non-recursive listing, host-side
+  gitignore `ignored` flag, 5000-entry cap (electron/plugin/fsList.ts + test).
+- A2 atelier.shell.openPath(path) — perm shell:open; re-gated cwd-scoped opener
+  (electron/plugin/openPath.ts + test). Renderer's app.openPath stays unexposed to sandboxes.
+- A3 atelier.agent.compose(text) — perm agent:compose; stages into the pane's ChatPanel
+  composer at the cursor via src/services/composerRegistry.ts; { error:'composer not open' }.
+- A4 atelier.os.* — perm os:notify; Electron Notification + tag coalescing + rate cap, flash,
+  badge (best-effort), focus query, notification-click + window-focus push events
+  (electron/plugin/osNotify.ts + test).
+- A5 atelier.agent.history(limit?) — perm agent:read; per-conversation ring (cap 1000),
+  oldest→newest, default 200/max 1000 (electron/plugin/agentHistory.ts + test).
+- A6 cwd in hello/enable, conversationId on tool invokes (PluginBackendManager).
+- A7 atelier.backend.call(op, params?, timeoutMs?) — panel→own service backend RPC
+  (PluginBackendManager.callRpc + tests).
+- A8 backend storage protocol { id, storage:{op,conversationId,key?,value?} } gated by the
+  plugin's `storage` permission (PluginBackendManager broker + tests).
+  Docs updated: PLUGIN_API.md, in-app plugin_authoring_guide, example backend.cjs.
+  Needs human spot-check: OS notifications / taskbar flash / badge behavior on real Windows
+  (headless tests cover the manager logic, not Electron's Notification/flashFrame/setBadgeCount);
+  composer insertion caret behavior in the live app.
+  Future work: A5 history ring is in-memory only (no persistence across restart).

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { URL_CHANNEL_PREFIX } from '@shared/plugins'
+import { composeInto } from '../services/composerRegistry'
 import {
   BROWSER_READ_SCRIPT,
   browserExecScript,
@@ -140,6 +141,19 @@ export function PluginPane({
         { __atelierEvent: true, event: 'data', payload: { channel: evt.channel, data: evt.data } },
         '*'
       )
+    })
+
+    // A4 — OS events (notification click / window focus). A notification-click is routed to the
+    // owning plugin (main tags it with pluginId); a window-focus event carries no plugin, so we only
+    // forward it once this pane opted in via os.onWindowFocusChange. Both become an 'os' frame event.
+    let wantsFocusEvents = false
+    const offOsEvent = window.atelier.plugins.onOsEvent((evt) => {
+      if (evt.kind === 'notification-click') {
+        if (evt.pluginId !== pluginId) return
+      } else if (evt.kind === 'window-focus') {
+        if (!wantsFocusEvents) return
+      }
+      frame.contentWindow?.postMessage({ __atelierEvent: true, event: 'os', payload: evt }, '*')
     })
 
     // Channels this pane subscribed to (channel -> the conversation it was scoped to), so we can
@@ -437,7 +451,119 @@ export function PluginPane({
             await window.atelier.agent.send(conv, String(args[0] ?? ''))
             return reply(d.id, true)
           }
+          if (d.method === 'compose') {
+            // A3 — stage text into THIS conversation's composer without sending. Renderer-local:
+            // there is no host round-trip; the composer registry inserts at the cursor. The 4KB cap
+            // keeps a runaway pane from flooding the input. `{ error }` when the composer isn't mounted.
+            if (!perms().includes('agent:compose')) {
+              return reply(d.id, false, undefined, 'permission "agent:compose" not granted')
+            }
+            const text = String(args[0] ?? '').slice(0, 4096)
+            const ok = composeInto(conv, text)
+            return reply(d.id, true, ok ? { ok: true } : { error: 'composer not open' })
+          }
+          if (d.method === 'history') {
+            if (!perms().includes('agent:read')) {
+              return reply(d.id, false, undefined, 'permission "agent:read" not granted')
+            }
+            const limit = typeof args[0] === 'number' ? args[0] : undefined
+            return reply(
+              d.id,
+              true,
+              await window.atelier.plugins.agentHistory(conv, pluginId, limit)
+            )
+          }
           return reply(d.id, false, undefined, `unknown agent method "${d.method}"`)
+        }
+        if (d.ns === 'fs') {
+          if (!perms().includes('fs:list')) {
+            return reply(d.id, false, undefined, 'permission "fs:list" not granted')
+          }
+          const conv = getConversationId()
+          if (!conv) return reply(d.id, false, undefined, 'no active conversation')
+          if (d.method === 'list') {
+            const dir = args[0] == null ? undefined : String(args[0])
+            return reply(d.id, true, await window.atelier.plugins.fsList(conv, pluginId, dir))
+          }
+          return reply(d.id, false, undefined, `unknown fs method "${d.method}"`)
+        }
+        if (d.ns === 'shell') {
+          if (!perms().includes('shell:open')) {
+            return reply(d.id, false, undefined, 'permission "shell:open" not granted')
+          }
+          const conv = getConversationId()
+          if (!conv) return reply(d.id, false, undefined, 'no active conversation')
+          if (d.method === 'openPath') {
+            return reply(
+              d.id,
+              true,
+              await window.atelier.plugins.shellOpen(conv, pluginId, String(args[0] ?? ''))
+            )
+          }
+          return reply(d.id, false, undefined, `unknown shell method "${d.method}"`)
+        }
+        if (d.ns === 'os') {
+          if (!perms().includes('os:notify')) {
+            return reply(d.id, false, undefined, 'permission "os:notify" not granted')
+          }
+          const conv = getConversationId()
+          if (!conv) return reply(d.id, false, undefined, 'no active conversation')
+          if (d.method === 'notify') {
+            const n = (args[0] ?? {}) as {
+              title?: string
+              body?: string
+              sound?: boolean
+              tag?: string
+            }
+            return reply(
+              d.id,
+              true,
+              await window.atelier.plugins.notify(conv, pluginId, {
+                title: String(n.title ?? ''),
+                body: String(n.body ?? ''),
+                sound: n.sound,
+                tag: n.tag
+              })
+            )
+          }
+          if (d.method === 'flashFrame') {
+            await window.atelier.plugins.flashFrame(conv, pluginId, !!args[0])
+            return reply(d.id, true)
+          }
+          if (d.method === 'setBadgeCount') {
+            await window.atelier.plugins.setBadgeCount(conv, pluginId, Number(args[0]) || 0)
+            return reply(d.id, true)
+          }
+          if (d.method === 'isWindowFocused') {
+            return reply(d.id, true, await window.atelier.plugins.isWindowFocused(conv, pluginId))
+          }
+          if (d.method === 'subscribeFocus') {
+            // The frame's os.onWindowFocusChange opted in — start forwarding focus events to it.
+            wantsFocusEvents = true
+            return reply(d.id, true)
+          }
+          return reply(d.id, false, undefined, `unknown os method "${d.method}"`)
+        }
+        if (d.ns === 'backend') {
+          // A7 — panel→own-service-backend RPC. No permission gate here (the plugin can only reach
+          // ITS OWN backend); main verifies the plugin declares a service backend and is enabled.
+          const conv = getConversationId()
+          if (!conv) return reply(d.id, false, undefined, 'no active conversation')
+          if (d.method === 'call') {
+            const op = String(args[0] ?? '')
+            const timeoutMs = typeof args[2] === 'number' ? args[2] : undefined
+            const res = await window.atelier.plugins.backendCall(
+              conv,
+              pluginId,
+              op,
+              args[1],
+              timeoutMs
+            )
+            // Unwrap { result } to the raw value the pane asked for; surface { error } as a rejection.
+            if ('error' in res) return reply(d.id, false, undefined, res.error)
+            return reply(d.id, true, res.result)
+          }
+          return reply(d.id, false, undefined, `unknown backend method "${d.method}"`)
         }
         if (d.ns === 'browser') {
           if (!perms().includes('browser:embed')) {
@@ -542,6 +668,7 @@ export function PluginPane({
       window.removeEventListener('atelier-theme', pushTheme)
       offContext()
       offData()
+      offOsEvent()
       offAgentEvents?.()
       resizeObserver.disconnect()
       // Release this pane's channel subscriptions (pane unmount / conversation switch).

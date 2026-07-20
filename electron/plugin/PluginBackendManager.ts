@@ -25,15 +25,29 @@ export type PublishFromBackend = (
   data: unknown
 ) => void
 
+// A8 — a backend's request/response for the SAME per-(conversation, plugin) storage the pane sees.
+// Injected so this manager stays free of the storage/permission machinery; main validates the
+// plugin's `storage` permission and resolves the key/value. Rejects (thrown/`{ error }`) become a
+// `{ id, error }` reply to the backend.
+export type BackendStorageOp = {
+  op: 'get' | 'set' | 'keys'
+  conversationId: string
+  key?: string
+  value?: unknown
+}
+export type BackendStorageBroker = (pluginId: string, req: BackendStorageOp) => Promise<unknown>
+
 // A child that exits within this window of spawning counts as a crash (vs. a normal later exit).
 const CRASH_WINDOW_MS = 5_000
 // Consecutive crashes before the plugin's backend is wedged (rejects calls until reloaded).
 const CRASH_LIMIT = 3
 
 interface Pending {
-  resolve: (text: string) => void
+  resolve: (value: unknown) => void
   reject: (err: Error) => void
   timer: ReturnType<typeof setTimeout>
+  // A7: an RPC call wants the raw JSON `result`; a tool call wants it coerced to a string.
+  raw?: boolean
 }
 interface Child {
   transport: BackendTransport
@@ -56,16 +70,22 @@ export class PluginBackendManager {
   constructor(
     private spawn: SpawnBackend,
     private timeoutMs = 30_000,
-    private onPublish?: PublishFromBackend
+    private onPublish?: PublishFromBackend,
+    // A6 — resolve a conversation's cwd for the hello/enable lifecycle payloads (null if unknown).
+    private cwdFor: (conversationId: string) => string | null = () => null,
+    // A8 — broker a backend's storage request against the plugin's per-conversation store.
+    private storageBroker?: BackendStorageBroker
   ) {}
 
-  /** Call `tool(input)` in the plugin's backend; resolves with the result text the agent receives. */
+  /** Call `tool(input)` in the plugin's backend; resolves with the result text the agent receives.
+   *  A6: `conversationId` (when known) rides on the invoke so the backend can scope storage/publish. */
   invoke(
     pluginId: string,
     backendPath: string,
     tool: string,
     input: unknown,
-    timeoutMs?: number
+    timeoutMs?: number,
+    conversationId?: string
   ): Promise<string> {
     if (this.wedged.has(pluginId)) {
       return Promise.reject(
@@ -80,9 +100,48 @@ export class PluginBackendManager {
         child.pending.delete(id)
         reject(new Error(`plugin "${pluginId}" tool "${tool}" timed out after ${cap}ms`))
       }, cap)
-      child.pending.set(id, { resolve, reject, timer })
+      child.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer })
       try {
-        child.transport.postMessage({ id, tool, input })
+        child.transport.postMessage({ id, tool, input, conversationId })
+      } catch (err) {
+        child.pending.delete(id)
+        clearTimeout(timer)
+        reject(err instanceof Error ? err : new Error(String(err)))
+      }
+    })
+  }
+
+  /** A7 — panel→service-backend RPC. Posts `{ id, rpc: { conversationId, op, params } }`; resolves
+   *  with the backend's `{ id, result }` payload (any JSON), rejects on `{ id, error }` / timeout.
+   *  The plugin must have a running service backend (enabled in the conversation). */
+  callRpc(
+    pluginId: string,
+    op: string,
+    conversationId: string,
+    params: unknown,
+    timeoutMs?: number
+  ): Promise<unknown> {
+    if (this.wedged.has(pluginId)) {
+      return Promise.reject(
+        new Error(`plugin "${pluginId}" backend crashed repeatedly — fix the plugin and reload it`)
+      )
+    }
+    const child = this.children.get(pluginId)
+    if (!child) {
+      return Promise.reject(new Error(`plugin "${pluginId}" has no running service backend`))
+    }
+    const id = ++this.seq
+    const cap = Math.min(600_000, timeoutMs ?? this.timeoutMs)
+    return new Promise<unknown>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        child.pending.delete(id)
+        reject(new Error(`plugin "${pluginId}" rpc "${op}" timed out after ${cap}ms`))
+      }, cap)
+      // Reuse the tool `pending` map (the reply shape is the same { id, result|error }); resolve as
+      // raw JSON rather than the tool path's string coercion — RPC returns structured data.
+      child.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer, raw: true })
+      try {
+        child.transport.postMessage({ id, rpc: { conversationId, op, params } })
       } catch (err) {
         child.pending.delete(id)
         clearTimeout(timer)
@@ -102,7 +161,7 @@ export class PluginBackendManager {
     this.backendPaths.set(pluginId, backendPath)
     if (this.wedged.has(pluginId)) return // stays down until reload clears the wedge
     const child = this.ensure(pluginId, backendPath)
-    this.post(child, { enable: { conversationId } })
+    this.post(child, { enable: { conversationId, cwd: this.cwdFor(conversationId) ?? undefined } })
   }
 
   /** Disable a SERVICE plugin for a conversation; kill the child when the last one drops. */
@@ -141,7 +200,11 @@ export class PluginBackendManager {
     const backendPath = this.backendPaths.get(pluginId)
     if (convs && convs.size > 0 && backendPath) {
       const child = this.ensure(pluginId, backendPath)
-      for (const conversationId of convs) this.post(child, { enable: { conversationId } })
+      for (const conversationId of convs) {
+        this.post(child, {
+          enable: { conversationId, cwd: this.cwdFor(conversationId) ?? undefined }
+        })
+      }
     }
   }
 
@@ -167,7 +230,34 @@ export class PluginBackendManager {
     const child: Child = { transport, pending, spawnedAt: Date.now() }
 
     transport.onMessage((raw) => {
-      const m = raw as { id?: unknown; result?: unknown; error?: unknown; publish?: unknown }
+      const m = raw as {
+        id?: unknown
+        result?: unknown
+        error?: unknown
+        publish?: unknown
+        storage?: unknown
+      }
+      // A8 — a backend storage request: { id, storage: { op, conversationId, key?, value? } }. Broker
+      // it against the plugin's per-conversation store (main checks the `storage` permission) and
+      // reply { id, result } | { id, error }. Never confused with a tool/rpc reply (those carry no
+      // `storage`). An unbrokered manager (test/no-storage) refuses cleanly.
+      if (m && typeof m === 'object' && m.storage && typeof m.storage === 'object') {
+        const id = typeof m.id === 'number' ? m.id : null
+        if (id === null) return
+        const req = m.storage as BackendStorageOp
+        const send = (reply: { id: number; result?: unknown; error?: string }): void =>
+          this.post(child, reply)
+        if (!this.storageBroker) {
+          send({ id, error: 'storage not available' })
+          return
+        }
+        this.storageBroker(pluginId, req)
+          .then((result) => send({ id, result: result ?? null }))
+          .catch((err: unknown) =>
+            send({ id, error: err instanceof Error ? err.message : String(err) })
+          )
+        return
+      }
       if (m && typeof m === 'object' && m.publish && typeof m.publish === 'object') {
         // Unsolicited push from a service backend. Only allowed to a conversation the plugin is
         // currently enabled in; main additionally checks the data:publish permission.
@@ -185,6 +275,8 @@ export class PluginBackendManager {
       pending.delete(m.id)
       clearTimeout(pend.timer)
       if (typeof m.error === 'string' && m.error) pend.reject(new Error(m.error))
+      // A7: an RPC caller wants the raw JSON result; a tool caller wants the string the agent sees.
+      else if (pend.raw) pend.resolve(m.result ?? null)
       else pend.resolve(typeof m.result === 'string' ? m.result : JSON.stringify(m.result ?? null))
     })
 
@@ -207,9 +299,16 @@ export class PluginBackendManager {
     })
 
     // Tell the backend who it is and whether it's running as a service (so it starts loops only then).
+    // A6 — include the cwd (best-effort: the first enabled conversation's, if any; a subsequent
+    // `enable` carries each conversation's own cwd for a multi-conversation service).
     this.children.set(pluginId, child)
+    const firstConv = this.serviceConvs.get(pluginId)?.values().next().value as string | undefined
     this.post(child, {
-      hello: { pluginId, service: (this.serviceConvs.get(pluginId)?.size ?? 0) > 0 }
+      hello: {
+        pluginId,
+        service: (this.serviceConvs.get(pluginId)?.size ?? 0) > 0,
+        cwd: firstConv ? (this.cwdFor(firstConv) ?? undefined) : undefined
+      }
     })
     return child
   }

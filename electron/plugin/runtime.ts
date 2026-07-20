@@ -17,6 +17,8 @@ export const RUNTIME_JS = String.raw`
   var seq = 0
   var listeners = { load: [], unload: [], reload: [], context: [], browser: [], agent: [], resize: [] }
   var dataListeners = {} // channel -> [cb] for atelier.data.subscribe
+  var notifClickListeners = [] // cb list for atelier.os.onNotificationClick (this plugin's notifs)
+  var focusListeners = [] // cb list for atelier.os.onWindowFocusChange
 
   function call(ns, method, args) {
     return new Promise(function (resolve, reject) {
@@ -50,6 +52,22 @@ export const RUNTIME_JS = String.raw`
         dcbs = dcbs.slice()
         for (var j = 0; j < dcbs.length; j++) {
           try { dcbs[j](d.payload.data) } catch (err) { /* isolate a plugin handler that threw */ }
+        }
+      }
+      return
+    }
+    if (d.__atelierEvent && d.event === 'os' && d.payload) {
+      // A4 — an OS event routed to this plugin: a click on ITS notification, or a window-focus change.
+      var op = d.payload
+      if (op.kind === 'notification-click') {
+        var ncbs = notifClickListeners.slice()
+        for (var n = 0; n < ncbs.length; n++) {
+          try { ncbs[n]({ id: op.notificationId }) } catch (err) { /* isolate */ }
+        }
+      } else if (op.kind === 'window-focus') {
+        var fcbs = focusListeners.slice()
+        for (var f = 0; f < fcbs.length; f++) {
+          try { fcbs[f](!!op.focused) } catch (err) { /* isolate */ }
         }
       }
       return
@@ -97,7 +115,58 @@ export const RUNTIME_JS = String.raw`
         }
       },
       // Send a user message into this conversation, exactly as if typed. Needs "agent:send".
-      send: function (text) { return call('agent', 'send', [text]) }
+      send: function (text) { return call('agent', 'send', [text]) },
+      // Stage text into THIS conversation's chat composer WITHOUT sending (distinct from send).
+      // Needs "agent:compose". Resolves { ok:true } | { error:'composer not open' }.
+      compose: function (text) { return call('agent', 'compose', [text]) },
+      // Bounded backfill of this conversation's normalized AgentEvent trace (oldest→newest, default
+      // 200, max 1000), for a pane that mounts mid-conversation. Needs "agent:read".
+      history: function (limit) { return call('agent', 'history', [limit]) }
+    },
+    fs: {
+      // Non-recursive, cwd-scoped directory listing (dir cwd-relative, ''/undefined = root).
+      // Resolves { entries:[{ name, kind, size?, mtime?, ignored }], truncated? } | { error }.
+      // Needs "fs:list".
+      list: function (dir) { return call('fs', 'list', [dir]) }
+    },
+    shell: {
+      // Open a cwd-relative file in the OS default handler. Needs "shell:open".
+      // Resolves { ok:true } | { error }. Refuses paths outside the conversation cwd.
+      openPath: function (path) { return call('shell', 'openPath', [path]) }
+    },
+    os: {
+      // Show an OS notification (silent unless sound:true). tag coalesces same-tag notifications
+      // from THIS plugin. Host-side rate-capped. Needs "os:notify". Resolves { id } | { error }.
+      notify: function (n) { return call('os', 'notify', [n]) },
+      // Fires with { id } when one of THIS plugin's notifications is clicked. Returns unsubscribe.
+      onNotificationClick: function (cb) {
+        notifClickListeners.push(cb)
+        return function () {
+          var i = notifClickListeners.indexOf(cb)
+          if (i >= 0) notifClickListeners.splice(i, 1)
+        }
+      },
+      // Flash the taskbar frame (on/off). Needs "os:notify".
+      flashFrame: function (on) { return call('os', 'flashFrame', [!!on]) },
+      // Best-effort taskbar badge count (no-op where unsupported). Needs "os:notify".
+      setBadgeCount: function (n) { return call('os', 'setBadgeCount', [n]) },
+      // Whether the Atelier window currently has OS focus. Needs "os:notify".
+      isWindowFocused: function () { return call('os', 'isWindowFocused', []) },
+      // Fires with the new focus boolean on every window focus/blur. Returns unsubscribe.
+      onWindowFocusChange: function (cb) {
+        focusListeners.push(cb)
+        call('os', 'subscribeFocus', []) // tell the host to route focus events to this pane
+        return function () {
+          var i = focusListeners.indexOf(cb)
+          if (i >= 0) focusListeners.splice(i, 1)
+        }
+      }
+    },
+    backend: {
+      // Call an operation on THIS plugin's own service backend (the plugin must declare a service
+      // backend). Host posts { id, rpc: { conversationId, op, params } }; resolves the backend's
+      // result (any JSON) or rejects with its error. 30s default / 600s max, like a tool.
+      call: function (op, params, timeoutMs) { return call('backend', 'call', [op, params, timeoutMs]) }
     },
     context: {
       // A context document (this plugin's contextExports). get/set the full value; the agent

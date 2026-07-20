@@ -1,5 +1,46 @@
 # PROGRESS.md — Atelier build log
 
+## workspace-explorer plugin (2026-07-20, autonomous session)
+
+Built `plugins/workspace-explorer/` (manifest.json, index.html, explorer.js) on the landed
+Tier-1 host verbs (`fs:list`, `shell:open`, `agent:compose`, `agent:read`+`agent.history`).
+Pure sandboxed frontend — no host code changed.
+
+**Shipped (all spec §9 acceptance criteria):**
+
+- Lazy one-level tree via `atelier.fs.list` (root + expand-on-click); expansion set persisted in
+  `storage` and re-listed on mount (§9.1). dirs-first + ignored-sink sort.
+- gitignore graying from the host `ignored` flag; "Hide ignored" toggle (persisted) removes them
+  entirely; ignored dirs are not auto-listed (§9.2, §6).
+- Read/write heat overlay: `tool_use` events classified (Read/Grep/Glob→read;
+  Write/Edit/MultiEdit/NotebookEdit→write), stored as bounded `(path,kind,ts)` ring in `storage`,
+  hue-distinguished (cool read bar / warm write bar), exponential decay computed at render (90s
+  half-life, no per-file timers), folder rollup on collapsed dirs, hover detail, legend, freeze +
+  clear-heat controls. Backfill via `agent.history(1000)` on mount (§9.3).
+- Click preview: `file:` DataBus tail (live-updates), 128 KB truncation marker, images via
+  `readAsset`, hand-rolled lightweight tokenizer (see DECISIONS) (§9.4).
+- Double-click → `atelier.shell.openPath` (§9.5); right-click "Mention in chat" →
+  `atelier.agent.compose('`path`')` with clipboard fallback on `{ error }` (§9.6).
+- Targeted dir re-list on live agent _writes_ into an expanded dir (§6c) — no global watch/enumerate.
+
+Gate green: typecheck, lint, format:check, `vitest run` (241/241). Manifest validated against the
+live `ManifestSchema`.
+
+**Needs live-app spot-check** (not verifiable headlessly — sandboxed iframe + real agent):
+
+- Tree renders/expands and expansion survives close-reopen in the running app.
+- Heat glows appear on real agent reads/writes, are read/write-distinct, and decay; reopening the
+  pane rebuilds heat from `storage` + `agent.history`.
+- `file:` preview live-updates when the selected file changes; image + truncation rendering.
+- Double-click opens the external editor; right-click "Mention in chat" inserts into the composer
+  without sending (and the clipboard fallback fires when the ChatPanel is unmounted).
+- Containment: a deliberate throw in explorer.js stays isolated to the pane (rail error, app alive).
+
+**Deviation from spec:** spec proposed `composer:insert`/`shell:openPath` permission names; the
+landed names are `agent:compose`/`shell:open` with `atelier.agent.compose(text)` — reconciled to
+the shipped host API (verified in `electron/shared/plugins.ts` + `runtime.ts`). Syntax highlight is
+a lightweight hand-rolled tokenizer, not Shiki (see DECISIONS).
+
 ## Default plugin suite: proposals + bugs.txt fixes (2026-07-19, autonomous session)
 
 - **bugs.txt bug 2 fixed** (commit `fix(agent): defer plugin-toggle rebind…`): toggling a

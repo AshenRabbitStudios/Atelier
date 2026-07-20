@@ -1,0 +1,18 @@
+{
+  "id": "workspace-explorer",
+  "name": "Workspace Explorer",
+  "version": "0.1.0",
+  "description": "File tree of the conversation cwd with an agent-activity heat overlay (reads vs. writes, decaying over time). Click a file for a read-only preview; double-click to open it in your editor; right-click to mention its path in the chat composer.",
+  "icon": "M2 4.2c0-0.5 0.4-0.9 0.9-0.9h3.4l1.3 1.5h6.5c0.5 0 0.9 0.4 0.9 0.9v7.4c0 0.5-0.4 0.9-0.9 0.9H2.9c-0.5 0-0.9-0.4-0.9-0.9z",
+  "kind": "panel",
+  "entry": "index.html",
+  "permissions": [
+    "fs:list",
+    "data:subscribe",
+    "agent:read",
+    "agent:compose",
+    "shell:open",
+    "storage"
+  ],
+  "defaultDock": "left"
+}

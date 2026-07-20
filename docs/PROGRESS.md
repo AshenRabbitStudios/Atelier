@@ -1,6 +1,23 @@
 # PROGRESS.md — Atelier build log
 
-## workspace-explorer plugin (2026-07-20, autonomous session)
+## Overnight session 2026-07-20 — summary (read this first)
+
+All four plugins from the user review are BUILT and merged to main, gate green (276 tests):
+
+1. **Host-API Tier 1 (A1–A8)** per docs/plugin-proposals/HOST-ADDENDUM.md — fs.list,
+   shell.openPath, agent.compose, os.\*, agent.history, backend cwd/conversationId,
+   backend.call RPC, backend storage protocol. PLUGIN_API.md + authoring guide updated.
+2. **whiteboard** — mermaid/table/chart/note boards, comments, bidirectional sync.
+3. **workspace-explorer** — lazy tree, heat overlay, live preview, open-in-editor,
+   mention-in-chat.
+4. **notifications** — 7 channels, notify_user tool (works with pane closed), rate caps.
+5. **agent-flow** — Timeline/Changes/History/Branches tabs + git-reader service backend.
+
+Docs updated per the 5-point user feedback (consolidation → agent-flow; mission-control and
+http-workbench addenda; PROPOSALS.md status block). Each plugin's section below carries its
+**needs human spot-check** list — the live-app checks to run in the morning (whiteboard
+rendering, explorer heat/compose, notifications with real webhook URLs, agent-flow tabs,
+plus OS toast/flash on real Windows).
 
 Built `plugins/workspace-explorer/` (manifest.json, index.html, explorer.js) on the landed
 Tier-1 host verbs (`fs:list`, `shell:open`, `agent:compose`, `agent:read`+`agent.history`).

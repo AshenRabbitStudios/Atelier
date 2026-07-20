@@ -1,5 +1,26 @@
 # Design docs — default plugin suite
 
+## User review 2026-07-20 — decisions
+
+1. **Consolidation:** git-workbench + change-review + agent-timeline merge into ONE
+   workspace-flow plugin with sub-tabs → [agent-flow](agent-flow.md) (build spec). Enabled by
+   the main proc logging agent activity and exposing it (`agent.history`).
+2. **workspace-explorer:** approved as designed ("read-only IDE interface") → build. Its
+   HOST-GAPs (fs.list, composer-insert, openPath) are in [../HOST-ADDENDUM.md](../HOST-ADDENDUM.md).
+3. **mission-control:** mostly duplicates the main chat; keep as T2 doc-only. See its addendum
+   on what a plugin could still add given plugins only see what the host pushes.
+4. **http-workbench:** approved in principle IF it integrates cleanly with the plugin
+   architecture; stays T2, not in tonight's build set.
+5. **attention → [notifications](notifications.md):** rescoped to channels-first (webhooks,
+   Telegram, ntfy, Pushover + OS toast) with an agent-callable `notify_user` tool → build.
+   Cross-conversation watching stays a stretch tier.
+6. **New: [whiteboard](whiteboard.md)** — tabbed visual boards (mermaid diagrams, tables,
+   charts, notes), bidirectional via one context export → build.
+
+Build set tonight: **whiteboard, workspace-explorer, notifications, agent-flow**, preceded by
+the host-API slice in [../HOST-ADDENDUM.md](../HOST-ADDENDUM.md).
+
+
 One doc per proposal in [`../PROPOSALS.md`](../PROPOSALS.md), written 2026-07-19 (one Opus
 subagent each, grounded in PLUGIN_API.md / PLUGIN_ARCHITECTURE.md / CONTEXT_SYSTEM.md and the
 actual schemas in `electron/shared/plugins.ts`). Extrapolations are marked inline; capabilities

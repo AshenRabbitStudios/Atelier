@@ -481,6 +481,57 @@ before the next (per CLAUDE.md).
   yields a clean in-pane error and a clean tool result — never a throw into the host, never a
   crash of the pane or another plugin (`PLUGIN_API.md` §3 `net`, invariant 3).
 
-```
+---
 
-```
+## Addendum (user review 2026-07-20)
+
+### How it integrates with the plugin architecture
+
+The user asked whether http-workbench can integrate cleanly with the plugin architecture as it
+exists. The answer is yes, with one host-side wire that is now being landed.
+
+**What already works.** The pane side (M1–M3 in §7) fits the existing plugin contract with no
+new host work: the sandboxed pane calls `atelier.net.fetch(url, opts)` (the `net:fetch`
+permission, `netFetch.ts`), receives `{ status, headers, bodyText?, bodyBase64?, error }`,
+writes history to `storage`, and maintains the `ctx:history` context export via the standard
+`contextExports` + `readonly: true` mechanism (`CONTEXT_SYSTEM.md`). Localhost dev servers
+work today (`netFetch.ts` allows any `http(s)` URL with no allow/deny filter).
+
+**The one gap, now being closed: HOST-ADDENDUM A7 (panel→backend RPC).** The agent's
+`http_request` tool (M4) requires the backend child to perform a `net.fetch` on behalf of the
+plugin. Today `net:fetch` is a pane IPC handler only; the backend child (over `parentPort`)
+has no route to `createNetFetcher`. HOST-ADDENDUM A7 lands
+`atelier.backend.call(op, params)` as a general panel→backend RPC channel, but the more
+directly relevant fix for http-workbench is the host-side relay pattern it enables:
+
+- When the host relays the `http_request` tool call to the backend, the host itself performs
+  the `net.fetch` under the plugin's `net:fetch` permission (§4.4 option a above).
+- The host writes the resulting history entry to the plugin's `storage` and publishes it on a
+  DataBus channel the pane subscribes to — so both an open pane and a closed pane's stored
+  history are updated.
+- The host also refreshes the `ctx:history` context export via the same write path the auto-
+  generated `set_` tools use.
+
+This keeps one fetch code path, one permission check, and one history store — exactly the
+"one shared console" the proposal requires. The backend child is a thin schema/routing shim;
+the host is the actual executor. A7 also provides the general `atelier.backend.call` verb for
+any future pane→backend interaction, which makes the pattern broadly applicable.
+
+**Updated HOST-GAP status.** With A7 landing:
+
+- HOST-GAP §6.1 (backend→host fetcher bridge) — **resolved** by the host-relay pattern above.
+- HOST-GAP §6.2 (host-side history write + pane push) — **resolved** as part of the same
+  host relay: the host writes storage and publishes the DataBus update in one step.
+- HOST-GAP §6.3 (host-side context refresh for agent requests) — **resolved** by reusing
+  the existing context-store write path (the same mechanism `set_` tools use).
+- HOST-GAP §6.4 (server-timing breakdown) — still deferred; round-trip timing from the caller
+  is the v1 answer and is labeled honestly in the UI.
+- HOST-GAP §6.5 (untrusted-cert opt-in) — still deferred; document the limitation in-pane.
+- HOST-GAP §6.6 (streaming responses) — still deferred; out of scope for v1.
+
+**Net result.** http-workbench integrates cleanly with the plugin architecture. M1–M3 need
+no new host work at all. M4 (agent tool sharing the pipe) needs the host-relay wiring that A7
+enables, but that wiring is small, contained in `main.ts`, reuses existing code paths
+(`netFetch`, `storage`, context write), and does not require any new plugin-facing permission
+or API method. The design remains T2 (approved in principle, not in tonight's build set), but
+its host dependencies are now fully specified and the principal one is landing.

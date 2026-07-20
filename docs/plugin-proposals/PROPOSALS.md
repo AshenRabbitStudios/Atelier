@@ -5,6 +5,37 @@ with Atelier by default, replacing the current grab-bag of experiments. Each pro
 is a pitch: the need, how it's used in a session, and why it earns a default slot. Detailed
 per-plugin design docs live in `designs/` (one file per plugin).
 
+---
+
+## Status after user review 2026-07-20
+
+Decisions from the review session are recorded in full in
+[`designs/README.md`](designs/README.md) ("User review 2026-07-20 — decisions"). Summary:
+
+**Build set (tonight):** `whiteboard`, `workspace-explorer`, `notifications`, `agent-flow` —
+preceded by the host-API slice in [`HOST-ADDENDUM.md`](HOST-ADDENDUM.md).
+
+**Consolidation:** `git-workbench` + `change-review` + `agent-timeline` are merged into one
+plugin — [`agent-flow`](designs/agent-flow.md) — with sub-tabs for the three functions. The
+three original docs are superseded by the agent-flow build spec.
+
+**Approved but deferred (T2, not tonight):**
+
+- `http-workbench` — approved in principle; integrates cleanly with the plugin architecture
+  once HOST-ADDENDUM A7 (panel→backend RPC) lands. See the
+  [http-workbench addendum](designs/http-workbench.md#addendum-user-review-2026-07-20) for
+  the updated HOST-GAP status (A7 resolves the principal gap).
+- `mission-control` — the per-conversation board is buildable on `agent:read` + HOST-ADDENDUM
+  A5 (`agent.history`). A cross-conversation fleet view is a real v2, gated on
+  `agent:read-all` (HOST-ADDENDUM Tier 2, B1). See the
+  [mission-control addendum](designs/mission-control.md#addendum-user-review-2026-07-20) for
+  a concrete v1/v2 breakdown and an honest account of what requires additional host work.
+
+**Not in the build set:** `db-explorer`, `prompt-library`, `pr-watch`, `test-lens`,
+`proc-manager`, `cost-dashboard`. All remain designed and tiered; none were rejected.
+
+---
+
 ## Research basis
 
 What people actually do with Claude Code / the CLI, distilled from 2026 workflow guides,

@@ -381,3 +381,129 @@ And, gated on the HOST-GAP fix (M7 — separately acceptable):
 Un-automatable checks to spot-check by a human (per CLAUDE.md): the elapsed clocks tick
 smoothly under a real overnight run, and the inbox correctly captures completions that happen
 while the app window is unfocused.
+
+---
+
+## Addendum (user review 2026-07-20)
+
+### The user's question, restated plainly
+
+> "Mission control is good but mostly exists in the main Claude chat in Atelier. If you can
+> think of a way to enhance that with a plugin, propose it further. Unsure how all that real
+> time info goes in and out of the plugin since right now plugins have no visibility on the
+> main app other than what Claude pushes. This may be a pipedream."
+
+This addendum answers honestly. Some parts are buildable now; one part requires host work;
+one part is a genuine pipedream without a deliberate host capability decision.
+
+### What the main chat already does (and a plugin cannot duplicate cheaply)
+
+The main chat in Atelier renders the full SDK event stream — every tool call, every subagent
+launch, every task transition — because it _is_ the conversation. A mission-control plugin is
+a sandboxed pane: it sees only the `AgentEvent` feed its own conversation's relay forwards to
+it (`agent.onEvent`), which is the same `background` / `task_activity` / `status` events
+described in §3-4. The relay is sound; the data arrives in real time. What the main chat has
+that a plugin does not:
+
+- **Cross-conversation visibility.** The chat shows its own conversation; a plugin sees only
+  its own conversation's feed. A multi-conversation fleet view is out of scope unless the host
+  adds `agent:read-all` (HOST-ADDENDUM Tier 2, B1).
+- **Full transcript.** The chat has every `assistant` block, every `tool_result`. The plugin
+  has the `AgentEvent` union — which is the summarized, relayable subset, not the raw
+  transcript.
+- **Structural authority.** The chat can do things like pause/resume, display thinking blocks,
+  route tool-confirmation prompts. A plugin cannot intercept those; it can only nudge via
+  `agent.send`.
+
+So the question is: what does a plugin add that _complements_ the chat rather than
+duplicating it?
+
+### v1 — what a plugin can genuinely add today (built on `agent:read` + A5)
+
+The plugin's real value is **persistence, structure, and actionability** that the chat scroll
+does not provide:
+
+1. **Durable task board.** The chat scroll loses completed work. A plugin with `storage` +
+   `agent.history(limit)` (HOST-ADDENDUM A5, landing with the Tier 1 host slice) can
+   reconstruct the full session's task/subagent arc at mount time and keep a Done column of
+   what finished while the pane was closed. The main chat has no inbox; the plugin does.
+
+2. **Persistent context export — "open work summary."** The plugin maintains a `contextExport`
+   (writable, not `readonly`) that the agent keeps current via a generated `set_work_summary`
+   tool: a compact bullet list of in-flight tasks and last-known states. Every new turn the
+   agent opens with this pinned to context, so "what are you currently tracking?" is answered
+   without re-reading the transcript. This is bidirectional: the plugin pushes the summary
+   into context; the agent updates it as tasks change. The pane renders this summary live.
+   Without the plugin, this summary does not exist — the agent re-derives it each turn from
+   scroll.
+
+3. **Structured nudge surface.** The chat allows free-text. The plugin provides templated
+   one-click nudges (promote, unblock, check on elapsed subagent) scoped to specific board
+   items, with debounce and working-state guards — a structured steering interface the chat
+   panel doesn't offer.
+
+4. **Inbox for completed-while-away.** The chat shows "subagent finished" inline, once, then
+   it scrolls away. The plugin's inbox accumulates those chips durably, per-conversation,
+   scoped across pane opens. This is the "finished 10 minutes ago and I didn't notice"
+   problem.
+
+**What the "real-time info goes in and out" path looks like for v1:**
+
+- **In (plugin ← host):** `agent.onEvent(cb)` fires every `background` snapshot and
+  `task_activity` update the session emits. `agent.history(200)` gives the backfill on mount
+  (A5). `agent.info()` gives conversation label. Nothing here requires new wiring beyond A5.
+- **Out (plugin → agent context):** the plugin's `contextExport` is injected automatically
+  each turn by the host's context system. The agent's generated `set_work_summary` tool (from
+  the manifest's `contextExports` declaration) lets the agent push updates back. This is
+  exactly how every other context-bearing plugin works.
+- **Out (plugin → agent as nudge):** `agent.send(text)` injects a message. Already wired.
+
+So the real-time loop is fully functional for the per-conversation task board. The only host
+gap remaining for v1 is **A5** (`agent.history`), which is already scheduled as a Tier 1
+host item.
+
+### v2 — cross-conversation fleet, gated on `agent:read-all`
+
+HOST-ADDENDUM Tier 2, B1 proposes `agent.onAnyEvent(cb)` (events tagged `conversationId`)
+and `agent.listConversations()`. With that, a mission-control pane can:
+
+- Show a multi-conversation kanban — each conversation's in-flight tasks in its own swimlane.
+- Surface a "parallel work fleet" that answers "across all my open conversations, what is
+  currently running?"
+- Aggregate a cross-conversation inbox: things that finished in _any_ conversation while you
+  were focused elsewhere.
+- Provide `agent.focusConversation(id)` (HOST-ADDENDUM B2) as a jump link from a fleet card
+  to the relevant chat.
+
+v2 is the "mission-control as a first-class orchestration surface" story. It requires a
+deliberate host scoping decision (`agent:read-all` is a new permission and a new IPC surface)
+and is explicitly out of scope tonight. It is plausible host work — not an architectural
+impossibility.
+
+### What is a pipedream without new host work
+
+The following user expectations are pipedreams unless the host adds them explicitly:
+
+- **Seeing what Claude is "thinking" right now** (the stream of thought blocks). The plugin
+  gets `task_activity` one-liners derived from forwarded messages — not the raw `thinking`
+  blocks or the full assistant stream. Getting those would require a new, deliberately-scoped
+  relay that raises its own "how much of the raw transcript does a plugin see?" question.
+- **Killing or pausing a subagent from the board.** The plugin has no `TaskStop`-shaped
+  capability (§7). Nudging the agent to stop a subagent is the only mechanism; the agent
+  decides whether to honor it.
+- **Knowing a task's outcome accurately.** Until HOST-ADDENDUM's enriched agent-work feed
+  lands (M7 in §6 above), "completed" and "interrupted/cancelled" are indistinguishable from
+  set-departure alone.
+- **Cross-conversation fleet without `agent:read-all`.** Without a deliberate host capability
+  decision, the per-conversation fence cannot be crossed, and a plugin that tries to widen
+  `agent.onEvent` scope would be violating `PLUGIN_API.md` §3.
+
+### Summary
+
+A mission-control plugin is **not** a pipedream for the per-conversation case. It adds
+persistence, structure, a context export, and a nudge surface that the main chat does not
+provide. The real-time data path (`agent.onEvent` + A5 backfill + `contextExports`) is sound.
+A cross-conversation fleet view is a real v2 story, gated on a single deliberate host
+capability (`agent:read-all`). The gap between "plugin-as-dashboard" and
+"plugin-as-orchestrator" is real and is correctly called T2: it earns its place for power
+users but requires the host to close the remaining gaps before it delivers its full promise.

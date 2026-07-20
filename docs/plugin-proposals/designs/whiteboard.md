@@ -27,23 +27,44 @@ editing + live render is the contract).
 
 ```jsonc
 {
-  "active": "arch",            // optional: board id the pane should focus (agent can direct attention)
+  "active": "arch", // optional: board id the pane should focus (agent can direct attention)
   "boards": [
-    { "id": "arch", "title": "Architecture", "type": "mermaid",
+    {
+      "id": "arch",
+      "title": "Architecture",
+      "type": "mermaid",
       "source": "flowchart TD\n  A[Renderer] --> B[Main]\n  B --> C[(SDK)]",
-      "comments": [ { "by": "user", "ts": 1752987600000, "text": "what about the cache path?" } ] },
-    { "id": "bench", "title": "Benchmarks", "type": "table",
+      "comments": [{ "by": "user", "ts": 1752987600000, "text": "what about the cache path?" }]
+    },
+    {
+      "id": "bench",
+      "title": "Benchmarks",
+      "type": "table",
       "columns": ["case", "before_ms", "after_ms"],
-      "rows": [["cold start", 1200, 340], ["hot reload", 90, 85]],
-      "align": ["left", "right", "right"] },              // optional
-    { "id": "bench-chart", "title": "Benchmarks (chart)", "type": "chart",
-      "chart": "bar",                                      // bar | line | area | scatter | pie
+      "rows": [
+        ["cold start", 1200, 340],
+        ["hot reload", 90, 85]
+      ],
+      "align": ["left", "right", "right"]
+    }, // optional
+    {
+      "id": "bench-chart",
+      "title": "Benchmarks (chart)",
+      "type": "chart",
+      "chart": "bar", // bar | line | area | scatter | pie
       "x": { "label": "case", "categories": ["cold start", "hot reload"] },
       "y": { "label": "ms" },
-      "series": [ { "name": "before", "values": [1200, 90] },
-                  { "name": "after",  "values": [340, 85] } ] },
-    { "id": "notes", "title": "Open questions", "type": "note",
-      "markdown": "- Should the cache be per-conversation?\n- TTL?" }
+      "series": [
+        { "name": "before", "values": [1200, 90] },
+        { "name": "after", "values": [340, 85] }
+      ]
+    },
+    {
+      "id": "notes",
+      "title": "Open questions",
+      "type": "note",
+      "markdown": "- Should the cache be per-conversation?\n- TTL?"
+    }
   ]
 }
 ```
@@ -70,8 +91,13 @@ editing + live render is the contract).
   "permissions": ["context", "storage"],
   "defaultDock": "center",
   "contextExports": [
-    { "key": "boards", "label": "Whiteboard boards", "format": "json", "maxTokens": 4000,
-      "description": "JSON: { active?, boards: [...] }. Types: mermaid{source}, table{columns,rows}, chart{chart,x,y,series[{name,values|points}]}, note{markdown}. Every board may carry comments[{by,ts,text}]. Edit with the edit tool for small changes (a cell, a comment reply); set replaces everything. Preserve user comments and edits — never drop boards you did not change." }
+    {
+      "key": "boards",
+      "label": "Whiteboard boards",
+      "format": "json",
+      "maxTokens": 4000,
+      "description": "JSON: { active?, boards: [...] }. Types: mermaid{source}, table{columns,rows}, chart{chart,x,y,series[{name,values|points}]}, note{markdown}. Every board may carry comments[{by,ts,text}]. Edit with the edit tool for small changes (a cell, a comment reply); set replaces everything. Preserve user comments and edits — never drop boards you did not change."
+    }
   ]
 }
 ```

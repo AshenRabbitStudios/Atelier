@@ -20,7 +20,6 @@
 Build set tonight: **whiteboard, workspace-explorer, notifications, agent-flow**, preceded by
 the host-API slice in [../HOST-ADDENDUM.md](../HOST-ADDENDUM.md).
 
-
 One doc per proposal in [`../PROPOSALS.md`](../PROPOSALS.md), written 2026-07-19 (one Opus
 subagent each, grounded in PLUGIN_API.md / PLUGIN_ARCHITECTURE.md / CONTEXT_SYSTEM.md and the
 actual schemas in `electron/shared/plugins.ts`). Extrapolations are marked inline; capabilities

@@ -7,6 +7,7 @@ plugin", enabled by the main process logging agent activity and exposing it
 (`agent.history`, ../HOST-ADDENDUM.md A5).
 
 Parents (keep for detail; this doc governs scope + integration):
+
 - [agent-timeline](agent-timeline.md) → **Timeline** tab
 - [change-review](change-review.md) → **Changes** tab
 - [git-workbench](git-workbench.md) → **History** + **Branches** tabs
@@ -50,7 +51,7 @@ agent/user in chat; record in DECISIONS.md).
 
 - **Backend** (`backend.js`, service): learns `cwd` from `hello`/`enable` (A6). Runs git via
   `child_process` (`git status --porcelain=v2`, `git diff [--staged] -- <file>`, `git log
-  --format=... --graph-ish data`, `git branch -vv`, `git worktree list --porcelain`). Answers
+--format=... --graph-ish data`, `git branch -vv`, `git worktree list --porcelain`). Answers
   pane RPC (A7): `status()`, `diff(file, staged)`, `log(limit)`, `commit(hash)`, `branches()`.
   Publishes `flow:status` on DataBus (needs `data:publish`) on its own debounce timer so the
   pane gets pushed refreshes. All output parsed backend-side into typed JSON; caps (diff ≤ 500KB,

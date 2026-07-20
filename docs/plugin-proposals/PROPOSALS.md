@@ -14,7 +14,7 @@ plugin marketplaces, and community pain-point threads:
   agent changed is the single most repeated activity, and the terminal is the worst place to
   do it. Marketplace data shows git/PR-review tooling at the top of every install chart.
 - **Verification workflows are the second loop**: TDD red/green, running dev servers,
-  driving a browser, hitting APIs. The agent needs the feedback; the human needs to *watch*
+  driving a browser, hitting APIs. The agent needs the feedback; the human needs to _watch_
   the feedback.
 - **Observability is the loudest unmet need**: "what is the agent doing / what did it just
   do / what did that cost me" spawned an entire tool category in 2026 (agenttrace,
@@ -67,7 +67,7 @@ time, which anchors the whole docking UX.
 
 ## 2. `change-review` — approve/revert the agent's edits, hunk by hunk — T1
 
-**The need.** Distinct from git-workbench: this is *review of the agent's work product*,
+**The need.** Distinct from git-workbench: this is _review of the agent's work product_,
 not repo plumbing. The #1 community complaint about agentic coding is discovering a runaway
 refactor after the fact — 40 files changed, requirements missed, duplicate code. People
 want a bounded, reviewable changeset per turn ("diff stays within bounds" is a named
@@ -93,7 +93,7 @@ event stream — it can render the trace first-hand, not forensically.
 session: each tool call as a block — name, target file/command, duration, ok/error —
 color-coded by tool family, with slow calls and failures visually loud. Clicking a block
 shows the full input/output. Filters: errors only, by tool, by turn. A "current activity"
-header answers "what is it doing *right now*" during long silent stretches.
+header answers "what is it doing _right now_" during long silent stretches.
 
 **Why it earns a default slot.** It is the observability story, and it directly treats the
 "chain of thought stopped / is it stuck?" anxiety that even Atelier's own bug reports show.
@@ -103,7 +103,7 @@ Debugging a wedged turn goes from vibes to evidence.
 
 **The need.** Opaque token burn is a top-3 complaint in every Claude Code thread (people
 canceling over "token issues"). Existing meters show account-level percent-used; nobody
-shows *what in this session* is expensive — which turn, which tool loop, cached vs not.
+shows _what in this session_ is expensive — which turn, which tool loop, cached vs not.
 
 **How it's used.** Per-conversation dashboard: cumulative cost, per-turn bar chart
 (input/output/cache-read stacked), burn rate, and "expensive outliers" (a doom-looped tool
@@ -143,7 +143,7 @@ processes, and process state (running/exited/port) is a context export — so "i
 server up?" is a lookup, not a `netstat` expedition.
 
 **Why it earns a default slot.** It removes the whole class of "two zombie vite instances
-fighting over port 5173" incidents, for the human *and* the agent, and it makes bash-stream
+fighting over port 5173" incidents, for the human _and_ the agent, and it makes bash-stream
 feel curated rather than raw.
 
 ## 7. `workspace-explorer` — file tree with agent-activity heat — T1
@@ -175,7 +175,7 @@ commands with exit status. Finished-while-away items accumulate in an inbox stri
 board is read from the SDK's task/background events; the user can nudge ("promote this
 task") via chat-injection.
 
-**Why it earns a default slot (T2).** For power users this *is* the app. It's T2 only
+**Why it earns a default slot (T2).** For power users this _is_ the app. It's T2 only
 because single-threaded users won't see data in it on day one.
 
 ## 9. `http-workbench` — request/response console the agent and user share — T2
@@ -196,7 +196,7 @@ but when it's relevant it replaces an entire external app.
 ## 10. `db-explorer` — schema + query results next to the chat — T2
 
 **The need.** Database MCP servers (Postgres, SQLite, Supabase) rank high in every survey,
-which proves demand — but they return tables *as prose into the transcript*. Tabular data
+which proves demand — but they return tables _as prose into the transcript_. Tabular data
 in a chat bubble is the worst rendering imaginable.
 
 **How it's used.** Connect to SQLite file / Postgres URL (read-only by default). Pane
@@ -218,7 +218,7 @@ release runbook", "the way I like commit messages") live in text files and get r
 **How it's used.** A pane of user-curated entries (title, description, template with
 `{placeholders}`), one click → filled template lands in the chat composer. Entries are
 plain markdown files in a folder (portable, git-syncable). The agent can be granted a tool
-to *propose* new entries when it notices the user repeating a pattern — the user approves
+to _propose_ new entries when it notices the user repeating a pattern — the user approves
 into the library.
 
 **Why it earns a default slot (T2).** Cheap to build, compounds forever, and it's the
@@ -227,7 +227,7 @@ on-ramp for users to discover that Atelier workflows are programmable at all.
 ## 12. `pr-watch` — GitHub PRs and CI status without leaving — T2
 
 **The need.** "Morning PR-review digest" and "overnight CI failure analysis" are named
-workflows now. The gh CLI does the plumbing but the *watching* (is CI green yet?) is a
+workflows now. The gh CLI does the plumbing but the _watching_ (is CI green yet?) is a
 human polling loop — the classic thing a pane should do.
 
 **How it's used.** Lists the repo's open PRs (yours + assigned): checks status live,

@@ -1,0 +1,52 @@
+{
+  "id": "notifications",
+  "name": "Notifications",
+  "version": "0.1.0",
+  "description": "Pings you where you actually are: OS toasts plus user-configured channels (Discord/Slack webhook, Telegram, ntfy, Pushover, generic webhook). Auto-ping on turn finished / blocked / error, and a notify_user tool the agent can call to reach you mid-run.",
+  "icon": "M8 1.75a3.25 3.25 0 0 0-3.25 3.25v2.2c0 .5-.2.98-.55 1.33L3 9.9h10l-1.2-1.37a1.9 1.9 0 0 1-.55-1.33V5A3.25 3.25 0 0 0 8 1.75zM6.5 11.5a1.5 1.5 0 0 0 3 0z",
+  "kind": "both",
+  "entry": "index.html",
+  "backend": "backend.cjs",
+  "service": true,
+  "permissions": [
+    "agent:read",
+    "storage",
+    "os:notify",
+    "data:subscribe",
+    "data:publish",
+    "net:fetch"
+  ],
+  "defaultDock": "right",
+  "tools": [
+    {
+      "name": "notify_user",
+      "description": "Send a notification to the user over their configured channels. Use when blocked on the user, when finishing something they're waiting on, or when something needs attention they'd want interrupted for. Do not spam: at most one ping per distinct reason.",
+      "inputSchema": {
+        "title": "string",
+        "body": "string",
+        "urgency": {
+          "type": "string",
+          "enum": ["low", "normal", "high"],
+          "optional": true
+        },
+        "channels": {
+          "type": "array",
+          "items": { "type": "string" },
+          "optional": true,
+          "description": "restrict to these configured channel names; default all enabled"
+        }
+      },
+      "timeoutMs": 30000
+    }
+  ],
+  "contextExports": [
+    {
+      "key": "notify_status",
+      "label": "Notification channels",
+      "format": "text",
+      "maxTokens": 150,
+      "readonly": true,
+      "description": "Pane-maintained summary: which channels exist and are enabled, so the agent knows whether notify_user can reach the user."
+    }
+  ]
+}

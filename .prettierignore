@@ -6,3 +6,4 @@ package-lock.json
 *.tsbuildinfo
 plugins/hologram/hologram.bundle.js
 plugins/examples/bash-stream/vendor
+plugins/whiteboard/vendor

@@ -93,7 +93,23 @@ Injected into every panel. All calls are async (return Promises) unless noted.
 - \`agent.info()\` — { id, title, cwd, status } for THIS conversation. Needs "agent:read".
 - \`agent.onEvent(cb)\` — subscribe to this conversation's live event stream (status, streamed text,
   tool_use/tool_result, result, error); returns an unsubscribe fn. Needs "agent:read".
+- \`agent.history(limit?)\` — bounded backfill of this conversation's AgentEvent trace
+  (oldest→newest, default 200, max 1000), for a pane that mounts mid-conversation. Needs "agent:read".
 - \`agent.send(text)\` — send a user message into this conversation, as if typed. Needs "agent:send".
+- \`agent.compose(text)\` — stage text into this conversation's chat composer at the cursor WITHOUT
+  sending (~4KB cap). Resolves { ok:true } | { error:'composer not open' }. Needs "agent:compose".
+- \`fs.list(dir?)\` — non-recursive, cwd-scoped directory listing (dir cwd-relative, ''/omitted =
+  root). Resolves { entries:[{ name, kind:'file'|'dir', size?, mtime?, ignored }], truncated? } |
+  { error }. \`ignored\` = matched by .gitignore/built-in (.git, node_modules). Cap 5000. Needs "fs:list".
+- \`shell.openPath(path)\` — open a cwd-relative file in the OS default handler as { ok:true } |
+  { error }. Refuses paths outside the cwd. Needs "shell:open".
+- \`os.notify(n)\` — OS notification n:{ title, body, sound?, tag? } (silent unless sound; \`tag\`
+  coalesces same-tag notifications from this plugin; host rate-caps ≤1/3s). Resolves { id } | { error }.
+  Plus \`os.onNotificationClick(cb)\` (cb({ id }); a click also focuses Atelier), \`os.flashFrame(on)\`,
+  \`os.setBadgeCount(n)\` (best-effort), \`os.isWindowFocused()\`, \`os.onWindowFocusChange(cb)\`. All need "os:notify".
+- \`backend.call(op, params?, timeoutMs?)\` — call an operation on THIS plugin's own SERVICE backend
+  (the plugin must declare \`service:true\` + \`backend\`); resolves the backend's result or rejects with
+  its error (30s default / 600s max). No extra permission (a pane only reaches its own backend).
 - \`layout.dock(position) / float() / setTitle(title)\` — control this pane's docking/title.
 - \`layout.onResize(cb)\` — cb fires with this pane's { w, h } on resize; returns an unsubscribe fn.
 - \`browser.open(url)/close()/back()/forward()/reload()/stop()/setBounds(rect)/read(opts?)\` — drive a
@@ -121,11 +137,15 @@ The entry HTML must load the runtime first: \`<script src="atelier-plugin://__ru
 4. One folder = one plugin; \`id\` == folder name; a panel plugin MUST declare \`entry\`.
 5. Debounce writes (context/storage) — a keystroke should not spam the host. ~300–400ms is typical.
 6. Backend/tool logic runs as a child process (\`backend\`), never hot-reloaded in-process. UI hot-reloads.
-   Backend protocol (\`process.parentPort\`): the host posts { id, tool, input } → reply { id, result }
-   or { id, error }. Lifecycle messages you may ignore or use: { hello: { pluginId, service } } on
-   spawn, { enable | disable: { conversationId } } as a SERVICE is toggled. A service may push
-   unsolicited { publish: { conversationId, channel, data } } to a conversation it's enabled in
-   (needs "data:publish"); a pane subscribed to that channel receives it. A backend that crashes 3×
+   Backend protocol (\`process.parentPort\`): the host posts { id, tool, input, conversationId? } → reply
+   { id, result } or { id, error }. Lifecycle messages you may ignore or use: { hello: { pluginId,
+   service, cwd? } } on spawn, { enable | disable: { conversationId, cwd? } } as a SERVICE is toggled.
+   A service may push unsolicited { publish: { conversationId, channel, data } } to a conversation it's
+   enabled in (needs "data:publish"); a pane subscribed to that channel receives it. Its own pane may
+   call it via { id, rpc: { conversationId, op, params } } → reply { id, result } | { id, error }
+   (\`atelier.backend.call\`). A backend may read/write its per-(conversation, plugin) storage by posting
+   { id, storage: { op:'get'|'set'|'keys', conversationId, key?, value? } } and awaiting the matching
+   { id, result } | { id, error } (needs the plugin's "storage" permission). A backend that crashes 3×
    on spawn is wedged until the plugin is reloaded; its V8 heap is capped (~512MB).
 
 ## Where a plugin lives (global vs workspace)

@@ -447,6 +447,99 @@ export const PluginNetFetchSchema = z.object({
     .optional()
 })
 
+// A1. Non-recursive, cwd-scoped directory listing (permission `fs:list`, enforced main-side).
+// `dir` is cwd-relative (`''` = root); the resolver bounds it to the conversation cwd.
+export const PluginFsListSchema = z.object({
+  conversationId: z.string().min(1),
+  pluginId: z.string().min(1),
+  dir: z.string().optional()
+})
+
+/** One entry in an `fs.list` result. `ignored` = matched by .gitignore/built-in defaults (host-side). */
+export interface FsEntry {
+  name: string
+  kind: 'file' | 'dir'
+  size?: number
+  mtime?: number
+  ignored: boolean
+}
+export type FsListResult = { entries: FsEntry[]; truncated?: boolean } | { error: string }
+
+// A2. Open a cwd-scoped file in the OS default handler (permission `shell:open`, enforced main-side).
+export const PluginShellOpenSchema = z.object({
+  conversationId: z.string().min(1),
+  pluginId: z.string().min(1),
+  path: z.string().min(1)
+})
+
+// A3. Stage text into a conversation's chat composer WITHOUT sending (permission `agent:compose`).
+// Length-capped host-side (renderer relay); returns { error } if that composer is not mounted.
+export const PluginComposeSchema = z.object({
+  conversationId: z.string().min(1),
+  pluginId: z.string().min(1),
+  text: z.string()
+})
+
+// A4. OS notification (permission `os:notify`, enforced main-side). `tag` coalesces same-tag
+// notifications from the same plugin; host-side rate cap drops/coalesces excess.
+export const PluginNotifySchema = z.object({
+  conversationId: z.string().min(1),
+  pluginId: z.string().min(1),
+  title: z.string().min(1),
+  body: z.string(),
+  sound: z.boolean().optional(),
+  tag: z.string().optional()
+})
+export type NotifyResult = { id: string } | { error: string }
+
+// A4. Taskbar frame flash (permission `os:notify`).
+export const PluginFlashFrameSchema = z.object({
+  conversationId: z.string().min(1),
+  pluginId: z.string().min(1),
+  on: z.boolean()
+})
+
+// A4. Best-effort taskbar badge count (permission `os:notify`).
+export const PluginBadgeCountSchema = z.object({
+  conversationId: z.string().min(1),
+  pluginId: z.string().min(1),
+  count: z.number().int().min(0)
+})
+
+// A4. Window-focus query / A5 history: identify the plugin + conversation (permission checked main-side).
+export const PluginConvPluginSchema = z.object({
+  conversationId: z.string().min(1),
+  pluginId: z.string().min(1)
+})
+
+// A5. Bounded mount-time backfill of this conversation's AgentEvent trace (existing `agent:read`).
+export const PluginHistorySchema = z.object({
+  conversationId: z.string().min(1),
+  pluginId: z.string().min(1),
+  limit: z.number().int().positive().max(1000).optional()
+})
+
+// A7. Panel→own-service-backend RPC (requires the plugin to declare a `service` backend; no new perm).
+export const PluginBackendCallSchema = z.object({
+  conversationId: z.string().min(1),
+  pluginId: z.string().min(1),
+  op: z.string().min(1),
+  params: z.unknown().optional(),
+  timeoutMs: z.number().int().positive().max(600000).optional()
+})
+
+/**
+ * Pushed (main → renderer) when one of a plugin's OS notifications is clicked, or the window's focus
+ * state changes. Routed to the owning mounted pane by pluginId (focus events carry no pluginId, so
+ * the relay broadcasts them to every pane that asked). Mirrors ContextChangedEvent routing.
+ */
+export interface OsEvent {
+  kind: 'notification-click' | 'window-focus'
+  pluginId?: string
+  notificationId?: string
+  focused?: boolean
+}
+
 // ---- Auth safety (billing) ----
 
 export interface AuthStatus {
@@ -508,6 +601,14 @@ export const IPC = {
   pluginWriteFile: 'plugin:write-file',
   pluginNetFetch: 'plugin:net-fetch',
   pluginReadAsset: 'plugin:read-asset',
+  pluginFsList: 'plugin:fs-list',
+  pluginShellOpen: 'plugin:shell-open',
+  pluginNotify: 'plugin:os-notify',
+  pluginFlashFrame: 'plugin:os-flash-frame',
+  pluginBadgeCount: 'plugin:os-badge-count',
+  pluginWindowFocused: 'plugin:os-window-focused',
+  pluginAgentHistory: 'plugin:agent-history',
+  pluginBackendCall: 'plugin:backend-call',
   authStatus: 'auth:status',
   appDefaultCwd: 'app:default-cwd',
   appPickFolder: 'app:pick-folder',
@@ -519,7 +620,8 @@ export const IPC = {
   agentEvent: 'agent:event',
   pluginsChanged: 'plugins:changed',
   contextChanged: 'context:changed',
-  dataMessage: 'data:message'
+  dataMessage: 'data:message',
+  osEvent: 'os:event'
 } as const
 
 /**
@@ -669,6 +771,39 @@ export interface AtelierAPI {
       pluginId: string,
       path: string
     ): Promise<{ dataUrl: string } | { error: string }>
+    // A1 — non-recursive, cwd-scoped directory listing (permission `fs:list`).
+    fsList(conversationId: string, pluginId: string, dir?: string): Promise<FsListResult>
+    // A2 — open a cwd-scoped file in the OS default handler (permission `shell:open`).
+    shellOpen(
+      conversationId: string,
+      pluginId: string,
+      path: string
+    ): Promise<{ ok: true } | { error: string }>
+    // A4 — OS notification with tag coalescing + host-side rate cap (permission `os:notify`).
+    notify(
+      conversationId: string,
+      pluginId: string,
+      n: { title: string; body: string; sound?: boolean; tag?: string }
+    ): Promise<NotifyResult>
+    flashFrame(conversationId: string, pluginId: string, on: boolean): Promise<void>
+    setBadgeCount(conversationId: string, pluginId: string, count: number): Promise<void>
+    isWindowFocused(conversationId: string, pluginId: string): Promise<boolean>
+    // A5 — bounded backfill of this conversation's AgentEvent trace (existing `agent:read`).
+    agentHistory(
+      conversationId: string,
+      pluginId: string,
+      limit?: number
+    ): Promise<AgentEvent[] | { error: string }>
+    // A7 — panel→own-service-backend RPC (plugin must declare a `service` backend).
+    backendCall(
+      conversationId: string,
+      pluginId: string,
+      op: string,
+      params?: unknown,
+      timeoutMs?: number
+    ): Promise<{ result: unknown } | { error: string }>
+    // Fires when one of a plugin's OS notifications is clicked, or window focus changes (A4).
+    onOsEvent(cb: (e: OsEvent) => void): () => void
     // Fires when the catalog changes (global rescan or a workspace registry change). A signal —
     // the renderer refetches list(activeConversation), since the catalog is per-conversation now.
     onChanged(cb: () => void): () => void

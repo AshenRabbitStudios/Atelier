@@ -1,7 +1,16 @@
 import { join, dirname, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { existsSync } from 'node:fs'
-import { app, BrowserWindow, Menu, ipcMain, dialog, shell, utilityProcess } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  Menu,
+  ipcMain,
+  dialog,
+  shell,
+  utilityProcess,
+  Notification
+} from 'electron'
 import { z } from 'zod'
 import { AgentManager } from './agent/AgentManager.js'
 import {
@@ -36,7 +45,16 @@ import {
   PluginWriteFileSchema,
   PluginNetFetchSchema,
   PluginReadAssetSchema,
+  PluginFsListSchema,
+  PluginShellOpenSchema,
+  PluginNotifySchema,
+  PluginFlashFrameSchema,
+  PluginBadgeCountSchema,
+  PluginConvPluginSchema,
+  PluginHistorySchema,
+  PluginBackendCallSchema,
   type AgentEvent,
+  type OsEvent,
   type AuthStatus
 } from './shared/events.js'
 import {
@@ -52,12 +70,20 @@ import { mergeRegistry } from './plugin/registryView.js'
 import { DataBus, createFileSource, createUrlSource } from './plugin/DataBus.js'
 import { createAssetReader } from './plugin/assets.js'
 import { createFileWriter } from './plugin/fileWrite.js'
+import { createFsLister } from './plugin/fsList.js'
+import { createPathOpener } from './plugin/openPath.js'
 import { createNetFetcher } from './plugin/netFetch.js'
-import { PluginBackendManager, type BackendTransport } from './plugin/PluginBackendManager.js'
+import { OsNotifier } from './plugin/osNotify.js'
+import { AgentHistoryRing } from './plugin/agentHistory.js'
+import {
+  PluginBackendManager,
+  type BackendTransport,
+  type BackendStorageOp
+} from './plugin/PluginBackendManager.js'
 import { buildPluginToolServers } from './plugin/pluginTools.js'
 import { buildEnvironmentBriefing, buildAtelierToolServer } from './plugin/introspection.js'
 import { registerPluginScheme, handlePluginProtocol } from './plugin/protocol.js'
-import { pluginStorageSet, pluginStorageKeys } from './plugin/pluginStorage.js'
+import { pluginStorageGet, pluginStorageSet, pluginStorageKeys } from './plugin/pluginStorage.js'
 import {
   buildContextBlock,
   buildContextMcpServers,
@@ -111,8 +137,13 @@ let mainWindow: BrowserWindow | null = null
 // Anything else ('user'/'project'/'org'/'temporary') means an API key is in play.
 const SAFE_KEY_SOURCES = new Set(['oauth', 'none'])
 
+// A5 — the bounded per-conversation AgentEvent ring, fed from the single place every event is
+// pushed to the renderer. A pane backfills its conversation's recent trace via agent:history.
+const history = new AgentHistoryRing()
+
 function sendToRenderer(e: AgentEvent): void {
   if (e.kind === 'system_init' && SAFE_KEY_SOURCES.has(e.apiKeySource)) usingSubscription = true
+  history.record(e)
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send(IPC.agentEvent, e)
   }
@@ -160,6 +191,27 @@ const backends = new PluginBackendManager(
   (pluginId, conversationId, channel, data) => {
     if (!pluginPermitted(conversationId, pluginId, 'data:publish')) return
     dataBus.publish(conversationId, channel, data)
+  },
+  // A6 — resolve a conversation's cwd for the hello/enable lifecycle payloads.
+  (conversationId) => agents.cwdFor(conversationId),
+  // A8 — broker a backend's storage request against the plugin's per-conversation store, gated by
+  // the plugin's `storage` permission (throws → the manager replies { id, error } to the backend).
+  async (pluginId, req: BackendStorageOp) => {
+    const { op, conversationId, key, value } = req
+    if (!pluginPermitted(conversationId, pluginId, 'storage')) {
+      throw new Error('permission "storage" not granted')
+    }
+    if (op === 'keys') return pluginStorageKeys(conversationId, pluginId)
+    if (op === 'get') {
+      if (typeof key !== 'string' || !key) throw new Error('storage.get requires a key')
+      return pluginStorageGet(conversationId, pluginId, key)
+    }
+    if (op === 'set') {
+      if (typeof key !== 'string' || !key) throw new Error('storage.set requires a key')
+      pluginStorageSet(conversationId, pluginId, key, value)
+      return null
+    }
+    throw new Error(`unknown storage op "${String(op)}"`)
   }
 )
 
@@ -184,8 +236,10 @@ const agents = new AgentManager(
       pluginState,
       // Forward the per-tool timeout override (5th arg) — dropping it pins every tool to the 30s
       // default and defeats manifest `timeoutMs` (e.g. a long build).
+      // A6 — pass the conversationId (captured by this per-conversation closure) so each tool invoke
+      // posted to the backend carries `{ id, tool, input, conversationId }`.
       (pluginId, backendPath, t, i, timeoutMs) =>
-        backends.invoke(pluginId, backendPath, t, i, timeoutMs)
+        backends.invoke(pluginId, backendPath, t, i, timeoutMs, conversationId)
     )
     // The built-in `atelier` introspection server is always present (independent of enablement) so
     // the agent can always inspect its environment; merged with the per-conversation servers.
@@ -229,6 +283,54 @@ const readCwdAsset = createAssetReader(resolveWithinCwd)
 // Write sibling of the file: source — a pane-produced artifact, atomically written and bounded to
 // the conversation cwd by the same resolver (permission data:write).
 const writeCwdFile = createFileWriter(resolveWithinCwd)
+
+// A1 — non-recursive, cwd-scoped directory listing (permission fs:list). Same resolver bounds `dir`;
+// `.gitignore` is evaluated against the conversation's cwd root.
+const listCwdDir = createFsLister(resolveWithinCwd, (conversationId) =>
+  agents.cwdFor(conversationId)
+)
+
+// A2 — open a cwd-scoped file in the OS default handler (permission shell:open). Re-gated wrapper
+// around shell.openPath — never the renderer's unscoped app.openPath.
+const openCwdPath = createPathOpener(resolveWithinCwd, (abs) => shell.openPath(abs))
+
+// A4 — OS attention (permission os:notify): notifications with tag coalescing + a host-side rate cap,
+// taskbar flash/badge, and window-focus queries, all against the single Atelier window.
+const osNotifier = new OsNotifier({
+  show: (opts, onClick) => {
+    const n = new Notification({ title: opts.title, body: opts.body, silent: opts.silent })
+    n.on('click', onClick)
+    n.show()
+    return { close: () => n.close() }
+  },
+  focusWindow: () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.show()
+      mainWindow.focus()
+    }
+  },
+  flashFrame: (on) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.flashFrame(on)
+  },
+  setBadgeCount: (count) => {
+    // Cross-platform best-effort: app.setBadgeCount is a no-op on Windows (returns false) but is the
+    // documented API; a taskbar overlay icon is deliberately not over-engineered here (HOST-ADDENDUM A4).
+    try {
+      app.setBadgeCount(count)
+    } catch {
+      /* unsupported platform */
+    }
+  },
+  isWindowFocused: () => !!mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused(),
+  emitClick: (pluginId, notificationId) =>
+    sendOsEvent({ kind: 'notification-click', pluginId, notificationId })
+})
+
+/** Push an OS event (notification click / window focus change) to the renderer relay (A4). */
+function sendOsEvent(e: OsEvent): void {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.osEvent, e)
+}
 
 // Host-side HTTP for panes (permission net:fetch): a real request verb (method/headers/body/binary,
 // capped, cookie-isolated) beyond the one-shot url: DataBus channel.
@@ -348,6 +450,10 @@ function createWindow(): void {
   }
 
   installCrashRecovery(mainWindow)
+
+  // A4 — surface window focus changes to any pane that subscribed via os.onWindowFocusChange.
+  mainWindow.on('focus', () => sendOsEvent({ kind: 'window-focus', focused: true }))
+  mainWindow.on('blur', () => sendOsEvent({ kind: 'window-focus', focused: false }))
 
   mainWindow.on('closed', () => {
     mainWindow = null
@@ -563,6 +669,7 @@ function registerIpc(): void {
   ipcMain.handle(IPC.agentClearChat, (_e, payload) => {
     const { instanceId } = InstanceRefSchema.parse(payload)
     agents.clearChat(instanceId)
+    history.clear(instanceId) // A5 — a cleared chat starts a fresh trace
   })
 
   ipcMain.handle(IPC.agentClearPlugins, (_e, payload) => {
@@ -573,6 +680,7 @@ function registerIpc(): void {
   ipcMain.handle(IPC.agentDelete, async (_e, payload) => {
     const { instanceId } = InstanceRefSchema.parse(payload)
     await agents.deleteConversation(instanceId)
+    history.clear(instanceId) // A5 — drop the deleted conversation's trace
     reconcileWorkspaces()
   })
 
@@ -742,6 +850,81 @@ function registerIpc(): void {
   ipcMain.handle(IPC.pluginReadAsset, (_e, payload) => {
     const { conversationId, path } = PluginReadAssetSchema.parse(payload)
     return readCwdAsset(conversationId, path)
+  })
+
+  // A1 — non-recursive, cwd-scoped directory listing (permission fs:list). Refusal is `{ error }`.
+  ipcMain.handle(IPC.pluginFsList, (_e, payload) => {
+    const { conversationId, pluginId, dir } = PluginFsListSchema.parse(payload)
+    if (!pluginPermitted(conversationId, pluginId, 'fs:list')) {
+      return { error: 'permission "fs:list" not granted' }
+    }
+    return listCwdDir(conversationId, dir)
+  })
+
+  // A2 — open a cwd-scoped file in the OS default handler (permission shell:open). Refusal is `{ error }`.
+  ipcMain.handle(IPC.pluginShellOpen, async (_e, payload) => {
+    const { conversationId, pluginId, path } = PluginShellOpenSchema.parse(payload)
+    if (!pluginPermitted(conversationId, pluginId, 'shell:open')) {
+      return { error: 'permission "shell:open" not granted' }
+    }
+    return openCwdPath(conversationId, path)
+  })
+
+  // A4 — OS notification (permission os:notify). Returns { id } | { error }.
+  ipcMain.handle(IPC.pluginNotify, (_e, payload) => {
+    const { conversationId, pluginId, title, body, sound, tag } = PluginNotifySchema.parse(payload)
+    if (!pluginPermitted(conversationId, pluginId, 'os:notify')) {
+      return { error: 'permission "os:notify" not granted' }
+    }
+    return osNotifier.notify(pluginId, { title, body, sound, tag })
+  })
+
+  ipcMain.handle(IPC.pluginFlashFrame, (_e, payload) => {
+    const { conversationId, pluginId, on } = PluginFlashFrameSchema.parse(payload)
+    if (!pluginPermitted(conversationId, pluginId, 'os:notify')) return
+    osNotifier.flashFrame(on)
+  })
+
+  ipcMain.handle(IPC.pluginBadgeCount, (_e, payload) => {
+    const { conversationId, pluginId, count } = PluginBadgeCountSchema.parse(payload)
+    if (!pluginPermitted(conversationId, pluginId, 'os:notify')) return
+    osNotifier.setBadgeCount(count)
+  })
+
+  ipcMain.handle(IPC.pluginWindowFocused, (_e, payload) => {
+    const { conversationId, pluginId } = PluginConvPluginSchema.parse(payload)
+    if (!pluginPermitted(conversationId, pluginId, 'os:notify')) return false
+    return osNotifier.isWindowFocused()
+  })
+
+  // A5 — bounded backfill of this conversation's AgentEvent trace (existing agent:read).
+  ipcMain.handle(IPC.pluginAgentHistory, (_e, payload) => {
+    const { conversationId, pluginId, limit } = PluginHistorySchema.parse(payload)
+    if (!pluginPermitted(conversationId, pluginId, 'agent:read')) {
+      return { error: 'permission "agent:read" not granted' }
+    }
+    return history.get(conversationId, limit)
+  })
+
+  // A7 — panel→own-service-backend RPC. No new permission; the plugin must have a live service
+  // backend enabled in this conversation. Returns { result } | { error } (never throws to the pane).
+  ipcMain.handle(IPC.pluginBackendCall, async (_e, payload) => {
+    const { conversationId, pluginId, op, params, timeoutMs } =
+      PluginBackendCallSchema.parse(payload)
+    // Confirm the plugin is enabled here and actually declares a service backend before dispatching.
+    const manifest = registryFor(conversationId).get(pluginId)?.manifest
+    if (!manifest || !agents.pluginStateFor(conversationId)[pluginId]?.enabled) {
+      return { error: 'plugin not enabled for this conversation' }
+    }
+    if (!(manifest.service && manifest.backend)) {
+      return { error: 'plugin does not declare a service backend' }
+    }
+    try {
+      const result = await backends.callRpc(pluginId, op, conversationId, params, timeoutMs)
+      return { result }
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) }
+    }
   })
 }
 

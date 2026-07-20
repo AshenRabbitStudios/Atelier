@@ -222,3 +222,28 @@ toolsearch|webfetch|websearch` start collapsed in the chat (they're just retriev
 - Transient errors no longer flash status=error; they surface in the error list while
   status re-derives (working/idle). Sticky error is reserved for restart-budget-exhausted
   and auth failures (wedged flag), cleared by the next send.
+
+## Host-API addendum Tier 1 (A1–A8, HOST-ADDENDUM.md)
+
+- A1/A2 (fs.list, shell.openPath) reuse resolveWithinCwd; new modules fsList.ts/openPath.ts
+  are Electron-free (injected shell.openPath) so path-scoping is unit-tested like fileWrite.
+- A1 gitignore is a single-file matcher (bare names, *.ext, dir/); nested/negated (!) rules
+  are out of scope for v1 per the spec — `.git`/`node_modules` are always-ignored built-ins.
+- A2 maps shell.openPath's non-empty return (its failure message) to { error }, '' to { ok }.
+- A3 compose is renderer-local: a module-level composerRegistry maps conversationId → the
+  mounted ChatPanel composer's insert-at-cursor handler; no host round-trip. Returns
+  { error:'composer not open' } when unmounted. Chosen over a host IPC because the composer
+  state lives only in the renderer, and two Dockview panes have no shared React context.
+- A4 OsNotifier is Electron-free (injected show/focus/flash/badge); rate cap ≤1/plugin/3s
+  with same-tag replacements exempt (they coalesce). Window-focus events are broadcast to
+  panes that opted in via os.onWindowFocusChange (they carry no pluginId); clicks route by
+  pluginId. app.setBadgeCount used for A4 badge (no-op on Windows) — no taskbar overlay icon.
+- A5 history is an in-memory per-conversation ring (cap 1000) fed from the single
+  sendToRenderer emit point; cleared on clear-chat/delete. Persistence across restart is
+  future work (noted in PROGRESS).
+- A6/A7/A8 live in PluginBackendManager: cwd added to hello/enable (best-effort first-conv
+  cwd on hello), conversationId on each tool invoke; callRpc reuses the pending map with a
+  `raw` flag so RPC returns structured JSON while tools keep string coercion; storage broker
+  is injected (main gates the `storage` permission, replies { id, result|error }).
+- A7 backend.call needs no new permission (a pane only reaches its own backend); main verifies
+  the plugin declares service:true+backend and is enabled before dispatching.

@@ -22,7 +22,18 @@ export const PLUGIN_PERMISSIONS = [
   // A live, host-owned Chromium surface (Electron <webview>) composited over the pane and driven
   // via `atelier.browser.*`. The page runs real JS in its own guest process; the plugin only sends
   // commands and receives extracted state — page content can never reach the atelier bridge.
-  'browser:embed'
+  'browser:embed',
+  // Read-only, non-recursive directory listing inside the conversation cwd (`atelier.fs.list`). A
+  // narrower reach than `data:subscribe` (which tails file contents) — it only enumerates names.
+  'fs:list',
+  // Open a cwd-scoped file in the OS default handler (`atelier.shell.openPath`). Hands a path to the
+  // OS shell — a distinct coupling class from reading, so declared apart.
+  'shell:open',
+  // Stage text into THIS conversation's chat composer without sending (`atelier.agent.compose`).
+  // Narrower than `agent:send` (which submits a turn) — it only pre-fills the input box.
+  'agent:compose',
+  // OS-level attention: notifications, taskbar flash/badge, window-focus queries (`atelier.os.*`).
+  'os:notify'
 ] as const
 export type PluginPermission = (typeof PLUGIN_PERMISSIONS)[number]
 

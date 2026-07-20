@@ -922,3 +922,49 @@ Implemented the full Tier-1 slice of docs/plugin-proposals/HOST-ADDENDUM.md:
   (headless tests cover the manager logic, not Electron's Notification/flashFrame/setBadgeCount);
   composer insertion caret behavior in the live app.
   Future work: A5 history ring is in-memory only (no persistence across restart).
+
+## notifications plugin (feat/notifications) — 2026-07-20
+
+Built `plugins/notifications` per docs/plugin-proposals/designs/notifications.md.
+
+Done:
+
+- Manifest (`kind:both`, `service:true`, perms agent:read/storage/os:notify/data:subscribe/
+  data:publish/net:fetch; `notify_user` tool; readonly `notify_status` context export). Validated
+  against the real ManifestSchema in a test (schema is ground truth). No deviation needed — the
+  spec's manifest sketch validates as-is; the `tools` permission is NOT required (tools register
+  from the `tools` array), so it is omitted.
+- Backend (`backend.cjs`, service): owns outbound HTTP for webhook/discord/slack/telegram/ntfy/
+  pushover via Node `fetch`; `notify_user` tool with per-conversation rate caps (≤1/10s, ≤10/hr)
+  returning `{ delivered, failed }`; pane RPC ops `sendTest` + `send`; reads pane settings via the
+  A8 storage protocol; appends to a bounded-200 ping log in storage; publishes each outcome on the
+  `notify:log` DataBus channel; per-channel failure isolation via `Promise.allSettled`; 15s
+  per-request abort; malformed settings → clear `{ error }`, never a throw.
+- Pure logic split into `channels.cjs` (payload builders + urgency mapping) and `ratelimit.cjs`
+  (rate limiter) — framework-free CommonJS, unit-tested headlessly in
+  `electron/plugin/notificationsPayloads.test.ts` (15 tests: manifest, all 7 builders, error
+  paths, secret-not-in-error, rate caps incl. per-conversation isolation + hour-window slide).
+- Pane (`index.html` + `channels.browser.js`): channel add/edit/remove with masked secret inputs,
+  per-event-class toggles (turn-finished/blocked/error/agent-initiated), quiet hours (HH:MM, wraps
+  midnight), ping log (seeded from storage + live via `notify:log`), os-toast delivery via
+  `atelier.os.notify` (also fulfils backend `notify:toast` requests when open), and the auto-event
+  watcher (`agent.onEvent` + `agent.history` catch-up) with debounce/re-arm per spec §4 (one
+  turn-finished per result msgId; one blocked ping per unresolved permission/question requestId,
+  re-armed on resolve; a single catch-up blocked ping for a block already pending at mount).
+  Maintains the readonly `notify_status` export (channel NAMES + enabled flags only — never
+  secrets).
+
+Needs human spot-check in the live app (cannot verify headlessly):
+
+- Add a Discord/generic webhook, click "Send test" → message arrives + shows in the ping log (AC1).
+- Agent calls `notify_user` with the pane CLOSED → delivery still happens via the service backend
+  (AC2). REQUIRES the user's own webhook URL / bot tokens — no real endpoints can be hit in CI.
+- Turn finish / permission block with the pane open → OS toast + enabled channels ping, respecting
+  toggles + quiet hours (AC3).
+- Confirm secrets stay masked after entry and never appear in the ping log, tool result, or the
+  `notify_status` export (AC4 — enforced in code + a unit test for builder error strings).
+- Bad-URL channel is contained: reported in log + `failed`, other channels still deliver (AC5).
+- Rate cap holds under a notify_user loop (AC6 — unit-tested; confirm end-to-end).
+
+Note: real channel delivery requires the user to paste their own webhook URLs / bot tokens; none
+can be exercised in automated tests, hence the payload-builder + rate-limiter unit tests instead.

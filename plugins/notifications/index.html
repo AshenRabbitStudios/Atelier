@@ -1,0 +1,734 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Notifications</title>
+    <script src="atelier-plugin://__runtime__/atelier.js"></script>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: var(--surface, #14171e);
+        color: var(--text, #e7eaf0);
+        font-family: var(--font, system-ui, sans-serif);
+        font-size: 12px;
+      }
+      #root {
+        height: 100%;
+        overflow: auto;
+        padding: 10px 12px 24px;
+      }
+      h1 {
+        margin: 0 0 2px;
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .lede {
+        margin: 0 0 12px;
+        font-size: 11px;
+        color: var(--dim, #8b97ae);
+        line-height: 1.5;
+      }
+      .warn {
+        margin: 0 0 12px;
+        padding: 6px 8px;
+        border: 1px solid var(--border, #3a2f1e);
+        border-left: 3px solid var(--warn, #d8a657);
+        border-radius: 4px;
+        background: var(--bg-2, #0f1117);
+        font-size: 10px;
+        color: var(--dim, #8b97ae);
+        line-height: 1.45;
+      }
+      section {
+        margin-bottom: 16px;
+      }
+      h2 {
+        margin: 0 0 6px;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--dim, #8b97ae);
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+      }
+      .channel {
+        border: 1px solid var(--border, #252b37);
+        border-radius: 6px;
+        padding: 8px 10px;
+        margin-bottom: 8px;
+        background: var(--bg-2, #0f1117);
+      }
+      .channel-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 6px;
+      }
+      .channel-head .type {
+        font-family: var(--mono, monospace);
+        font-size: 11px;
+        color: var(--accent, #5b9cff);
+      }
+      .channel-head input.name {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      .channel-head .spacer {
+        flex: 1 1 auto;
+      }
+      label.row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin: 4px 0;
+        font-size: 11px;
+        color: var(--dim, #8b97ae);
+      }
+      label.row .lbl {
+        flex: 0 0 88px;
+      }
+      input[type='text'],
+      input[type='password'],
+      select {
+        flex: 1 1 auto;
+        min-width: 0;
+        padding: 4px 7px;
+        border: 1px solid var(--border, #252b37);
+        border-radius: 4px;
+        background: var(--input, #0f1117);
+        color: var(--text, #e7eaf0);
+        font-family: var(--mono, monospace);
+        font-size: 11px;
+        outline: none;
+      }
+      input:focus,
+      select:focus {
+        border-color: var(--accent, #5b9cff);
+      }
+      button {
+        padding: 4px 10px;
+        border: 1px solid var(--border, #252b37);
+        border-radius: 4px;
+        background: var(--bg-2, #0f1117);
+        color: var(--text, #e7eaf0);
+        font-size: 11px;
+        cursor: pointer;
+      }
+      button:hover {
+        border-color: var(--accent, #5b9cff);
+      }
+      button.primary {
+        background: var(--accent, #5b9cff);
+        color: var(--on-accent, #fff);
+        border-color: var(--accent, #5b9cff);
+      }
+      button.danger:hover {
+        border-color: var(--err, #e06c75);
+        color: var(--err, #e06c75);
+      }
+      .btns {
+        display: flex;
+        gap: 6px;
+        margin-top: 6px;
+        flex-wrap: wrap;
+      }
+      .add-row {
+        display: flex;
+        gap: 6px;
+      }
+      .toggles label.row .lbl {
+        flex: 1 1 auto;
+      }
+      .quiet-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .quiet-row input {
+        flex: 0 0 70px;
+      }
+      #log {
+        border: 1px solid var(--border, #252b37);
+        border-radius: 6px;
+        background: var(--bg-2, #0f1117);
+        max-height: 220px;
+        overflow: auto;
+        font-family: var(--mono, monospace);
+        font-size: 10px;
+      }
+      .log-entry {
+        padding: 4px 8px;
+        border-bottom: 1px solid var(--border, #1c2029);
+        display: flex;
+        gap: 8px;
+        align-items: baseline;
+      }
+      .log-entry:last-child {
+        border-bottom: none;
+      }
+      .log-entry .ts {
+        color: var(--faint, #5e6677);
+        flex: 0 0 auto;
+      }
+      .log-entry .ch {
+        color: var(--accent, #5b9cff);
+        flex: 0 0 auto;
+      }
+      .log-entry .msg {
+        flex: 1 1 auto;
+        min-width: 0;
+        word-break: break-word;
+      }
+      .log-entry.ok .ch::before {
+        content: '\2713 ';
+        color: var(--ok, #4caf82);
+      }
+      .log-entry.fail .ch::before {
+        content: '\2717 ';
+        color: var(--err, #e06c75);
+      }
+      .log-entry.fail .msg {
+        color: var(--err, #e06c75);
+      }
+      .empty {
+        padding: 10px;
+        color: var(--faint, #5e6677);
+        font-style: italic;
+      }
+      .status {
+        font-size: 10px;
+        color: var(--faint, #5e6677);
+        margin-top: 4px;
+        min-height: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <h1>Notifications</h1>
+      <p class="lede">
+        Get pinged where you are: OS toasts plus channels you configure. Auto-pings on turn finished
+        / blocked / error, and the agent can call <code>notify_user</code> mid-run.
+      </p>
+      <div class="warn">
+        Auto pings (turn finished / blocked) run in this pane — they only fire while the pane has
+        been open at least once this session. The <code>notify_user</code> tool works even with the
+        pane closed. Secrets you paste are masked and never shared with the agent.
+      </div>
+
+      <section>
+        <h2>Channels</h2>
+        <div id="channels"></div>
+        <div class="add-row">
+          <select id="add-type">
+            <option value="os-toast">OS toast</option>
+            <option value="webhook">Generic webhook</option>
+            <option value="discord">Discord</option>
+            <option value="slack">Slack</option>
+            <option value="telegram">Telegram</option>
+            <option value="ntfy">ntfy</option>
+            <option value="pushover">Pushover</option>
+          </select>
+          <button id="add-btn" type="button">+ Add channel</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>Auto-ping on</h2>
+        <div class="toggles" id="toggles"></div>
+      </section>
+
+      <section>
+        <h2>Quiet hours</h2>
+        <div class="quiet-row">
+          <label class="row"><input type="checkbox" id="quiet-on" /> enabled</label>
+          <input type="text" id="quiet-start" placeholder="22:00" />
+          <span>to</span>
+          <input type="text" id="quiet-end" placeholder="08:00" />
+        </div>
+        <div class="status">
+          Auto pings are suppressed in this window (local time, HH:MM). notify_user is never
+          suppressed.
+        </div>
+      </section>
+
+      <section>
+        <h2>Ping log</h2>
+        <div id="log"><div class="empty">No pings yet.</div></div>
+      </section>
+    </div>
+
+    <script src="channels.browser.js"></script>
+    <script>
+      const A = window.atelier
+      const CH = window.__notifyChannels // { TYPES, FIELDS }
+
+      const EVENT_CLASSES = [
+        { key: 'turn-finished', label: 'Turn finished', def: true },
+        { key: 'blocked', label: 'Blocked on you (permission / question)', def: true },
+        { key: 'error', label: 'Error', def: true },
+        { key: 'agent-initiated', label: 'Agent-initiated (notify_user)', def: true }
+      ]
+
+      // ---- in-memory settings (mirrors storage key "settings") ----
+      let settings = { channels: [], eventToggles: {}, quietHours: null }
+      let conversationId = null
+
+      const el = (id) => document.getElementById(id)
+      const secretField = (f) => CH.SECRET_FIELDS.includes(f)
+
+      function fieldsFor(type) {
+        return CH.FIELDS[type] || []
+      }
+
+      // ---- persistence ----
+      let saveTimer = null
+      function saveSettings() {
+        // Debounced so rapid typing doesn't thrash storage.
+        clearTimeout(saveTimer)
+        saveTimer = setTimeout(async () => {
+          try {
+            await A.storage.set('settings', settings)
+          } catch (_) {
+            /* storage unavailable */
+          }
+          updateStatusExport()
+        }, 250)
+      }
+
+      // ---- context export (readonly): channel NAMES + enabled flags only, NEVER secrets ----
+      async function updateStatusExport() {
+        const enabled = settings.channels.filter((c) => c.enabled !== false)
+        let text
+        if (!enabled.length) {
+          text = 'No notification channels are configured. notify_user cannot reach the user.'
+        } else {
+          const names = enabled.map((c) => `${c.name || c.type} (${c.type})`).join(', ')
+          text = `Enabled channels: ${names}. notify_user can reach the user over these.`
+        }
+        try {
+          await A.context.set('notify_status', text)
+        } catch (_) {
+          /* context permission absent or export not pinned — non-fatal */
+        }
+      }
+
+      // ---- channel rendering ----
+      function makeId() {
+        return 'c_' + Math.random().toString(36).slice(2, 9)
+      }
+
+      function renderChannels() {
+        const host = el('channels')
+        host.innerHTML = ''
+        if (!settings.channels.length) {
+          const d = document.createElement('div')
+          d.className = 'empty'
+          d.textContent = 'No channels yet. Add one below.'
+          host.appendChild(d)
+          return
+        }
+        settings.channels.forEach((c) => host.appendChild(renderChannel(c)))
+      }
+
+      function renderChannel(c) {
+        const wrap = document.createElement('div')
+        wrap.className = 'channel'
+
+        const head = document.createElement('div')
+        head.className = 'channel-head'
+        const type = document.createElement('span')
+        type.className = 'type'
+        type.textContent = c.type
+        head.appendChild(type)
+        const name = document.createElement('input')
+        name.type = 'text'
+        name.className = 'name'
+        name.placeholder = 'name (optional)'
+        name.value = c.name || ''
+        name.addEventListener('input', () => {
+          c.name = name.value
+          saveSettings()
+        })
+        head.appendChild(name)
+        const enabled = document.createElement('label')
+        enabled.className = 'row'
+        enabled.style.margin = '0'
+        const cb = document.createElement('input')
+        cb.type = 'checkbox'
+        cb.checked = c.enabled !== false
+        cb.addEventListener('change', () => {
+          c.enabled = cb.checked
+          saveSettings()
+        })
+        enabled.appendChild(cb)
+        enabled.appendChild(document.createTextNode('on'))
+        head.appendChild(enabled)
+        wrap.appendChild(head)
+
+        c.config = c.config || {}
+        fieldsFor(c.type).forEach((f) => {
+          const label = document.createElement('label')
+          label.className = 'row'
+          const lbl = document.createElement('span')
+          lbl.className = 'lbl'
+          lbl.textContent = f.label
+          label.appendChild(lbl)
+          const inp = document.createElement('input')
+          const isSecret = secretField(f.key)
+          inp.type = isSecret ? 'password' : 'text'
+          inp.placeholder = f.placeholder || ''
+          inp.value = c.config[f.key] || ''
+          inp.addEventListener('input', () => {
+            c.config[f.key] = inp.value
+            saveSettings()
+          })
+          label.appendChild(inp)
+          wrap.appendChild(label)
+        })
+
+        const btns = document.createElement('div')
+        btns.className = 'btns'
+        const test = document.createElement('button')
+        test.type = 'button'
+        test.textContent = 'Send test'
+        const st = document.createElement('span')
+        st.className = 'status'
+        test.addEventListener('click', async () => {
+          st.textContent = 'sending…'
+          try {
+            if (c.type === 'os-toast') {
+              await fireToast({
+                title: 'Atelier test',
+                body: 'Test toast for os-toast.',
+                tag: 'test'
+              })
+              logLocal({
+                ts: Date.now(),
+                channel: 'os-toast',
+                name: 'os-toast',
+                ok: true,
+                event: 'test',
+                title: 'Atelier test'
+              })
+              st.textContent = 'toast shown'
+              return
+            }
+            const res = await A.backend.call('sendTest', { channel: c })
+            const r = res && res.result !== undefined ? res.result : res
+            if (r && r.ok) st.textContent = 'delivered'
+            else
+              st.textContent =
+                'failed: ' + (r && r.failed && r.failed[0] ? r.failed[0].error : 'unknown')
+          } catch (e) {
+            st.textContent = 'error: ' + (e && e.message ? e.message : String(e))
+          }
+        })
+        const del = document.createElement('button')
+        del.type = 'button'
+        del.className = 'danger'
+        del.textContent = 'Remove'
+        del.addEventListener('click', () => {
+          settings.channels = settings.channels.filter((x) => x.id !== c.id)
+          renderChannels()
+          saveSettings()
+        })
+        btns.appendChild(test)
+        btns.appendChild(del)
+        btns.appendChild(st)
+        wrap.appendChild(btns)
+        return wrap
+      }
+
+      el('add-btn').addEventListener('click', () => {
+        const type = el('add-type').value
+        settings.channels.push({ id: makeId(), type, name: '', enabled: true, config: {} })
+        renderChannels()
+        saveSettings()
+      })
+
+      // ---- event toggles ----
+      function renderToggles() {
+        const host = el('toggles')
+        host.innerHTML = ''
+        EVENT_CLASSES.forEach((ev) => {
+          const label = document.createElement('label')
+          label.className = 'row'
+          const lbl = document.createElement('span')
+          lbl.className = 'lbl'
+          lbl.textContent = ev.label
+          const cb = document.createElement('input')
+          cb.type = 'checkbox'
+          const cur = settings.eventToggles[ev.key]
+          cb.checked = cur === undefined ? ev.def : !!cur
+          cb.addEventListener('change', () => {
+            settings.eventToggles[ev.key] = cb.checked
+            saveSettings()
+          })
+          label.appendChild(cb)
+          label.appendChild(lbl)
+          host.appendChild(label)
+        })
+      }
+      function eventEnabled(key) {
+        const cur = settings.eventToggles[key]
+        const def = (EVENT_CLASSES.find((e) => e.key === key) || {}).def
+        return cur === undefined ? !!def : !!cur
+      }
+
+      // ---- quiet hours ----
+      function renderQuiet() {
+        const q = settings.quietHours || {}
+        el('quiet-on').checked = !!q.enabled
+        el('quiet-start').value = q.start || ''
+        el('quiet-end').value = q.end || ''
+      }
+      function readQuiet() {
+        settings.quietHours = {
+          enabled: el('quiet-on').checked,
+          start: el('quiet-start').value.trim(),
+          end: el('quiet-end').value.trim()
+        }
+        saveSettings()
+      }
+      ;['quiet-on', 'quiet-start', 'quiet-end'].forEach((id) => {
+        el(id).addEventListener('change', readQuiet)
+        el(id).addEventListener('input', readQuiet)
+      })
+      function toMinutes(hhmm) {
+        const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm || '')
+        if (!m) return null
+        return (+m[1] % 24) * 60 + (+m[2] % 60)
+      }
+      function inQuietHours(now = new Date()) {
+        const q = settings.quietHours
+        if (!q || !q.enabled) return false
+        const s = toMinutes(q.start)
+        const e = toMinutes(q.end)
+        if (s == null || e == null) return false
+        const cur = now.getHours() * 60 + now.getMinutes()
+        // A window that wraps midnight (start > end) is "outside [end, start)".
+        return s <= e ? cur >= s && cur < e : cur >= s || cur < e
+      }
+
+      // ---- ping log ----
+      function fmtTs(ts) {
+        const d = new Date(ts)
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      }
+      function renderLog(entries) {
+        const host = el('log')
+        host.innerHTML = ''
+        if (!entries || !entries.length) {
+          host.innerHTML = '<div class="empty">No pings yet.</div>'
+          return
+        }
+        entries
+          .slice(-200)
+          .reverse()
+          .forEach((e) => {
+            const row = document.createElement('div')
+            row.className = 'log-entry ' + (e.ok ? 'ok' : 'fail')
+            const ts = document.createElement('span')
+            ts.className = 'ts'
+            ts.textContent = fmtTs(e.ts)
+            const ch = document.createElement('span')
+            ch.className = 'ch'
+            ch.textContent = e.name || e.channel
+            const msg = document.createElement('span')
+            msg.className = 'msg'
+            msg.textContent = e.ok
+              ? e.note
+                ? e.note
+                : `${e.event || ''} — ${e.title || ''}`.trim()
+              : e.error || 'failed'
+            row.appendChild(ts)
+            row.appendChild(ch)
+            row.appendChild(msg)
+            host.appendChild(row)
+          })
+      }
+      let logCache = []
+      function logLocal(entry) {
+        logCache = logCache.concat([entry]).slice(-200)
+        renderLog(logCache)
+      }
+
+      // ---- os-toast delivery (pane-side) ----
+      async function fireToast(n) {
+        try {
+          await A.os.notify({ title: n.title || 'Atelier', body: n.body || '', tag: n.tag })
+        } catch (_) {
+          /* os:notify unavailable */
+        }
+      }
+
+      // ==== auto-event watcher (spec §4) ====
+      // Debounce: one turn-finished ping per result event; one blocked ping per unresolved
+      // permission/question request; re-arm on resolve. We track pending request ids so a resolve
+      // re-arms, and guard against double-firing the same result.
+      const pendingBlocks = new Set()
+      let lastResultMsgId = null
+
+      async function autoPing(eventClass, title, body, urgency) {
+        if (!eventEnabled(eventClass)) return
+        if (inQuietHours()) return
+        // os-toast (pane) — always attempt if an os-toast channel is enabled.
+        const hasToast = settings.channels.some((c) => c.type === 'os-toast' && c.enabled !== false)
+        if (hasToast) {
+          await fireToast({ title, body, tag: eventClass })
+        }
+        // webhook-class channels via the backend (works pane-open; guarantees a single code path).
+        const webhookNames = settings.channels
+          .filter((c) => c.type !== 'os-toast' && c.enabled !== false)
+          .map((c) => c.name || c.type)
+        if (webhookNames.length) {
+          try {
+            await A.backend.call('send', {
+              title,
+              body,
+              urgency,
+              event: eventClass,
+              channels: webhookNames
+            })
+          } catch (_) {
+            /* backend unavailable — the log will show nothing for this attempt */
+          }
+        }
+      }
+
+      function handleEvent(e) {
+        if (!e || typeof e !== 'object') return
+        if (e.kind === 'result') {
+          if (e.messageId && e.messageId === lastResultMsgId) return
+          lastResultMsgId = e.messageId || String(Date.now())
+          if (e.isError) {
+            autoPing('error', 'Atelier: run errored', 'A turn ended with an error.', 'high')
+          } else {
+            autoPing(
+              'turn-finished',
+              'Atelier: turn finished',
+              'The agent finished its turn.',
+              'normal'
+            )
+          }
+        } else if (e.kind === 'error') {
+          autoPing('error', 'Atelier: error', String(e.message || 'An error occurred.'), 'high')
+        } else if (e.kind === 'permission_request' || e.kind === 'question_request') {
+          if (pendingBlocks.has(e.requestId)) return
+          pendingBlocks.add(e.requestId)
+          const what = e.kind === 'permission_request' ? e.toolName || 'a tool' : 'a question'
+          autoPing('blocked', 'Atelier: needs you', `Blocked on ${what}.`, 'high')
+        } else if (e.kind === 'permission_resolved' || e.kind === 'question_resolved') {
+          pendingBlocks.delete(e.requestId) // re-arm
+        }
+      }
+
+      async function catchUpHistory() {
+        // Mount-time backfill: seed the debounce guards from what already happened so we don't
+        // re-ping resolved blocks, and mark the last result as seen (don't ping for a turn that
+        // finished before the pane opened).
+        try {
+          const hist = await A.agent.history(200)
+          if (!Array.isArray(hist)) return
+          for (const e of hist) {
+            if (e.kind === 'result') lastResultMsgId = e.messageId || lastResultMsgId
+            else if (e.kind === 'permission_request' || e.kind === 'question_request')
+              pendingBlocks.add(e.requestId)
+            else if (e.kind === 'permission_resolved' || e.kind === 'question_resolved')
+              pendingBlocks.delete(e.requestId)
+          }
+          // Any still-pending block that we learned about at mount: fire ONE catch-up blocked ping
+          // (the user may have stepped away while it was raised).
+          if (pendingBlocks.size > 0) {
+            autoPing(
+              'blocked',
+              'Atelier: needs you',
+              'The agent is blocked waiting on you.',
+              'high'
+            )
+          }
+        } catch (_) {
+          /* agent:read unavailable or no history */
+        }
+      }
+
+      // ---- boot ----
+      A.on('load', async () => {
+        try {
+          const info = await A.agent.info()
+          conversationId = info && info.id
+        } catch (_) {
+          /* agent:read may be absent */
+        }
+
+        try {
+          const saved = await A.storage.get('settings')
+          if (saved && typeof saved === 'object') {
+            settings = {
+              channels: Array.isArray(saved.channels) ? saved.channels : [],
+              eventToggles:
+                saved.eventToggles && typeof saved.eventToggles === 'object'
+                  ? saved.eventToggles
+                  : {},
+              quietHours: saved.quietHours || null
+            }
+            // Ensure ids exist (older saves / hand edits).
+            settings.channels.forEach((c) => {
+              if (!c.id) c.id = makeId()
+              if (!c.config) c.config = {}
+            })
+          }
+        } catch (_) {
+          /* first run */
+        }
+
+        renderChannels()
+        renderToggles()
+        renderQuiet()
+        updateStatusExport()
+
+        // Ping log: seed from storage, then subscribe live.
+        try {
+          const stored = await A.storage.get('pinglog')
+          if (Array.isArray(stored)) {
+            logCache = stored.slice(-200)
+            renderLog(logCache)
+          }
+        } catch (_) {
+          /* none yet */
+        }
+        try {
+          await A.data.subscribe('notify:log', (entry) => {
+            if (entry && typeof entry === 'object') logLocal(entry)
+          })
+        } catch (_) {
+          /* data:subscribe unavailable */
+        }
+        // os-toast requests from the backend (notify_user / test with pane open).
+        try {
+          await A.data.subscribe('notify:toast', (n) => {
+            if (n && typeof n === 'object' && !inQuietHours()) fireToast(n)
+          })
+        } catch (_) {
+          /* none */
+        }
+
+        // Auto-event watcher.
+        await catchUpHistory()
+        try {
+          A.agent.onEvent(handleEvent)
+        } catch (_) {
+          /* agent:read unavailable */
+        }
+      })
+    </script>
+  </body>
+</html>

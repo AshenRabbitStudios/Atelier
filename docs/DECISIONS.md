@@ -267,3 +267,22 @@ toolsearch|webfetch|websearch` start collapsed in the chat (they're just retriev
   is injected (main gates the `storage` permission, replies { id, result|error }).
 - A7 backend.call needs no new permission (a pane only reaches its own backend); main verifies
   the plugin declares service:true+backend and is enabled before dispatching.
+
+## notifications plugin (feat/notifications)
+
+- Backend delivers webhook-class channels itself with Node `fetch` (spec-sanctioned: trusted child
+  process; `net:fetch` still declared for rail honesty). Did NOT route through the host fetcher.
+- Pure delivery logic (payload builders + rate limiter) lives in framework-free `.cjs` modules under
+  the plugin so both `backend.cjs` (require) and the vitest suite (electron/ path, so it's collected)
+  can use them — `plugins/` is lint-ignored and not a test root, so the test file sits under
+  `electron/plugin/` and imports the modules via `createRequire`.
+- os-toast is pane-only (host `os.notify` is a renderer capability). The backend requests a toast via
+  a `notify:toast` DataBus publish the pane fulfils when open; with the pane closed it degrades to
+  log-only, exactly as the spec's "auto pings need the pane mounted once" caveat allows.
+- Auto-event pings for webhook channels route THROUGH the backend (`backend.call('send', …)`) rather
+  than the pane fetching directly, so there is one delivery/log/rate code path.
+- Secrets live only in the `settings` storage value; the `notify_status` export and every tool
+  result carry channel NAMES + enabled flags only. Builder error strings are constructed to never
+  echo a secret (unit-tested).
+- `tools` permission omitted from the manifest: tool registration is driven by the `tools` array,
+  not a permission (matches the spec sketch; schema accepts it).

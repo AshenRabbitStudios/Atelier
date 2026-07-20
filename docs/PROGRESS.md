@@ -896,6 +896,7 @@ Needs human spot-check (live app — supervisor):
 9. Chart interactions: hover tooltips, legend, "view as table" toggle; scatter + pie boards.
 10. Mermaid pan/zoom (wheel/drag), copy-source, download-.svg buttons.
 11. Theme: verify boards read host CSS vars in both dark and light themes.
+
 ## Host-API addendum Tier 1 (A1–A8) — landed
 
 Implemented the full Tier-1 slice of docs/plugin-proposals/HOST-ADDENDUM.md:

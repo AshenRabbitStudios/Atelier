@@ -242,6 +242,7 @@ toolsearch|webfetch|websearch` start collapsed in the chat (they're just retriev
   node; the browser loads them as classic <script> (window.WB/WBCharts/…). Node harness
   tests load them via `new Function(...)` to exercise the pure logic headlessly.
 - vendor/ added to .prettierignore (precedent: bash-stream/vendor).
+
 ## Host-API addendum Tier 1 (A1–A8, HOST-ADDENDUM.md)
 
 - A1/A2 (fs.list, shell.openPath) reuse resolveWithinCwd; new modules fsList.ts/openPath.ts

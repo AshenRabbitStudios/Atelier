@@ -115,6 +115,40 @@ export interface DiscoveredPlugin {
   valid: boolean
   error?: string
   manifest?: Manifest
+  // Discovery source (Phase 7). Absent/'global' = the app-wide /plugins catalog; 'workspace' = a
+  // plugin under the conversation's `<cwd>/.atelier/plugins`. `workspaceKey` (a stable hash of the
+  // cwd) is set for workspace plugins so the renderer can build the encoded asset host.
+  scope?: 'global' | 'workspace'
+  workspaceKey?: string
+}
+
+/** The read surface every plugin consumer needs (global registry OR a merged global+workspace view).
+ *  `PluginRegistry` satisfies it structurally; the merged view (registryView.ts) implements it too. */
+export interface RegistryView {
+  get(id: string): DiscoveredPlugin | undefined
+  dirOf(id: string): string | null
+  list(): DiscoveredPlugin[]
+}
+
+// ---- Workspace plugin asset host encoding (Phase 7) ----
+// A plugin frame loads over `atelier-plugin://<host>/`. A global plugin's host is just its id; a
+// workspace plugin's host embeds a fixed-length cwd hash so the protocol handler resolves it against
+// the right workspace registry (ids can collide across workspaces). One encode/decode pair, shared by
+// the protocol handler, PluginPane (frame src), and the injected runtime (which reads location.host
+// back into the bare pluginId) — three hand-rolled parsers is how this drifts.
+export const WORKSPACE_KEY_LEN = 12
+const WORKSPACE_HOST_RE = /^w--([0-9a-f]{12})--(.+)$/
+
+/** Build the asset host for a plugin frame. Global → the bare id; workspace → `w--<key>--<id>`. */
+export function encodePluginHost(pluginId: string, workspaceKey?: string): string {
+  return workspaceKey ? `w--${workspaceKey}--${pluginId}` : pluginId
+}
+
+/** Parse an asset host back to its bare id (+ workspaceKey when it is a workspace host). The
+ *  fixed-length key makes the split unambiguous even when the id itself contains `--`. */
+export function decodePluginHost(host: string): { pluginId: string; workspaceKey?: string } {
+  const m = WORKSPACE_HOST_RE.exec(host)
+  return m ? { pluginId: m[2], workspaceKey: m[1] } : { pluginId: host }
 }
 
 /** Per-conversation plugin state: which are enabled, which exports are pinned to context. */

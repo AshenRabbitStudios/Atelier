@@ -7,7 +7,12 @@
 // Kept as a bundled string (not a served file) so there is no runtime path resolution.
 export const RUNTIME_JS = String.raw`
 ;(function () {
-  var pluginId = location.hostname
+  // The asset host is the bare plugin id, OR a workspace host "w--<12-hex-key>--<id>" (Phase 7).
+  // Decode to the BARE id so every RPC (storage/context/permission keyed by manifest id) matches;
+  // must mirror decodePluginHost in electron/shared/plugins.ts.
+  var __host = location.hostname
+  var __wm = /^w--([0-9a-f]{12})--(.+)$/.exec(__host)
+  var pluginId = __wm ? __wm[2] : __host
   var pending = new Map()
   var seq = 0
   var listeners = { load: [], unload: [], reload: [], context: [], browser: [], agent: [], resize: [] }

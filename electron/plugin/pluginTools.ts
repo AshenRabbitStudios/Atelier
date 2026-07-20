@@ -6,8 +6,7 @@ import {
   type Options,
   type SdkMcpToolDefinition
 } from '@anthropic-ai/claude-agent-sdk'
-import type { PluginRegistry } from './PluginRegistry.js'
-import type { ConversationPluginState } from '../shared/plugins.js'
+import type { ConversationPluginState, RegistryView } from '../shared/plugins.js'
 
 // P4 S3: turn each enabled tool-contributing plugin's manifest `tools` into in-process MCP tools.
 // The tool handler runs in main but does NO work itself — it forwards the call to the plugin's
@@ -130,7 +129,7 @@ export function jsonSchemaToZodShape(
  * (Split from the server wrapper so the handlers are unit-testable without an `McpServer`.)
  */
 export function buildPluginTools(
-  registry: PluginRegistry,
+  registry: RegistryView,
   pluginState: Record<string, ConversationPluginState>,
   invoke: InvokeBackend
 ): SdkMcpToolDefinition[] {
@@ -165,7 +164,7 @@ export function buildPluginTools(
  * The `mcpServers` entry exposing every enabled tool-plugin's tools (or undefined if none).
  */
 export function buildPluginToolServers(
-  registry: PluginRegistry,
+  registry: RegistryView,
   pluginState: Record<string, ConversationPluginState>,
   invoke: InvokeBackend
 ): Options['mcpServers'] | undefined {

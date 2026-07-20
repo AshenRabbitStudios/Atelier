@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { DockviewReact, type DockviewReadyEvent, type IDockviewPanelProps } from 'dockview-react'
 import type { AgentInstance, ConversationSummary, SessionSummary, UsageInfo } from '@shared/events'
-import type { DiscoveredPlugin, ConversationPluginState, DockPosition } from '@shared/plugins'
+import {
+  encodePluginHost,
+  type DiscoveredPlugin,
+  type ConversationPluginState,
+  type DockPosition
+} from '@shared/plugins'
 import { ChatPanel } from './components/ChatPanel'
 import { PluginPane } from './components/PluginPane'
 import { PluginRail } from './components/PluginRail'
@@ -84,6 +89,8 @@ export function App() {
           <PluginPane
             key={pluginId}
             pluginId={pluginId}
+            // A workspace plugin's assets live at an encoded host (w--<key>--<id>); global → bare id.
+            host={encodePluginHost(pluginId, found?.workspaceKey)}
             permissions={found?.manifest?.permissions ?? []}
             getConversationId={() => activeIdRef.current}
             onDock={(pos: DockPosition) => layout.current?.dockPlugin(pluginId, pos)}
@@ -194,18 +201,33 @@ export function App() {
     void window.atelier.agent.setActive(activeId)
   }, [activeId])
 
-  // The app-wide plugin catalog (registry), kept live as files change on disk.
+  // The plugin catalog for the ACTIVE conversation — the global registry merged with this cwd's
+  // workspace plugins (Phase 7). Refetched on conversation switch and whenever the catalog changes
+  // (a global rescan or a workspace registry change, incl. an agent authoring a workspace plugin).
   useEffect(() => {
     let alive = true
-    void window.atelier.plugins.list().then((list) => {
-      if (alive) setPlugins(list)
+    const id = activeId
+    const refetch = (): void => {
+      void window.atelier.plugins.list(id ?? undefined).then((list) => {
+        if (alive) setPlugins(list)
+      })
+    }
+    refetch()
+    const off = window.atelier.plugins.onChanged(() => {
+      refetch()
+      // A workspace plugin may have just auto-enabled for this conversation (D2) — resync the
+      // enabled set (NOT the reconcile baseline) so the rail reflects it and its pane mounts.
+      if (id) {
+        void window.atelier.plugins.enabledFor(id).then((s) => {
+          if (alive) setPluginState(s)
+        })
+      }
     })
-    const off = window.atelier.plugins.onChanged((list) => setPlugins(list))
     return () => {
       alive = false
       off()
     }
-  }, [])
+  }, [activeId])
 
   // Which plugins THIS conversation has enabled (per-conversation set).
   useEffect(() => {

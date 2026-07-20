@@ -1,11 +1,24 @@
 # PROGRESS.md — Atelier build log
 
-## Plugin capability roadmap Phases 0–6 (2026-07-19, uncommitted)
+## Plugin capability roadmap Phases 0–7 (2026-07-19)
 
 Design: `docs/roadmap/`. Framing: sandbox = fault containment + coupling contract (DECISIONS
-2026-07-19). Phases 0–6 all landed and gate-green (194 tests, up from 153). Per-phase detail in
-DECISIONS. Phase 7 (workspace-local plugins) deliberately NOT done — it needs two product
-decisions from the user (docs/roadmap/07-workspace-plugins.md, D1/D2).
+2026-07-19). Phases 0–6 committed on `feat/plugin-capability-roadmap` (PR #1). **Phase 7
+(workspace-local plugins) landed too** and gate-green (206 tests) — decisions resolved (D1
+workspace-local, D2 auto-enable). Per-phase detail in DECISIONS. This **closes bugs.txt F4 part (b)**
+(the deferred conversation-local plugin authoring; the DEFERRED writeup below is now historical).
+
+**Phase 7 (workspace-local plugins) — NEEDS HUMAN SPOT-CHECK (headless can't cover the GUI):**
+
+1. In a conversation, have the agent write `<cwd>/.atelier/plugins/demo/{manifest.json,index.html}` →
+   it appears in the rail badged "workspace" and auto-enables (pane mounts) with no restart.
+2. Its tools + context exports work like a global plugin's; a `data:write`/`net:fetch` verb it uses
+   is permitted.
+3. Open a SECOND conversation on the same cwd → it sees `demo`. Open one on a DIFFERENT cwd → it does
+   not.
+4. Author a plugin whose id equals a global one → the rail shows it invalid ("shadowed"); the global
+   one still works.
+5. Delete the folder → it leaves the rail; an enabled-but-now-missing plugin degrades without a crash.
 
 **Phase 6 (browser drive) — NEEDS HUMAN SPOT-CHECK:** run `npx electron scripts/verify-webview.mjs`
 (GUI harness, now includes exec/fill/click drive cases + the nav-guard mirror). In-app: a

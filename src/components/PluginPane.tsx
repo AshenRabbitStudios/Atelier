@@ -13,6 +13,10 @@ import type { DockPosition } from '@shared/plugins'
 // can reach the app ONLY through these messages; we permission-check and forward to main over IPC.
 interface Props {
   pluginId: string
+  // The asset host for the iframe: the bare id for a global plugin, or the encoded
+  // `w--<key>--<id>` for a workspace plugin (Phase 7). The runtime decodes it back to the bare
+  // pluginId, so RPC/permission/relay keying stays on `pluginId`.
+  host: string
   permissions: string[]
   getConversationId: () => string | null
   onDock: (position: DockPosition) => void
@@ -69,6 +73,7 @@ const THEME_TOKENS = [
 
 export function PluginPane({
   pluginId,
+  host,
   permissions,
   getConversationId,
   onDock,
@@ -556,7 +561,7 @@ export function PluginPane({
       <iframe
         ref={frameRef}
         className="plugin-frame"
-        src={`atelier-plugin://${pluginId}/`}
+        src={`atelier-plugin://${host}/`}
         // allow-same-origin grants the frame its OWN origin (atelier-plugin://<id>) — cross-origin
         // to the renderer AND to every other plugin, so it gains ES modules, fetch() of its own
         // assets, IndexedDB, and workers WITHOUT any reach into the app or other panes. window.atelier

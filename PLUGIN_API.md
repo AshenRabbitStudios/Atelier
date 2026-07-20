@@ -272,6 +272,14 @@ repo can author one with its normal Write tool: create the folder, `manifest.jso
 entry. The `/plugins` watcher surfaces it in the sidebar; the user loads it; no restart.
 This is the bridge from "I iterate via Claude Code CLI" to "I iterate from inside Atelier."
 
+**Workspace plugins (Phase 7).** An agent working in any project can also author a plugin under
+`<cwd>/.atelier/plugins/<id>` — no access to the Atelier repo needed. A per-cwd registry discovers
+it, it **auto-enables for the authoring conversation**, is shared by any conversation opened on that
+cwd, and travels with the repo (git). Identical contract to a global plugin; same host API, same
+per-(conversation, plugin) storage. On an id collision the **global plugin wins** and the workspace
+copy is shown as invalid ("shadowed"). Asset URLs for a workspace plugin use an encoded host
+(`atelier-plugin://w--<cwd-hash>--<id>/`), but the plugin still sees its bare `id` everywhere.
+
 Provide two worked examples under `/plugins/examples/` so the agent has a pattern to copy:
 
 1. **`hello-panel`** — a minimal `kind: "panel"` plugin (renders a styled pane, calls

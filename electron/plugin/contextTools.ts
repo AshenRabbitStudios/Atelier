@@ -2,8 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { tool, createSdkMcpServer, type Options } from '@anthropic-ai/claude-agent-sdk'
-import type { PluginRegistry } from './PluginRegistry.js'
-import type { ConversationPluginState } from '../shared/plugins.js'
+import type { ConversationPluginState, RegistryView } from '../shared/plugins.js'
 import { pluginStorageGet, pluginStorageSet } from './pluginStorage.js'
 
 // The "context document" engine (docs/CONTEXT_SYSTEM.md). A plugin declares `contextExports`;
@@ -55,7 +54,7 @@ function pluginDefaults(dir: string): Record<string, unknown> {
  * deliberate clear is respected and does not snap back to the default.
  */
 export function pluginValueOrDefault(
-  registry: PluginRegistry,
+  registry: RegistryView,
   conversationId: string,
   pluginId: string,
   storageKey: string
@@ -90,7 +89,7 @@ interface PinnedExport {
 
 /** Every pinned export of every enabled plugin, resolved against the registry's manifests. */
 function pinnedExports(
-  registry: PluginRegistry,
+  registry: RegistryView,
   pluginState: Record<string, ConversationPluginState>
 ): PinnedExport[] {
   const out: PinnedExport[] = []
@@ -119,7 +118,7 @@ function pinnedExports(
  * Stripped from the displayed transcript by sessionStore so editable history stays clean.
  */
 export function buildContextBlock(
-  registry: PluginRegistry,
+  registry: RegistryView,
   conversationId: string,
   pluginState: Record<string, ConversationPluginState>
 ): string {
@@ -175,7 +174,7 @@ export function buildContextBlock(
  * stays prompt-cached across turns. Returns '' when no enabled plugin contributes one.
  */
 export function buildSystemInstruction(
-  registry: PluginRegistry,
+  registry: RegistryView,
   conversationId: string,
   pluginState: Record<string, ConversationPluginState>
 ): string {
@@ -214,7 +213,7 @@ function countOccurrences(hay: string, needle: string): number {
  * means it can't interleave with a pane's `context.set` write to the same file.
  */
 export function buildContextMcpServers(
-  registry: PluginRegistry,
+  registry: RegistryView,
   conversationId: string,
   pluginState: Record<string, ConversationPluginState>,
   onChange: (pluginId: string, key: string) => void

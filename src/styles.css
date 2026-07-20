@@ -498,6 +498,16 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* "workspace" tag on a plugin discovered under <cwd>/.atelier/plugins (Phase 7). */
+.rail-item-scope {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent-2);
+  border: 1px solid var(--border-2);
+  border-radius: 3px;
+  padding: 0 3px;
+}
 .rail-item-desc {
   font-size: 11px;
   color: var(--faint);

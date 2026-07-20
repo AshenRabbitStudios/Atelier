@@ -612,7 +612,9 @@ export interface AtelierAPI {
     onEvent(cb: (e: AgentEvent) => void): () => void
   }
   plugins: {
-    list(): Promise<DiscoveredPlugin[]>
+    // Per-conversation catalog: the global list merged with the conversation's workspace plugins.
+    // Omit the id for the bare global list (Phase 7).
+    list(conversationId?: string): Promise<DiscoveredPlugin[]>
     enabledFor(conversationId: string): Promise<Record<string, ConversationPluginState>>
     setEnabled(conversationId: string, pluginId: string, enabled: boolean): Promise<void>
     reload(pluginId: string): Promise<void>
@@ -667,7 +669,9 @@ export interface AtelierAPI {
       pluginId: string,
       path: string
     ): Promise<{ dataUrl: string } | { error: string }>
-    onChanged(cb: (plugins: DiscoveredPlugin[]) => void): () => void
+    // Fires when the catalog changes (global rescan or a workspace registry change). A signal —
+    // the renderer refetches list(activeConversation), since the catalog is per-conversation now.
+    onChanged(cb: () => void): () => void
     onContextChanged(cb: (e: ContextChangedEvent) => void): () => void
     onDataMessage(cb: (e: DataMessageEvent) => void): () => void
   }

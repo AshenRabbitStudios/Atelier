@@ -41,10 +41,14 @@ import {
 } from './shared/events.js'
 import {
   URL_CHANNEL_PREFIX,
+  decodePluginHost,
   type DiscoveredPlugin,
-  type PluginPermission
+  type PluginPermission,
+  type RegistryView
 } from './shared/plugins.js'
 import { PluginRegistry } from './plugin/PluginRegistry.js'
+import { WorkspaceRegistries, type WorkspaceChange } from './plugin/WorkspaceRegistries.js'
+import { mergeRegistry } from './plugin/registryView.js'
 import { DataBus, createFileSource, createUrlSource } from './plugin/DataBus.js'
 import { createAssetReader } from './plugin/assets.js'
 import { createFileWriter } from './plugin/fileWrite.js'
@@ -163,17 +167,20 @@ const backends = new PluginBackendManager(
 // per-turn context, and register one update tool per export. Both resolve against the registry.
 const agents = new AgentManager(
   sendToRenderer,
-  (conversationId, pluginState) => buildContextBlock(plugins, conversationId, pluginState),
-  // mcpServers: the context update tools + the plugin-contributed backend tools, merged.
+  (conversationId, pluginState) =>
+    buildContextBlock(registryFor(conversationId), conversationId, pluginState),
+  // mcpServers: the context update tools + the plugin-contributed backend tools, merged. All resolve
+  // against the conversation's merged view so workspace plugins contribute tools/context too.
   (conversationId, pluginState) => {
-    const ctx = buildContextMcpServers(plugins, conversationId, pluginState, (pluginId, key) => {
+    const reg = registryFor(conversationId)
+    const ctx = buildContextMcpServers(reg, conversationId, pluginState, (pluginId, key) => {
       // The agent rewrote a pinned export — push it so the owning pane refreshes (no polling).
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send(IPC.contextChanged, { conversationId, pluginId, key })
       }
     })
     const toolServers = buildPluginToolServers(
-      plugins,
+      reg,
       pluginState,
       // Forward the per-tool timeout override (5th arg) — dropping it pins every tool to the 30s
       // default and defeats manifest `timeoutMs` (e.g. a long build).
@@ -182,14 +189,15 @@ const agents = new AgentManager(
     )
     // The built-in `atelier` introspection server is always present (independent of enablement) so
     // the agent can always inspect its environment; merged with the per-conversation servers.
-    const atelier = buildAtelierToolServer(plugins, pluginState)
+    const atelier = buildAtelierToolServer(reg, pluginState)
     return { ...atelier, ...(ctx ?? {}), ...(toolServers ?? {}) }
   },
   // System-prompt append: the always-on environment briefing first (so a fresh conversation knows
   // it is inside Atelier and what plugins exist), then any enabled plugin's standing instruction.
   (conversationId, pluginState) => {
-    const env = buildEnvironmentBriefing(plugins, agents.cwdFor(conversationId) ?? undefined)
-    const si = buildSystemInstruction(plugins, conversationId, pluginState)
+    const reg = registryFor(conversationId)
+    const env = buildEnvironmentBriefing(reg, agents.cwdFor(conversationId) ?? undefined)
+    const si = buildSystemInstruction(reg, conversationId, pluginState)
     return si ? `${env}\n\n${si}` : env
   },
   // Ambient Bash tap → DataBus. Forward-referenced (dataBus is built just below, since it needs
@@ -226,6 +234,74 @@ const writeCwdFile = createFileWriter(resolveWithinCwd)
 // capped, cookie-isolated) beyond the one-shot url: DataBus channel.
 const netFetch = createNetFetcher()
 
+// Phase 7 — workspace-local plugins (docs/roadmap/07-workspace-plugins.md). One PluginRegistry per
+// distinct open cwd (rooted at <cwd>/.atelier/plugins), refcounted by the conversations on it.
+const workspaces = new WorkspaceRegistries(
+  (root, onChange) => new PluginRegistry(root, () => onChange()),
+  (change) => onWorkspaceChange(change)
+)
+
+/** The registry view a conversation resolves against: the global catalog merged with its cwd's
+ *  workspace registry (global wins id collisions). Every plugin consumer goes through this. */
+function registryFor(conversationId: string): RegistryView {
+  const cwd = agents.cwdFor(conversationId)
+  if (!cwd) return plugins
+  const ws = workspaces.registryForCwd(cwd)
+  return ws ? mergeRegistry(plugins, ws, workspaces.keyForCwd(cwd)) : plugins
+}
+
+/** Keep the workspace registries tracking exactly the live conversations (create/open/close/restore).
+ *  Creates a cwd's registry on its first conversation, releases it (fs watcher freed) on the last. */
+function reconcileWorkspaces(): void {
+  workspaces.reconcile(agents.openConversations())
+}
+
+/** Apply an enable/disable for (conversation, plugin): service lifecycle + agent tool/context rebind.
+ *  Shared by the IPC handler and workspace auto-enable so both paths behave identically. */
+function applyPluginEnabled(
+  conversationId: string,
+  pluginId: string,
+  enabled: boolean,
+  view: RegistryView
+): void {
+  const manifest = view.get(pluginId)?.manifest
+  const exportKeys = (manifest?.contextExports ?? []).map((e) => e.key)
+  const hasTools = !!(
+    manifest?.backend &&
+    manifest.tools.length > 0 &&
+    manifest.permissions.includes('tools')
+  )
+  const backendDir = view.dirOf(pluginId)
+  const isService = !!(manifest?.service && manifest.backend && backendDir)
+  if (isService) {
+    const backendPath = join(backendDir!, manifest!.backend!)
+    if (enabled) backends.startService(pluginId, backendPath, conversationId)
+    else backends.stopService(pluginId, conversationId)
+  } else if (!enabled && hasTools) {
+    backends.stop(pluginId) // on-demand tool backend: free the child process on disable
+  }
+  agents.setPluginEnabled(conversationId, pluginId, enabled, exportKeys, hasTools)
+}
+
+/** D2 — a freshly-authored workspace plugin auto-enables for the conversations on its cwd (no click).
+ *  Only VALID, newly-added, non-shadowed ids; a broken/colliding manifest surfaces in the rail but
+ *  never mounts. Then the renderer is nudged to refetch the per-conversation catalog + enabled set. */
+function onWorkspaceChange(change: WorkspaceChange): void {
+  for (const pluginId of change.added) {
+    if (plugins.get(pluginId)) continue // shadowed by a global plugin → global wins, don't auto-enable
+    for (const conversationId of change.convs) {
+      applyPluginEnabled(conversationId, pluginId, true, registryFor(conversationId))
+    }
+  }
+  notifyPluginsChanged()
+}
+
+/** Signal the renderer that the plugin catalog changed (global or workspace); it refetches per the
+ *  active conversation. Payload carries the global list for back-compat but is treated as a nudge. */
+function notifyPluginsChanged(): void {
+  sendPlugins(plugins.list())
+}
+
 // Main-side enforcement of a plugin's declared coupling contract: a privileged handler confirms the
 // plugin is enabled for the conversation AND declares the permission, instead of trusting the
 // renderer relay's check alone (ARCH_REVIEW_2026-07-19 P0 #1). New verbs are built with this from
@@ -235,7 +311,7 @@ function pluginPermitted(
   pluginId: string,
   permission: PluginPermission
 ): boolean {
-  const manifest = plugins.get(pluginId)?.manifest
+  const manifest = registryFor(conversationId).get(pluginId)?.manifest
   if (!manifest) return false
   if (!agents.pluginStateFor(conversationId)[pluginId]?.enabled) return false
   return manifest.permissions.includes(permission)
@@ -369,7 +445,9 @@ function installCrashRecovery(win: BrowserWindow): void {
 function registerIpc(): void {
   ipcMain.handle(IPC.agentCreate, (_e, payload) => {
     const opts = CreateOptsSchema.parse(payload)
-    return agents.create({ ...opts, cwd: opts.cwd })
+    const id = agents.create({ ...opts, cwd: opts.cwd })
+    reconcileWorkspaces() // a new cwd may need its workspace registry started
+    return id
   })
 
   ipcMain.handle(IPC.agentSend, (_e, payload) => {
@@ -386,6 +464,7 @@ function registerIpc(): void {
     const { instanceId } = InstanceRefSchema.parse(payload)
     dataBus.dropConversation(instanceId) // release any file watchers this conversation opened
     await agents.close(instanceId)
+    reconcileWorkspaces() // may release the cwd's workspace registry if this was its last conversation
   })
 
   ipcMain.handle(IPC.agentDecide, (_e, payload) => {
@@ -469,12 +548,16 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.agentImportSession, (_e, payload) => {
     const { cwd, sessionId, title } = ImportSessionSchema.parse(payload)
-    return agents.importSession(cwd, sessionId, title)
+    const id = agents.importSession(cwd, sessionId, title)
+    reconcileWorkspaces()
+    return id
   })
 
   ipcMain.handle(IPC.agentOpen, (_e, payload) => {
     const { instanceId } = InstanceRefSchema.parse(payload)
-    return agents.open(instanceId)
+    const id = agents.open(instanceId)
+    reconcileWorkspaces()
+    return id
   })
 
   ipcMain.handle(IPC.agentClearChat, (_e, payload) => {
@@ -490,6 +573,7 @@ function registerIpc(): void {
   ipcMain.handle(IPC.agentDelete, async (_e, payload) => {
     const { instanceId } = InstanceRefSchema.parse(payload)
     await agents.deleteConversation(instanceId)
+    reconcileWorkspaces()
   })
 
   ipcMain.handle(IPC.agentSetActive, (_e, payload) => {
@@ -548,7 +632,14 @@ function registerIpc(): void {
 
   // ---- Plugin host ----
 
-  ipcMain.handle(IPC.pluginsList, () => plugins.list())
+  ipcMain.handle(IPC.pluginsList, (_e, payload) => {
+    // Per-conversation catalog: the global list merged with the conversation's workspace plugins
+    // (Phase 7). No conversationId → the bare global list (e.g. before any conversation is active).
+    const { conversationId } = z
+      .object({ conversationId: z.string().min(1).optional() })
+      .parse(payload ?? {})
+    return conversationId ? registryFor(conversationId).list() : plugins.list()
+  })
 
   ipcMain.handle(IPC.pluginsEnabledFor, (_e, payload) => {
     const { conversationId } = ConversationRefSchema.parse(payload)
@@ -557,26 +648,9 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.pluginsSetEnabled, (_e, payload) => {
     const { conversationId, pluginId, enabled } = SetPluginEnabledSchema.parse(payload)
-    const manifest = plugins.get(pluginId)?.manifest
-    // Auto-pin the plugin's context exports on enable (docs/CONTEXT_SYSTEM.md).
-    const exportKeys = (manifest?.contextExports ?? []).map((e) => e.key)
-    // A plugin contributes backend tools → enabling/disabling changes the tool set, so rebind.
-    const hasTools = !!(
-      manifest?.backend &&
-      manifest.tools.length > 0 &&
-      manifest.permissions.includes('tools')
-    )
-    // A service backend follows conversation enablement: spawn on enable, drop on the last disable.
-    const backendDir = plugins.dirOf(pluginId)
-    const isService = !!(manifest?.service && manifest.backend && backendDir)
-    if (isService) {
-      const backendPath = join(backendDir, manifest!.backend!)
-      if (enabled) backends.startService(pluginId, backendPath, conversationId)
-      else backends.stopService(pluginId, conversationId)
-    } else if (!enabled && hasTools) {
-      backends.stop(pluginId) // on-demand tool backend: free the child process on disable
-    }
-    agents.setPluginEnabled(conversationId, pluginId, enabled, exportKeys, hasTools)
+    // Resolve against the conversation's merged view so a workspace plugin enables like a global one
+    // (auto-pin exports, service lifecycle, tool rebind — all in applyPluginEnabled).
+    applyPluginEnabled(conversationId, pluginId, enabled, registryFor(conversationId))
   })
 
   ipcMain.handle(IPC.pluginsReload, (_e, payload) => {
@@ -585,13 +659,13 @@ function registerIpc(): void {
     // if it's a still-enabled service) — reloading one plugin must not kill unrelated backends
     // mid-call (ARCH_REVIEW_2026-07-19 P1 #11).
     backends.reset(pluginId)
-    plugins.scan() // re-read manifests; the renderer remounts affected panes
-    sendPlugins(plugins.list())
+    plugins.scan() // re-read global manifests; workspace registries self-watch their own dirs
+    notifyPluginsChanged() // renderer refetches per-conversation + remounts affected panes
   })
 
   ipcMain.handle(IPC.pluginStorageGet, (_e, payload) => {
     const { conversationId, pluginId, key } = PluginStorageGetSchema.parse(payload)
-    return pluginValueOrDefault(plugins, conversationId, pluginId, key)
+    return pluginValueOrDefault(registryFor(conversationId), conversationId, pluginId, key)
   })
 
   ipcMain.handle(IPC.pluginStorageSet, (_e, payload) => {
@@ -606,7 +680,12 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.pluginContextGet, (_e, payload) => {
     const { conversationId, pluginId, key } = PluginContextGetSchema.parse(payload)
-    const v = pluginValueOrDefault(plugins, conversationId, pluginId, contextStorageKey(key))
+    const v = pluginValueOrDefault(
+      registryFor(conversationId),
+      conversationId,
+      pluginId,
+      contextStorageKey(key)
+    )
     return typeof v === 'string' ? v : ''
   })
 
@@ -669,9 +748,20 @@ function registerIpc(): void {
 app.whenReady().then(() => {
   ensureNodeOnPath()
   registerIpc()
-  handlePluginProtocol(plugins) // serve plugin assets to sandboxes (after ready)
+  // Serve plugin assets: a bare host resolves globally; a `w--<key>--<id>` host resolves against
+  // that workspace's registry (Phase 7). Decode + dispatch here so protocol.ts stays mechanics-only.
+  handlePluginProtocol((host) => {
+    const { pluginId, workspaceKey } = decodePluginHost(host)
+    if (workspaceKey) return workspaces.registryForKey(workspaceKey)?.get(pluginId)
+    return plugins.get(pluginId)
+  })
   plugins.start() // discover /plugins and watch for changes
+  // Stand up each soon-to-be-restored conversation's workspace registry BEFORE restore builds its
+  // query, so a restored conversation's workspace plugins contribute tools/context from turn one
+  // (PluginRegistry.start scans synchronously, so the merged view is populated immediately).
+  workspaces.reconcile(agents.restorableOpen())
   agents.restore() // recreate persisted conversations, resuming each active branch
+  reconcileWorkspaces() // exact reconcile against the live set (drops any that didn't restore)
   createWindow()
 
   app.on('activate', () => {
@@ -682,6 +772,7 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   void agents.closeAll()
   plugins.stop()
+  workspaces.stopAll() // release every per-cwd workspace registry's fs watcher
   backends.stopAll() // kill any plugin backend child processes
   if (process.platform !== 'darwin') app.quit()
 })

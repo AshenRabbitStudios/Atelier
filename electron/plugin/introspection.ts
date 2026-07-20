@@ -1,7 +1,6 @@
 import { tool, createSdkMcpServer, type Options } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
-import type { PluginRegistry } from './PluginRegistry.js'
-import type { ConversationPluginState, Manifest } from '../shared/plugins.js'
+import type { ConversationPluginState, Manifest, RegistryView } from '../shared/plugins.js'
 import { pluginAuthoringGuide } from './pluginAuthoringGuide.js'
 
 // Host-level environment self-awareness (docs/ENVIRONMENT_AWARENESS.md). Every Atelier agent
@@ -16,11 +15,15 @@ import { pluginAuthoringGuide } from './pluginAuthoringGuide.js'
 // stays prompt-cached; anything per-conversation (what's enabled/pinned here) lives in the tools.
 
 /** Valid, manifest-bearing plugins, in the registry's stable id order. */
-function catalog(registry: PluginRegistry): { id: string; manifest: Manifest }[] {
+function catalog(registry: RegistryView): { id: string; manifest: Manifest; workspace: boolean }[] {
   return registry
     .list()
     .filter((p) => p.valid && p.manifest)
-    .map((p) => ({ id: p.id, manifest: p.manifest as Manifest }))
+    .map((p) => ({
+      id: p.id,
+      manifest: p.manifest as Manifest,
+      workspace: p.scope === 'workspace'
+    }))
 }
 
 /** One-line summary a plugin shows in the catalog: its description, else its name. */
@@ -34,9 +37,11 @@ function oneLine(m: Manifest): string {
  * regardless of which plugins are enabled. Deliberately install-level and stable (catalog + cwd) so
  * an unchanged value stays byte-identical across turns and keeps the system block cached.
  */
-export function buildEnvironmentBriefing(registry: PluginRegistry, cwd?: string): string {
+export function buildEnvironmentBriefing(registry: RegistryView, cwd?: string): string {
   const plugins = catalog(registry)
-  const lines = plugins.map((p) => `- ${p.id} — ${oneLine(p.manifest)}`)
+  const lines = plugins.map(
+    (p) => `- ${p.id}${p.workspace ? ' [workspace]' : ''} — ${oneLine(p.manifest)}`
+  )
   const list = lines.length > 0 ? lines.join('\n') : '- (none discovered)'
   return (
     '<atelier-environment>\n' +
@@ -56,7 +61,9 @@ export function buildEnvironmentBriefing(registry: PluginRegistry, cwd?: string)
     'To find out which of these are enabled for this conversation, what tools and context documents ' +
     'a plugin contributes, and how to use it, call the `list_plugins` and `describe_plugin` tools ' +
     '(the built-in `atelier` tool server, always available to you). To author a new plugin, call ' +
-    '`plugin_authoring_guide` first for the manifest contract, host API, and rules.\n' +
+    '`plugin_authoring_guide` first for the manifest contract, host API, and rules. A plugin marked ' +
+    '[workspace] lives under this project’s `.atelier/plugins`; you can author one there yourself ' +
+    '(it auto-enables for this conversation and travels with the repo).\n' +
     '</atelier-environment>'
   )
 }
@@ -72,7 +79,7 @@ function stateOf(
 
 /** The `list_plugins` catalog text: every installed plugin with a one-liner + enabled marker. */
 export function listPluginsText(
-  registry: PluginRegistry,
+  registry: RegistryView,
   pluginState: Record<string, ConversationPluginState>
 ): string {
   const rows = catalog(registry).map((p) => {
@@ -86,7 +93,7 @@ export function listPluginsText(
 
 /** Human-readable, multi-section report of a single plugin's contract + live conversation state. */
 export function describePlugin(
-  registry: PluginRegistry,
+  registry: RegistryView,
   pluginState: Record<string, ConversationPluginState>,
   id: string
 ): string {
@@ -98,7 +105,9 @@ export function describePlugin(
   const m = found.manifest
   const { enabled, pinned } = stateOf(pluginState, id)
   const out: string[] = []
-  out.push(`${m.name} (id: ${m.id}) v${m.version} — kind: ${m.kind}`)
+  const scope =
+    found.scope === 'workspace' ? ' — workspace (in this project’s .atelier/plugins)' : ''
+  out.push(`${m.name} (id: ${m.id}) v${m.version} — kind: ${m.kind}${scope}`)
   if (m.description) out.push(m.description.trim())
   out.push(
     enabled
@@ -146,7 +155,7 @@ export function describePlugin(
  * per-conversation state at call time, so enabling/disabling a plugin needs no rebind to be seen.
  */
 export function buildAtelierToolServer(
-  registry: PluginRegistry,
+  registry: RegistryView,
   pluginState: Record<string, ConversationPluginState>
 ): NonNullable<Options['mcpServers']> {
   const listPlugins = tool(

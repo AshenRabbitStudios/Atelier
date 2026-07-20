@@ -128,6 +128,17 @@ The entry HTML must load the runtime first: \`<script src="atelier-plugin://__ru
    (needs "data:publish"); a pane subscribed to that channel receives it. A backend that crashes 3×
    on spawn is wedged until the plugin is reloaded; its V8 heap is capped (~512MB).
 
+## Where a plugin lives (global vs workspace)
+
+- **Global:** \`/<atelier>/plugins/<id>\` — shipped with the app, available to every conversation.
+- **Workspace:** \`<cwd>/.atelier/plugins/<id>\` — authored inside a project. You can create one here
+  with your normal file tools; it is discovered without a restart, AUTO-ENABLES for this conversation,
+  is visible to any conversation opened on the same folder, and travels with the repo (git). This is
+  the intended way for you to build yourself a tool mid-task. Its storage/permissions/contract are
+  identical to a global plugin.
+- **Shadowing:** if a workspace plugin's \`id\` collides with a global one, the GLOBAL plugin wins and
+  the workspace copy is shown as invalid ("shadowed"). Pick a distinct id.
+
 ## Minimal example
 
 manifest.json:

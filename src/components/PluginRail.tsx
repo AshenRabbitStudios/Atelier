@@ -115,6 +115,15 @@ export function PluginRail({
                 <div className="rail-item-text">
                   <span className="rail-item-name" title={p.dir}>
                     {p.manifest?.name ?? p.id}
+                    {p.scope === 'workspace' && (
+                      <span
+                        className="rail-item-scope"
+                        title="Lives in this project's .atelier/plugins"
+                      >
+                        {' '}
+                        workspace
+                      </span>
+                    )}
                   </span>
                   <span className="rail-item-desc">{desc}</span>
                 </div>

@@ -1,0 +1,584 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      Host runtime — injects window.atelier (all methods async). MUST be first.
+      No external network / no CDN. Mermaid is vendored offline (vendor/mermaid.min.js).
+
+      This pane is a set of TABBED visual boards backed by the JSON context key
+      "boards": { active?, boards: [ {id,title,type,...,comments[]} ] }.
+        type: mermaid{source} | table{columns,rows,align?} | chart{chart,x,y,series}
+              | note{markdown}
+      The agent writes boards with its set_/edit_ tools; the user edits + comments
+      in the pane; every change round-trips through context so both sides share one
+      document. Malformed JSON shows a non-destructive banner and never overwrites.
+    -->
+    <script src="atelier-plugin://__runtime__/atelier.js"></script>
+    <title>Whiteboard</title>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        font-family: var(--font, system-ui, sans-serif);
+        background: var(--bg, #0f1117);
+        color: var(--text, #e7eaf0);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        font-size: 13px;
+      }
+
+      /* ── Tab strip ─────────────────────────────────────────────────── */
+      .topbar {
+        display: flex;
+        align-items: stretch;
+        background: var(--surface, #14171e);
+        border-bottom: 1px solid var(--border, #252b37);
+        flex-shrink: 0;
+        position: relative;
+        min-height: 34px;
+      }
+      #tab-strip {
+        display: flex;
+        align-items: stretch;
+        overflow-x: auto;
+        flex: 1;
+      }
+      .tab {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0 10px;
+        border-right: 1px solid var(--border, #252b37);
+        cursor: pointer;
+        white-space: nowrap;
+        color: var(--dim, #8892a4);
+        font-size: 12px;
+        user-select: none;
+      }
+      .tab:hover {
+        color: var(--text, #e7eaf0);
+        background: var(--surface-2, #191d27);
+      }
+      .tab.active {
+        color: var(--text, #e7eaf0);
+        background: var(--bg, #0f1117);
+        box-shadow: inset 0 -2px 0 var(--accent, #5b9cff);
+      }
+      .tab-glyph {
+        font-size: 12px;
+        color: var(--accent, #5b9cff);
+      }
+      .tab-del {
+        font-size: 13px;
+        color: var(--faint, #5e6677);
+        margin-left: 2px;
+        opacity: 0;
+      }
+      .tab:hover .tab-del {
+        opacity: 1;
+      }
+      .tab-del:hover {
+        color: var(--danger, #f85149);
+      }
+      .add-wrap {
+        position: relative;
+        display: flex;
+        align-items: center;
+      }
+      #add-menu-btn {
+        background: none;
+        border: none;
+        border-left: 1px solid var(--border, #252b37);
+        color: var(--dim, #8892a4);
+        cursor: pointer;
+        font-size: 18px;
+        line-height: 1;
+        padding: 0 12px;
+        height: 100%;
+        font-family: inherit;
+      }
+      #add-menu-btn:hover {
+        color: var(--accent, #5b9cff);
+      }
+      #add-menu {
+        display: none;
+        position: absolute;
+        top: 100%;
+        right: 0;
+        z-index: 300;
+        background: var(--surface-2, #191d27);
+        border: 1px solid var(--border-2, #333b4b);
+        border-radius: 6px;
+        overflow: hidden;
+        min-width: 150px;
+        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+      }
+      #add-menu.open {
+        display: block;
+      }
+      .add-item {
+        padding: 7px 12px;
+        cursor: pointer;
+        color: var(--dim, #8892a4);
+        font-size: 12px;
+      }
+      .add-item:hover {
+        background: var(--bg, #0f1117);
+        color: var(--text, #e7eaf0);
+      }
+
+      /* ── Malformed banner ──────────────────────────────────────────── */
+      #banner {
+        display: none;
+        padding: 12px 14px;
+        background: var(--surface, #14171e);
+        border-bottom: 1px solid var(--danger, #f85149);
+        overflow: auto;
+      }
+      .banner-head {
+        color: var(--danger, #f85149);
+        font-weight: 600;
+        font-size: 12px;
+        margin-bottom: 6px;
+      }
+      .banner-err {
+        color: var(--dim, #8892a4);
+        font-family: var(--mono, monospace);
+        font-size: 11px;
+        margin-bottom: 8px;
+      }
+      .banner-ta {
+        width: 100%;
+        min-height: 160px;
+        background: var(--input, #1b2029);
+        color: var(--text, #e7eaf0);
+        border: 1px solid var(--border, #252b37);
+        border-radius: 4px;
+        font-family: var(--mono, monospace);
+        font-size: 12px;
+        padding: 8px;
+        resize: vertical;
+        margin-bottom: 8px;
+      }
+
+      /* ── Size warning strip ────────────────────────────────────────── */
+      #size-warn {
+        display: none;
+        padding: 4px 10px;
+        font-size: 11px;
+        color: var(--warn, #e3b341);
+        background: var(--surface, #14171e);
+        border-bottom: 1px solid var(--border, #252b37);
+        flex-shrink: 0;
+      }
+
+      /* ── Board area ────────────────────────────────────────────────── */
+      #board-area {
+        flex: 1 1 0;
+        overflow: hidden;
+        position: relative;
+        display: flex;
+        background: var(--bg, #0f1117);
+      }
+      #board-area.flash {
+        animation: flash 0.6s ease;
+      }
+      @keyframes flash {
+        0%,
+        100% {
+          background: var(--bg, #0f1117);
+        }
+        30% {
+          background: var(--surface-2, #191d27);
+        }
+      }
+      .board-view {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .wb-empty {
+        color: var(--faint, #5e6677);
+        font-family: var(--mono, monospace);
+        font-size: 12px;
+        padding: 24px;
+        text-align: center;
+      }
+
+      /* ── Buttons ───────────────────────────────────────────────────── */
+      .wb-mini-btn {
+        background: none;
+        border: 1px solid var(--border, #252b37);
+        border-radius: 4px;
+        color: var(--dim, #8892a4);
+        cursor: pointer;
+        font-size: 11px;
+        padding: 3px 8px;
+        font-family: inherit;
+      }
+      .wb-mini-btn:hover {
+        border-color: var(--accent, #5b9cff);
+        color: var(--text, #e7eaf0);
+      }
+
+      /* ── Mermaid ───────────────────────────────────────────────────── */
+      .wb-mermaid-host {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        position: relative;
+      }
+      .wb-mermaid-viewport {
+        flex: 1;
+        overflow: hidden;
+        position: relative;
+        cursor: grab;
+      }
+      .wb-mermaid-viewport.dragging {
+        cursor: grabbing;
+      }
+      .wb-mermaid-svg {
+        position: absolute;
+        top: 0;
+        left: 0;
+        padding: 12px;
+      }
+      .wb-mermaid-svg svg {
+        max-width: none;
+      }
+      .wb-mermaid-toolbar {
+        position: absolute;
+        top: 6px;
+        right: 6px;
+        display: flex;
+        gap: 4px;
+        z-index: 5;
+      }
+      .wb-mermaid-error {
+        margin: 16px;
+        border: 1px solid var(--danger, #f85149);
+        border-radius: 6px;
+        overflow: hidden;
+      }
+      .wb-mermaid-error-head {
+        background: var(--surface, #14171e);
+        color: var(--danger, #f85149);
+        font-weight: 600;
+        font-size: 12px;
+        padding: 8px 12px;
+      }
+      .wb-mermaid-error-msg {
+        padding: 8px 12px;
+        color: var(--dim, #8892a4);
+        font-family: var(--mono, monospace);
+        font-size: 11px;
+        border-bottom: 1px solid var(--border, #252b37);
+      }
+      .wb-mermaid-error-src {
+        padding: 10px 12px;
+        color: var(--text, #e7eaf0);
+        font-family: var(--mono, monospace);
+        font-size: 12px;
+        white-space: pre-wrap;
+        background: var(--bg, #0f1117);
+      }
+
+      /* ── Source editor ─────────────────────────────────────────────── */
+      .source-sec {
+        flex-shrink: 0;
+        display: flex;
+        flex-direction: column;
+        height: 140px;
+        border-top: 1px solid var(--border, #252b37);
+        background: var(--surface, #14171e);
+      }
+      .source-lbl {
+        padding: 4px 10px 2px;
+        font-size: 10px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--faint, #5e6677);
+      }
+      .source-ta {
+        flex: 1;
+        resize: none;
+        background: var(--input, #1b2029);
+        color: var(--text, #e7eaf0);
+        border: none;
+        border-top: 1px solid var(--border, #252b37);
+        font-family: var(--mono, monospace);
+        font-size: 12px;
+        line-height: 1.6;
+        padding: 6px 10px;
+        outline: none;
+      }
+      .source-ta:focus {
+        border-top-color: var(--accent, #5b9cff);
+      }
+
+      /* ── Table board ───────────────────────────────────────────────── */
+      .wb-table-host,
+      .wb-chart-host {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .wb-table-toolbar {
+        display: flex;
+        gap: 6px;
+        padding: 6px 10px;
+        border-bottom: 1px solid var(--border, #252b37);
+        flex-shrink: 0;
+      }
+      .wb-table-scroll {
+        flex: 1;
+        overflow: auto;
+        padding: 4px;
+      }
+      table.wb-grid {
+        border-collapse: collapse;
+        font-size: 12px;
+        width: 100%;
+      }
+      .wb-th {
+        position: sticky;
+        top: 0;
+        background: var(--surface, #14171e);
+        color: var(--dim, #8892a4);
+        border: 1px solid var(--border, #252b37);
+        padding: 5px 9px;
+        text-align: left;
+        cursor: pointer;
+        white-space: nowrap;
+        font-weight: 600;
+      }
+      .wb-sort-ind {
+        color: var(--accent, #5b9cff);
+      }
+      .wb-td {
+        border: 1px solid var(--border, #252b37);
+        padding: 4px 9px;
+        color: var(--text, #e7eaf0);
+        cursor: text;
+        min-width: 44px;
+      }
+      .wb-td:hover {
+        background: var(--surface-2, #191d27);
+      }
+      .wb-cell-input {
+        width: 100%;
+        border: 1px solid var(--accent, #5b9cff);
+        background: var(--input, #1b2029);
+        color: var(--text, #e7eaf0);
+        font-family: inherit;
+        font-size: 12px;
+        padding: 2px 4px;
+        outline: none;
+      }
+
+      /* ── Chart board ───────────────────────────────────────────────── */
+      .wb-chart-host {
+        position: relative;
+      }
+      .wb-chart {
+        flex: 1;
+      }
+      .wb-chart-tip {
+        position: absolute;
+        pointer-events: none;
+        background: var(--surface-2, #191d27);
+        border: 1px solid var(--border-2, #333b4b);
+        color: var(--text, #e7eaf0);
+        font-size: 11px;
+        padding: 3px 7px;
+        border-radius: 4px;
+        z-index: 10;
+        white-space: nowrap;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+      }
+
+      /* ── Note board ────────────────────────────────────────────────── */
+      .wb-note-rendered {
+        flex: 1;
+        overflow: auto;
+        padding: 16px 20px;
+        line-height: 1.6;
+      }
+      .wb-note-rendered h1 {
+        font-size: 20px;
+        margin: 4px 0 10px;
+      }
+      .wb-note-rendered h2 {
+        font-size: 16px;
+        margin: 14px 0 8px;
+      }
+      .wb-note-rendered h3 {
+        font-size: 14px;
+        margin: 12px 0 6px;
+      }
+      .wb-note-rendered p {
+        margin: 8px 0;
+      }
+      .wb-note-rendered ul,
+      .wb-note-rendered ol {
+        margin: 8px 0 8px 22px;
+      }
+      .wb-note-rendered li {
+        margin: 3px 0;
+      }
+      .wb-note-rendered code {
+        font-family: var(--mono, monospace);
+        background: var(--surface-2, #191d27);
+        padding: 1px 5px;
+        border-radius: 3px;
+        font-size: 12px;
+        color: var(--accent, #5b9cff);
+      }
+      .wb-note-rendered pre {
+        background: var(--surface, #14171e);
+        border: 1px solid var(--border, #252b37);
+        border-radius: 5px;
+        padding: 10px 12px;
+        margin: 8px 0;
+        overflow: auto;
+      }
+      .wb-note-rendered pre code {
+        background: none;
+        padding: 0;
+        color: var(--text, #e7eaf0);
+      }
+      .wb-note-rendered hr {
+        border: none;
+        border-top: 1px solid var(--border, #252b37);
+        margin: 12px 0;
+      }
+      .wb-note-rendered a {
+        color: var(--accent, #5b9cff);
+      }
+      .wb-note-editor {
+        flex: 1;
+        resize: none;
+        background: var(--input, #1b2029);
+        color: var(--text, #e7eaf0);
+        border: none;
+        border-top: 1px solid var(--border, #252b37);
+        font-family: var(--mono, monospace);
+        font-size: 13px;
+        line-height: 1.6;
+        padding: 12px 16px;
+        outline: none;
+      }
+
+      /* ── Comments ──────────────────────────────────────────────────── */
+      #comments {
+        flex-shrink: 0;
+        max-height: 200px;
+        display: flex;
+        flex-direction: column;
+        border-top: 1px solid var(--border, #252b37);
+        background: var(--surface, #14171e);
+      }
+      .comments-head {
+        padding: 5px 12px;
+        font-size: 10px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--faint, #5e6677);
+        flex-shrink: 0;
+      }
+      .comments-list {
+        overflow: auto;
+        padding: 0 12px;
+        flex: 1;
+      }
+      .comment {
+        padding: 6px 0;
+        border-bottom: 1px solid var(--border, #252b37);
+      }
+      .comment-meta {
+        font-size: 10px;
+        color: var(--faint, #5e6677);
+      }
+      .comment.by-agent .comment-meta {
+        color: var(--accent, #5b9cff);
+      }
+      .comment-text {
+        font-size: 12px;
+        color: var(--text, #e7eaf0);
+        margin-top: 2px;
+        white-space: pre-wrap;
+      }
+      .comment-input-row {
+        display: flex;
+        gap: 6px;
+        padding: 6px 12px;
+        flex-shrink: 0;
+      }
+      .comment-input {
+        flex: 1;
+        background: var(--input, #1b2029);
+        color: var(--text, #e7eaf0);
+        border: 1px solid var(--border, #252b37);
+        border-radius: 4px;
+        font-family: inherit;
+        font-size: 12px;
+        padding: 5px 8px;
+        outline: none;
+      }
+      .comment-input:focus {
+        border-color: var(--accent, #5b9cff);
+      }
+
+      /* ── Status bar ────────────────────────────────────────────────── */
+      #status {
+        flex-shrink: 0;
+        padding: 3px 12px 4px;
+        font-size: 10px;
+        color: var(--faint, #5e6677);
+        border-top: 1px solid var(--border, #252b37);
+        background: var(--surface, #14171e);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="topbar">
+      <div id="tab-strip"></div>
+      <div class="add-wrap">
+        <button id="add-menu-btn" title="Add a board">+</button>
+        <div id="add-menu"></div>
+      </div>
+    </div>
+
+    <div id="banner"></div>
+    <div id="size-warn"></div>
+
+    <div id="board-area"></div>
+
+    <div id="comments"></div>
+
+    <div id="status">connecting…</div>
+
+    <!-- Vendored offline mermaid (sets global `mermaid`). MIT, v11.16.0. -->
+    <script src="atelier-plugin://whiteboard/vendor/mermaid.min.js"></script>
+    <script src="atelier-plugin://whiteboard/model.js"></script>
+    <script src="atelier-plugin://whiteboard/note.js"></script>
+    <script src="atelier-plugin://whiteboard/charts.js"></script>
+    <script src="atelier-plugin://whiteboard/table-board.js"></script>
+    <script src="atelier-plugin://whiteboard/mermaid-board.js"></script>
+    <script src="atelier-plugin://whiteboard/app.js"></script>
+  </body>
+</html>

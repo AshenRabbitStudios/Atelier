@@ -222,3 +222,23 @@ toolsearch|webfetch|websearch` start collapsed in the chat (they're just retriev
 - Transient errors no longer flash status=error; they surface in the error list while
   status re-derives (working/idle). Sticky error is reserved for restart-budget-exhausted
   and auth failures (wedged flag), cleared by the next send.
+
+## whiteboard plugin (feat/whiteboard)
+
+- Whiteboard is a tabbed panel plugin: one JSON context export `boards`
+  ({active?, boards:[{id,title,type,comments?,...}]}), types mermaid|table|chart|note.
+  One export (not one-per-type) so the agent edits a single doc with edit_/set_ tools.
+- Mermaid is vendored offline as `vendor/mermaid.min.js` (npm mermaid@11.16.0, MIT, the
+  self-contained esbuild IIFE that sets global `mermaid`; zero dynamic imports/chunks so
+  it works from a single <script> with no CDN). securityLevel:'strict'.
+- Charts/tables/notes are hand-rolled vanilla JS + SVG (no chart dep), themed via host
+  CSS vars. Note markdown is a tiny hand-rolled renderer that HTML-escapes first.
+- Sync: pure model in `model.js` (parse never throws / never yields {} on malformed;
+  serialize preserves unknown top-level AND per-board fields; updateBoard/addComment are
+  immutable-ish). Malformed export → non-destructive banner with raw text + fix-in-place,
+  never overwrites. User edits debounce context.set(400ms); own writes suppressed by
+  lastPushedValue. Agent `active` steers the tab unless the user clicked within 30s.
+- `.js` under a `"type":"module"` repo are ESM, so the UMD CommonJS branch is inert in
+  node; the browser loads them as classic <script> (window.WB/WBCharts/…). Node harness
+  tests load them via `new Function(...)` to exercise the pure logic headlessly.
+- vendor/ added to .prettierignore (precedent: bash-stream/vendor).

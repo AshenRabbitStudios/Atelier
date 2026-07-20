@@ -849,3 +849,50 @@ global lose to global or are flagged), enable-state stays per-conversation as to
 by resolving the conversation's local dir first. Gate creation behind an explicit user action or a
 per-plugin confirmation. The `plugin_authoring_guide` tool (shipped) is the agent-facing half and is
 useful regardless of where (b) lands.
+
+## whiteboard plugin — done (feat/whiteboard worktree)
+
+Built `plugins/whiteboard` per docs/plugin-proposals/designs/whiteboard.md. All five
+milestones implemented: tab shell + note + comments + sync (M1), table boards (M2),
+charts bar/line/area/scatter/pie (M3), mermaid vendored + error-tolerant + pan/zoom +
+svg export (M4), defaults.json guide + starter-board-of-each-type + size guard +
+active-tab steering (M5).
+
+Files: manifest.json, index.html, defaults.json, model.js (pure sync/merge),
+note.js, charts.js, table-board.js, mermaid-board.js, app.js, vendor/mermaid.min.js
+(mermaid@11.16.0, MIT, offline).
+
+Verified headlessly:
+
+- model.js: 25 unit assertions (parse tolerance, malformed-keeps-raw, unknown-field
+  preservation on serialize, immutable updateBoard/addComment, unique newBoard ids,
+  boardFieldChanged, sizeInfo guard, active-only + array-top edge cases) — all pass.
+- note.js markdown: 8 assertions (headings/lists/bold/code/fence/HTML-escape/null) — pass.
+- defaults.json valid JSON; embedded ctx:boards parses to one board of each of the 4
+  types with active:"arch". guide:boards present (2.2KB).
+- All 6 JS files pass `node --check`. Whiteboard files pass `prettier --check`.
+- Repo gate green: `npm run lint`, `npm run typecheck` (node+web) both pass. format:check
+  shows only 4 PRE-EXISTING doc warnings (agent-flow/notifications/README/whiteboard .md)
+  I did not touch; my files are clean.
+- mermaid.min.js confirmed self-contained (0 dynamic import()/chunk refs; sets global
+  `mermaid`) so it renders offline from a single <script>.
+
+Needs human spot-check (live app — supervisor):
+
+1. Load the plugin; the starter boards render — mermaid flowchart, bench table, grouped
+   bar chart, and the note (all 4 tabs, acceptance #1).
+2. Agent `set_whiteboard__boards` with one board of each type → all four render.
+3. Edit a table cell + add a comment → next agent turn's injected `boards` export shows
+   both (acceptance #2).
+4. `edit_whiteboard__boards` changing one mermaid node label re-renders; comments/edits
+   elsewhere survive (acceptance #3).
+5. Push a mermaid syntax error → error card + raw source shown; other tabs unaffected;
+   doc not corrupted (acceptance #4).
+6. Close/reopen pane + restart app → boards restore (context) and last-active tab restores
+   (storage key `activeTab`) (acceptance #5).
+7. Malformed JSON export → non-destructive banner with raw text + fix-in-place; never
+   overwritten with {} (acceptance #6).
+8. Confirm no network requests at runtime (offline) — vendored mermaid only (acceptance #7).
+9. Chart interactions: hover tooltips, legend, "view as table" toggle; scatter + pie boards.
+10. Mermaid pan/zoom (wheel/drag), copy-source, download-.svg buttons.
+11. Theme: verify boards read host CSS vars in both dark and light themes.

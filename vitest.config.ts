@@ -13,7 +13,9 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    include: ['electron/**/*.test.ts', 'src/**/*.test.{ts,tsx}'],
+    // Plugin backends are plain JS (they run outside the app's TS build), but their pure parsers
+    // are unit-tested here — include agent-flow's git porcelain parser suite (`.test.mjs`).
+    include: ['electron/**/*.test.ts', 'src/**/*.test.{ts,tsx}', 'plugins/**/*.test.mjs'],
     coverage: {
       provider: 'v8',
       include: ['electron/**/*.ts', 'src/**/*.ts'],

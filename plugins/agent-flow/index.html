@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      Agent Flow — one pane, four tabs (Timeline / Changes / History / Branches).
+
+      Host runtime injects window.atelier (all methods async). MUST be the first element in <head>;
+      no external network / no CDN.
+
+      - Timeline: this conversation's AgentEvent trace, turn-grouped (agent.history backfill +
+        agent.onEvent live). Tool calls with one-line summaries/durations/errors, permission/question
+        blocks, a per-turn result/token line, filter chips, and "view diff" links that jump to Changes.
+      - Changes: staged/unstaged/untracked list + a per-file unified diff, refreshed on file-write
+        agent events, tab focus, a manual button, and the backend's debounced flow:status push.
+      - History: recent commits (cap 200) + commit details + per-commit diff; session-window commits
+        are marked.
+      - Branches: branches + worktrees, READ-ONLY (destructive git stays with the agent/user in chat).
+
+      All git data comes from the service backend (backend.js) over atelier.backend.call — the pane
+      never parses .git itself. A non-git cwd yields a friendly empty state, not an error.
+    -->
+    <script src="atelier-plugin://__runtime__/atelier.js"></script>
+    <title>Agent Flow</title>
+    <link rel="stylesheet" href="atelier-plugin://agent-flow/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <nav id="tabs" role="tablist">
+        <button class="tab" data-tab="timeline" role="tab">Timeline</button>
+        <button class="tab" data-tab="changes" role="tab">Changes</button>
+        <button class="tab" data-tab="history" role="tab">History</button>
+        <button class="tab" data-tab="branches" role="tab">Branches</button>
+      </nav>
+
+      <!-- Timeline -->
+      <section class="panel" data-panel="timeline">
+        <div class="toolbar">
+          <div class="chips" id="tl-filters">
+            <button class="chip active" data-filter="all">All</button>
+            <button class="chip" data-filter="tools">Tools</button>
+            <button class="chip" data-filter="files">Files</button>
+            <button class="chip" data-filter="errors">Errors</button>
+          </div>
+        </div>
+        <div class="scroll" id="tl-list"></div>
+      </section>
+
+      <!-- Changes -->
+      <section class="panel" data-panel="changes">
+        <div class="split">
+          <div class="list-col">
+            <div class="toolbar">
+              <span class="col-title" id="ch-branch">—</span>
+              <button class="btn" id="ch-refresh" title="Refresh">Refresh</button>
+            </div>
+            <div class="scroll" id="ch-files"></div>
+          </div>
+          <div class="diff-col">
+            <div class="toolbar">
+              <span class="col-title" id="ch-file">Select a file</span>
+              <span class="diff-turns" id="ch-turns"></span>
+            </div>
+            <div class="scroll diff" id="ch-diff"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- History -->
+      <section class="panel" data-panel="history">
+        <div class="split">
+          <div class="list-col">
+            <div class="toolbar">
+              <span class="col-title">Recent commits</span>
+              <button class="btn" id="hi-refresh" title="Refresh">Refresh</button>
+            </div>
+            <div class="scroll" id="hi-list"></div>
+          </div>
+          <div class="diff-col">
+            <div class="toolbar"><span class="col-title" id="hi-title">Select a commit</span></div>
+            <div class="scroll" id="hi-detail"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Branches -->
+      <section class="panel" data-panel="branches">
+        <div class="toolbar">
+          <span class="col-title">Branches &amp; worktrees</span>
+          <span class="readonly-note">read-only</span>
+          <button class="btn" id="br-refresh" title="Refresh">Refresh</button>
+        </div>
+        <div class="scroll" id="br-list"></div>
+      </section>
+
+      <div id="empty" class="empty hidden"></div>
+    </div>
+
+    <script src="atelier-plugin://agent-flow/flow.js"></script>
+  </body>
+</html>

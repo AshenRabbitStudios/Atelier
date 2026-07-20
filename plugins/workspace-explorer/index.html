@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Workspace Explorer</title>
+    <!-- Host runtime — injects window.atelier (all methods async). MUST be first in <head>. -->
+    <script src="atelier-plugin://__runtime__/atelier.js"></script>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: var(--surface, #14171e);
+        color: var(--text, #e7eaf0);
+        font-family: var(--font, system-ui, sans-serif);
+        font-size: 12px;
+      }
+
+      #root {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+
+      /* ---- Toolbar ---- */
+      #bar {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 8px;
+        border-bottom: 1px solid var(--border, #252b37);
+        font-size: 11px;
+        color: var(--dim, #8b97ae);
+      }
+
+      #bar .title {
+        font-weight: 600;
+        color: var(--text, #e7eaf0);
+        margin-right: auto;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      #bar button {
+        padding: 3px 8px;
+        border: 1px solid var(--border, #252b37);
+        border-radius: 4px;
+        background: var(--surface-2, #1a1e27);
+        color: var(--text, #e7eaf0);
+        font-size: 11px;
+        cursor: pointer;
+      }
+
+      #bar button:hover {
+        border-color: var(--accent, #5b9cff);
+      }
+
+      #bar button.on {
+        background: var(--accent-weak, #23324a);
+        border-color: var(--accent, #5b9cff);
+      }
+
+      /* ---- Legend ---- */
+      #legend {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 3px 10px;
+        border-bottom: 1px solid var(--border, #252b37);
+        font-size: 10px;
+        color: var(--faint, #5e6677);
+      }
+
+      #legend .swatch {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      }
+
+      #legend .dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 2px;
+      }
+
+      #legend .dot.read {
+        background: var(--wx-read, #3a7bd5);
+      }
+
+      #legend .dot.write {
+        background: var(--wx-write, #e0913a);
+      }
+
+      #legend .frozen-note {
+        margin-left: auto;
+        color: var(--warn, #d8a657);
+      }
+
+      /* ---- Tree ---- */
+      #tree {
+        flex: 1 1 0;
+        min-height: 0;
+        overflow: auto;
+        padding: 4px 0;
+      }
+
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 1px 8px 1px 0;
+        white-space: nowrap;
+        cursor: pointer;
+        position: relative;
+        user-select: none;
+        line-height: 1.7;
+      }
+
+      .row:hover {
+        background: var(--surface-2, #1a1e27);
+      }
+
+      .row.selected {
+        background: var(--accent-weak, #23324a);
+      }
+
+      /* Heat wash sits behind the row content as a left-edge fill. */
+      .row .heat {
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        pointer-events: none;
+      }
+
+      .row .twisty {
+        flex: 0 0 auto;
+        width: 12px;
+        text-align: center;
+        color: var(--faint, #5e6677);
+        font-size: 9px;
+        transition: transform 0.1s;
+      }
+
+      .row .twisty.open {
+        transform: rotate(90deg);
+      }
+
+      .row .twisty.leaf {
+        visibility: hidden;
+      }
+
+      .row .icon {
+        flex: 0 0 auto;
+        width: 14px;
+        height: 14px;
+        color: var(--dim, #8b97ae);
+      }
+
+      .row .name {
+        flex: 1 1 auto;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        z-index: 1;
+      }
+
+      .row.ignored .name,
+      .row.ignored .icon {
+        color: var(--faint, #5e6677);
+        opacity: 0.6;
+      }
+
+      .row .badge {
+        flex: 0 0 auto;
+        font-size: 9px;
+        color: var(--faint, #5e6677);
+        z-index: 1;
+      }
+
+      .children {
+        overflow: hidden;
+      }
+
+      .empty-note,
+      .err-note {
+        padding: 2px 8px 2px 26px;
+        font-size: 10px;
+        color: var(--faint, #5e6677);
+        font-style: italic;
+      }
+
+      .err-note {
+        color: var(--danger, #d05b5b);
+      }
+
+      /* ---- Context menu ---- */
+      #ctx {
+        position: fixed;
+        z-index: 50;
+        min-width: 150px;
+        background: var(--surface-3, #222835);
+        border: 1px solid var(--border-2, #313847);
+        border-radius: 5px;
+        padding: 3px;
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+        font-size: 11px;
+      }
+
+      #ctx.hidden {
+        display: none;
+      }
+
+      #ctx .item {
+        padding: 5px 9px;
+        border-radius: 3px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+
+      #ctx .item:hover {
+        background: var(--accent-weak, #23324a);
+      }
+
+      /* ---- Preview pane ---- */
+      #preview {
+        flex: 0 0 auto;
+        display: flex;
+        flex-direction: column;
+        height: 45%;
+        min-height: 0;
+        border-top: 1px solid var(--border, #252b37);
+      }
+
+      #preview.collapsed {
+        height: auto;
+      }
+
+      #preview.collapsed #pv-body {
+        display: none;
+      }
+
+      #pv-head {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 8px;
+        background: var(--surface-2, #1a1e27);
+        font-size: 11px;
+        cursor: pointer;
+      }
+
+      #pv-head .pv-path {
+        flex: 1 1 auto;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-family: var(--mono, monospace);
+        color: var(--dim, #8b97ae);
+      }
+
+      #pv-head .pv-twisty {
+        color: var(--faint, #5e6677);
+        font-size: 9px;
+        transition: transform 0.1s;
+      }
+
+      #preview:not(.collapsed) #pv-head .pv-twisty {
+        transform: rotate(90deg);
+      }
+
+      #pv-head button {
+        padding: 2px 7px;
+        border: 1px solid var(--border, #252b37);
+        border-radius: 4px;
+        background: var(--surface-3, #222835);
+        color: var(--text, #e7eaf0);
+        font-size: 10px;
+        cursor: pointer;
+      }
+
+      #pv-body {
+        flex: 1 1 0;
+        min-height: 0;
+        overflow: auto;
+        background: var(--bg-2, #0f1117);
+      }
+
+      #pv-code {
+        margin: 0;
+        display: flex;
+        font-family: var(--mono, monospace);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      #pv-gutter {
+        flex: 0 0 auto;
+        padding: 8px 8px 8px 10px;
+        text-align: right;
+        color: var(--faint, #5e6677);
+        background: var(--surface, #14171e);
+        user-select: none;
+        border-right: 1px solid var(--border, #252b37);
+        white-space: pre;
+      }
+
+      #pv-text {
+        flex: 1 1 auto;
+        padding: 8px 10px;
+        white-space: pre;
+        overflow-x: auto;
+        color: var(--text, #e7eaf0);
+      }
+
+      #pv-img {
+        display: block;
+        max-width: 100%;
+        margin: 10px auto;
+      }
+
+      #pv-note {
+        padding: 10px 12px;
+        color: var(--faint, #5e6677);
+        font-style: italic;
+      }
+
+      .trunc-marker {
+        padding: 6px 10px;
+        margin-top: 4px;
+        border-top: 1px dashed var(--border, #252b37);
+        color: var(--warn, #d8a657);
+        font-size: 10px;
+        font-style: italic;
+      }
+
+      /* Lightweight token colors (hand-rolled tokenizer — see explorer.js). */
+      .tok-com {
+        color: var(--faint, #6b7280);
+        font-style: italic;
+      }
+      .tok-str {
+        color: var(--ok, #7bbf88);
+      }
+      .tok-kw {
+        color: var(--accent, #6b9fff);
+      }
+      .tok-num {
+        color: var(--warn, #d8a657);
+      }
+
+      #toast {
+        position: fixed;
+        left: 50%;
+        bottom: 12px;
+        transform: translateX(-50%);
+        max-width: 90%;
+        padding: 6px 12px;
+        border-radius: 4px;
+        background: var(--surface-3, #222835);
+        border: 1px solid var(--border-2, #313847);
+        color: var(--text, #e7eaf0);
+        font-size: 11px;
+        opacity: 0;
+        transition: opacity 0.2s;
+        pointer-events: none;
+        z-index: 60;
+      }
+
+      #toast.show {
+        opacity: 1;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div id="bar">
+        <span class="title" id="root-title">workspace</span>
+        <button id="btn-refresh" title="Re-list the root">Refresh</button>
+        <button id="btn-hide-ignored" title="Hide gitignored entries">Hide ignored</button>
+        <button id="btn-freeze" title="Freeze heat decay">Freeze</button>
+        <button id="btn-clear" title="Clear all heat">Clear heat</button>
+      </div>
+      <div id="legend">
+        <span class="swatch"><span class="dot read"></span>read</span>
+        <span class="swatch"><span class="dot write"></span>write</span>
+        <span class="frozen-note hidden" id="frozen-note">heat frozen</span>
+      </div>
+      <div id="tree"></div>
+      <div id="preview" class="collapsed">
+        <div id="pv-head">
+          <span class="pv-twisty">▶</span>
+          <span class="pv-path" id="pv-path">no file selected</span>
+          <button id="pv-open" class="hidden">Open</button>
+        </div>
+        <div id="pv-body">
+          <div id="pv-note">Click a file to preview it.</div>
+          <pre
+            id="pv-code"
+            class="hidden"
+          ><code id="pv-gutter"></code><code id="pv-text"></code></pre>
+          <img id="pv-img" class="hidden" alt="preview" />
+        </div>
+      </div>
+      <div id="ctx" class="hidden"></div>
+      <div id="toast"></div>
+    </div>
+    <script type="module" src="atelier-plugin://workspace-explorer/explorer.js"></script>
+  </body>
+</html>

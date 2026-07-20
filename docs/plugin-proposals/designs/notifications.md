@@ -24,15 +24,15 @@ token/webhook-URL based — the user pastes a secret, no browser dance).
 
 ## 2. Channels (v1 set — all plain HTTPS POSTs a backend can do with Node `fetch`)
 
-| channel   | config fields                       | delivery                                       |
-| --------- | ----------------------------------- | ---------------------------------------------- |
-| os-toast  | (none)                              | `atelier.os.notify` from the PANE (A4) — falls back to log-only if pane closed |
-| webhook   | url, optional headers JSON, template| POST JSON `{ title, body, event, conversation, ts }` |
-| discord   | webhook url                         | POST `{ content: "**title**\nbody" }`          |
-| slack     | webhook url                         | POST `{ text: "*title*\nbody" }`               |
-| telegram  | bot token, chat id                  | `api.telegram.org/bot<t>/sendMessage`          |
-| ntfy      | server url (default ntfy.sh), topic, optional token | POST body with `Title` header |
-| pushover  | app token, user key                 | `api.pushover.net/1/messages.json`             |
+| channel  | config fields                                       | delivery                                                                       |
+| -------- | --------------------------------------------------- | ------------------------------------------------------------------------------ |
+| os-toast | (none)                                              | `atelier.os.notify` from the PANE (A4) — falls back to log-only if pane closed |
+| webhook  | url, optional headers JSON, template                | POST JSON `{ title, body, event, conversation, ts }`                           |
+| discord  | webhook url                                         | POST `{ content: "**title**\nbody" }`                                          |
+| slack    | webhook url                                         | POST `{ text: "*title*\nbody" }`                                               |
+| telegram | bot token, chat id                                  | `api.telegram.org/bot<t>/sendMessage`                                          |
+| ntfy     | server url (default ntfy.sh), topic, optional token | POST body with `Title` header                                                  |
+| pushover | app token, user key                                 | `api.pushover.net/1/messages.json`                                             |
 
 Secrets live in plugin `storage` (per-conversation, host-persisted) under `settings`. The pane
 masks them after entry. They are NEVER placed in a context export (never re-injected into the
@@ -70,23 +70,42 @@ a small status export.
   "entry": "index.html",
   "backend": "backend.js",
   "service": true,
-  "permissions": ["agent:read", "storage", "os:notify", "data:subscribe", "data:publish", "net:fetch"],
+  "permissions": [
+    "agent:read",
+    "storage",
+    "os:notify",
+    "data:subscribe",
+    "data:publish",
+    "net:fetch"
+  ],
   "defaultDock": "right",
   "tools": [
-    { "name": "notify_user",
+    {
+      "name": "notify_user",
       "description": "Send a notification to the user over their configured channels. Use when blocked on the user, when finishing something they're waiting on, or when something needs attention they'd want interrupted for. Do not spam: at most one ping per distinct reason.",
       "inputSchema": {
         "title": "string",
         "body": "string",
         "urgency": { "type": "string", "enum": ["low", "normal", "high"], "optional": true },
-        "channels": { "type": "array", "items": { "type": "string" }, "optional": true,
-                      "description": "restrict to these configured channel names; default all enabled" } },
-      "timeoutMs": 30000 }
+        "channels": {
+          "type": "array",
+          "items": { "type": "string" },
+          "optional": true,
+          "description": "restrict to these configured channel names; default all enabled"
+        }
+      },
+      "timeoutMs": 30000
+    }
   ],
   "contextExports": [
-    { "key": "notify_status", "label": "Notification channels", "format": "text", "maxTokens": 150,
+    {
+      "key": "notify_status",
+      "label": "Notification channels",
+      "format": "text",
+      "maxTokens": 150,
       "readonly": true,
-      "description": "Pane-maintained summary: which channels exist and are enabled, so the agent knows whether notify_user can reach the user." }
+      "description": "Pane-maintained summary: which channels exist and are enabled, so the agent knows whether notify_user can reach the user."
+    }
   ]
 }
 ```
@@ -103,8 +122,7 @@ DECISIONS.md.
   unresolved permission/question request; re-arm on resolve.
 - `notify_user` always delivers (agent judgment), but rate-capped backend-side: ≤1/10s,
   ≤10/hour per conversation; excess returns an error result to the agent saying so.
-- Every delivery (success or failure, per channel) appends to the ping log (storage, bounded
-  200) and publishes on `notify:log`.
+- Every delivery (success or failure, per channel) appends to the ping log (storage, bounded 200) and publishes on `notify:log`.
 - Tool result to the agent: `{ delivered: ["telegram", "os-toast"], failed: [{channel, error}] }`
   so the agent knows whether the user was actually reachable.
 

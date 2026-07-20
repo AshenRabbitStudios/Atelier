@@ -41,6 +41,58 @@ landed names are `agent:compose`/`shell:open` with `atelier.agent.compose(text)`
 the shipped host API (verified in `electron/shared/plugins.ts` + `runtime.ts`). Syntax highlight is
 a lightweight hand-rolled tokenizer, not Shiki (see DECISIONS).
 
+## agent-flow plugin (2026-07-20, autonomous session, worktree feat/agent-flow)
+
+Built `plugins/agent-flow` per `docs/plugin-proposals/designs/agent-flow.md` — ONE panel pane,
+four tabs, backed by a `service` git-reader backend.
+
+Shipped:
+
+- **Backend** (`backend.js`, service): learns `cwd` from hello/enable; runs git via `child_process`;
+  RPC ops over `atelier.backend.call` — `status` (`--porcelain=v2 --branch -z`), `diff`
+  (`file`/`staged`/`commit` variants, `<hash>^!` for a commit), `log` (US/RS pretty, cap 200),
+  `commit` (header + `--name-status`), `branches` (`branch -vv` + `worktree list --porcelain`).
+  Publishes `flow:status` on the DataBus on a ≥5s debounce (armed on enable + after any RPC).
+  Diff capped at 500KB (`truncated:true`), git timeout 15s. Non-git cwd / missing git →
+  `{ error:'not a git repository' | 'git not found' }` and a friendly pane empty state — never throws.
+- **Parsers** (`gitParse.cjs`): pure, dependency-free `parseStatus/parseLog/parseBranches/`
+  `parseWorktrees/parseDiff` — the bug farm, unit-tested in `gitParse.test.mjs` (20 fixture tests,
+  node env; vitest `include` extended to `plugins/**/*.test.mjs`). All never throw on malformed input.
+- **Pane** (`index.html` + `flow.js` + `styles.css`): tabs (Timeline/Changes/History/Branches).
+  Timeline segments turns by `result` boundaries (AgentEvents carry no turn id), renders tool calls
+  with one-line summaries + durations + ok/error, permission/question blocks, per-turn result/token/
+  cost line, filter chips (all/tools/files/errors), and "view diff" cross-links. Changes: grouped
+  staged/unstaged/untracked/conflicted list + unified diff (plain mono, add/del backgrounds, line
+  numbers), refresh on file-write tool_result / tab focus / manual button / flow:status push.
+  History: commits (session-window marked by mount-time), details + per-commit diff reusing the
+  Changes renderer. Branches: branches + worktrees, READ-ONLY. Cross-link file→turns index both
+  directions (timeline "view diff"→Changes; Changes "n turns" chip→timeline). Persists active tab /
+  filter / selected file via `storage`.
+
+Gate (all green): `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test`
+(261 tests, 29 files, incl. the 20 agent-flow parser tests).
+
+Manifest note: the schema (`electron/shared/plugins.ts`) accepts `kind:"panel"` + `backend` +
+`service:true` directly — the spec's `kind:"both"` fallback was NOT needed; validated against
+`ManifestSchema.safeParse`.
+
+Needs live-app spot-check (not verifiable headlessly):
+
+1. Open on this dirty repo → Changes lists exactly what `git status` shows; staged vs unstaged split
+   is correct; clicking a file renders a readable diff; a rename shows old→new.
+2. Agent edits a file → Changes refreshes within ~5s with no user action (flow:status push); the
+   Timeline shows the Edit with a working "view diff" link that selects it in Changes.
+3. Close + reopen the pane → active tab, filter, and selected file restore; Timeline backfills past
+   turns via `agent.history` and streams new ones live.
+4. History renders recent commits with the "this session" badge on commits made after the pane
+   mounted; clicking a commit shows its details + diff.
+5. Branches lists branches (current highlighted, ahead/behind) + worktrees (this repo's multi-session
+   worktrees) with no destructive buttons.
+6. Non-git cwd → every git tab shows the friendly empty state, no thrown errors in devtools.
+7. Kill the backend child mid-session → pane shows a per-op "backend unavailable" error and recovers
+   after respawn (manager crash-loop guard).
+8. A >500KB diff shows the truncation marker.
+
 ## Default plugin suite: proposals + bugs.txt fixes (2026-07-19, autonomous session)
 
 - **bugs.txt bug 2 fixed** (commit `fix(agent): defer plugin-toggle rebind…`): toggling a

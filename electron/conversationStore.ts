@@ -1,6 +1,7 @@
 import { app } from 'electron'
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, rmSync } from 'node:fs'
+import { readFileSync, existsSync, readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
+import { writeFileAtomic } from './atomicWrite.js'
 import type { ConversationPluginState } from './shared/plugins.js'
 import type { PermissionMode } from './shared/events.js'
 
@@ -61,8 +62,7 @@ export function listConversations(): ConversationManifest[] {
 
 export function saveConversation(m: ConversationManifest): void {
   try {
-    mkdirSync(join(convDir(), m.id), { recursive: true })
-    writeFileSync(manifestPath(m.id), JSON.stringify(m, null, 2), 'utf8')
+    writeFileAtomic(manifestPath(m.id), JSON.stringify(m, null, 2))
   } catch {
     /* best-effort persistence */
   }
@@ -88,8 +88,7 @@ function loadState(): AppState {
 
 function saveState(s: AppState): void {
   try {
-    mkdirSync(root(), { recursive: true })
-    writeFileSync(statePath(), JSON.stringify(s), 'utf8')
+    writeFileAtomic(statePath(), JSON.stringify(s))
   } catch {
     /* best-effort */
   }

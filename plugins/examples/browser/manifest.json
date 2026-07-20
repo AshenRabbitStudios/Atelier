@@ -1,12 +1,12 @@
 {
   "id": "browser",
   "name": "Browser",
-  "version": "0.2.0",
-  "description": "A pane the user views. Preferred use: write a viewable file (.html/.md) in the cwd, then set 'source' to its path — the pane live-reloads it as you edit. 'source' also takes http(s) URLs (host-fetched). Read back what the user sees via the page state and snapshot outputs.",
+  "version": "0.3.0",
+  "description": "A pane the user views. Preferred use: write a viewable file (.html/.md) in the cwd, then set 'source' to its path — the pane live-reloads it as you edit. 'source' also takes http(s) URLs, shown in a real embedded Chromium surface (live JS, real navigation; falls back to a static host-fetch render when the surface is unavailable). Read back what the user sees via the page state and snapshot outputs.",
   "icon": "M8 1.6a6.4 6.4 0 100 12.8A6.4 6.4 0 008 1.6zM1.7 8h12.6M8 1.7c1.8 1.8 2.8 4 2.8 6.3S9.8 12.5 8 14.3M8 1.7C6.2 3.5 5.2 5.7 5.2 8s1 4.5 2.8 6.3",
   "kind": "panel",
   "entry": "index.html",
-  "permissions": ["context", "data:subscribe", "storage", "net:fetch"],
+  "permissions": ["context", "data:subscribe", "storage", "net:fetch", "browser:embed"],
   "defaultDock": "right",
   "contextExports": [
     {

@@ -2,8 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { tool, createSdkMcpServer, type Options } from '@anthropic-ai/claude-agent-sdk'
-import type { PluginRegistry } from './PluginRegistry.js'
-import type { ConversationPluginState } from '../shared/plugins.js'
+import type { ConversationPluginState, RegistryView } from '../shared/plugins.js'
 import { pluginStorageGet, pluginStorageSet } from './pluginStorage.js'
 
 // The "context document" engine (docs/CONTEXT_SYSTEM.md). A plugin declares `contextExports`;
@@ -55,7 +54,7 @@ function pluginDefaults(dir: string): Record<string, unknown> {
  * deliberate clear is respected and does not snap back to the default.
  */
 export function pluginValueOrDefault(
-  registry: PluginRegistry,
+  registry: RegistryView,
   conversationId: string,
   pluginId: string,
   storageKey: string
@@ -84,12 +83,13 @@ interface PinnedExport {
   format: string
   maxTokens: number
   inject: boolean
+  readonly: boolean
   description?: string
 }
 
 /** Every pinned export of every enabled plugin, resolved against the registry's manifests. */
 function pinnedExports(
-  registry: PluginRegistry,
+  registry: RegistryView,
   pluginState: Record<string, ConversationPluginState>
 ): PinnedExport[] {
   const out: PinnedExport[] = []
@@ -105,6 +105,7 @@ function pinnedExports(
         format: ex.format,
         maxTokens: ex.maxTokens,
         inject: ex.inject !== false,
+        readonly: ex.readonly === true,
         description: ex.description
       })
     }
@@ -117,7 +118,7 @@ function pinnedExports(
  * Stripped from the displayed transcript by sessionStore so editable history stays clean.
  */
 export function buildContextBlock(
-  registry: PluginRegistry,
+  registry: RegistryView,
   conversationId: string,
   pluginState: Record<string, ConversationPluginState>
 ): string {
@@ -135,6 +136,18 @@ export function buildContextBlock(
       pluginValueOrDefault(registry, conversationId, ex.pluginId, guideStorageKey(ex.key)),
       cap
     )
+    // A read-only export (e.g. the north star) is a user directive: inject it ONLY when the user
+    // has actually set a value (an empty one is not a directive), and frame it as fixed and yours-
+    // to-follow rather than yours-to-maintain. Its guide, if any, becomes the directive's intent.
+    if (ex.readonly) {
+      if (!value) continue
+      const intent = guide ? `${guide}\n\n` : ''
+      sections.push(
+        `## ${ex.label}\n_Set by the user; read-only to you — you cannot edit it. ` +
+          `Orient your work toward it._\n${intent}${value}`.trimEnd()
+      )
+      continue
+    }
     if (!value && !guide) continue
     const head = guide
       ? `_How to use this section — fixed instructions from the author. Follow them; do not edit ` +
@@ -161,7 +174,7 @@ export function buildContextBlock(
  * stays prompt-cached across turns. Returns '' when no enabled plugin contributes one.
  */
 export function buildSystemInstruction(
-  registry: PluginRegistry,
+  registry: RegistryView,
   conversationId: string,
   pluginState: Record<string, ConversationPluginState>
 ): string {
@@ -200,12 +213,15 @@ function countOccurrences(hay: string, needle: string): number {
  * means it can't interleave with a pane's `context.set` write to the same file.
  */
 export function buildContextMcpServers(
-  registry: PluginRegistry,
+  registry: RegistryView,
   conversationId: string,
   pluginState: Record<string, ConversationPluginState>,
   onChange: (pluginId: string, key: string) => void
 ): Options['mcpServers'] | undefined {
   const tools = pinnedExports(registry, pluginState).flatMap((ex) => {
+    // Read-only exports are user-authored: inject the value but register no write-tool, so the
+    // agent is steered by it yet cannot change it.
+    if (ex.readonly) return []
     const base = `${sanitize(ex.pluginId)}__${sanitize(ex.key)}`
     const injectionNote = ex.inject
       ? `It is shown back to you as context every turn — `

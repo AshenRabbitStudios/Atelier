@@ -82,7 +82,11 @@ These are load-bearing and restated from CLAUDE.md because review enforces them:
 2. **Renderer is sandboxed.** `contextIsolation: true`, `nodeIntegration: false`. All
    privileged work (SDK, fs, process spawn) lives in main, behind the preload `contextBridge`.
 3. **Plugins are capability-bounded.** A plugin reaches the app only through the host API. No
-   direct fs / SDK / IPC. A malformed or crashing plugin must never crash the app.
+   direct fs / SDK / IPC. A malformed or crashing plugin must never crash the app. This is
+   **fault containment + a clean coupling contract** (plugins are user/agent-authored, enabling
+   safe runtime authoring and preventing cross-contamination) — not a security boundary against
+   adversarial plugins. Remote web content (browser surface, `url:` fetches) is the one input
+   treated as hostile.
 4. **Every boundary payload is validated at the receiving side** (Zod).
 5. **Agent instances are isolated** — own `cwd`, session, transcript. One instance's failure is
    contained.
@@ -177,8 +181,11 @@ Target a pragmatic, value-first test pyramid — not coverage theater:
   `oauth`/`none` as the safe subscription path. (DECISIONS.md.)
 - **Pin dependency versions** (exact, as in `package.json`); upgrade deliberately, noting any
   peer-conflict resolution in DECISIONS.md.
-- **Least privilege:** the renderer and plugins get only the capabilities they need. Add a
-  dev-compatible strict CSP in the hardening pass (tracked).
+- **Threat model:** plugins are trusted (user/agent-authored); the sandbox is fault
+  containment, not security. The genuinely untrusted inputs are remote web content (the
+  `browser:embed` surface, `url:` fetches) — harden those paths specifically. Permissions
+  are declared coupling surfaces that prevent accidental overreach, not privilege defenses.
+  Add a dev-compatible strict CSP in the hardening pass (tracked).
 - Don't add a dependency for something a few lines of clear code can do.
 
 ---

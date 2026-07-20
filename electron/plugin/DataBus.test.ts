@@ -129,6 +129,52 @@ describe('DataBus', () => {
     bus.publish(CONV, 'topic:x', 1)
     expect(sink).not.toHaveBeenCalled()
   })
+
+  it('getHistory returns recent values oldest→newest, scoped per (conversation, channel)', () => {
+    const bus = new DataBus(vi.fn())
+    bus.publish(CONV, 'topic:x', 'a')
+    bus.publish(CONV, 'topic:x', 'b')
+    bus.publish(CONV, 'topic:x', 'c')
+    bus.publish(CONV, 'topic:y', 'other')
+    bus.publish('conv-2', 'topic:x', 'elsewhere')
+    expect(bus.getHistory(CONV, 'topic:x')).toEqual(['a', 'b', 'c'])
+    expect(bus.getHistory(CONV, 'topic:x', 2)).toEqual(['b', 'c'])
+    expect(bus.getHistory(CONV, 'topic:y')).toEqual(['other'])
+    expect(bus.getHistory('conv-2', 'topic:x')).toEqual(['elsewhere'])
+    expect(bus.getHistory(CONV, 'topic:none')).toEqual([])
+  })
+
+  it('caps history at 200 entries (oldest dropped)', () => {
+    const bus = new DataBus(vi.fn())
+    for (let i = 0; i < 250; i++) bus.publish(CONV, 'topic:x', i)
+    const h = bus.getHistory(CONV, 'topic:x')
+    expect(h.length).toBe(200)
+    expect(h[0]).toBe(50) // 0..49 dropped
+    expect(h[199]).toBe(249)
+  })
+
+  it('drops history when the channel closes', async () => {
+    const fake = fakeSource('topic:')
+    const bus = new DataBus(vi.fn(), [fake.source])
+    await bus.subscribe(CONV, 'plugin-a', 'topic:x')
+    fake.emit('v1')
+    expect(bus.getHistory(CONV, 'topic:x')).toEqual(['v1'])
+    bus.unsubscribe(CONV, 'plugin-a', 'topic:x') // last subscriber → channel closes
+    expect(bus.getHistory(CONV, 'topic:x')).toEqual([])
+  })
+
+  it('replays only the latest value to a late joiner', async () => {
+    const fake = fakeSource('topic:')
+    const sink = vi.fn<(m: DataMessage) => void>()
+    const bus = new DataBus(sink, [fake.source])
+    await bus.subscribe(CONV, 'plugin-a', 'topic:x')
+    fake.emit('v1')
+    fake.emit('v2')
+    sink.mockClear()
+    await bus.subscribe(CONV, 'plugin-b', 'topic:x') // late joiner
+    expect(sink).toHaveBeenCalledTimes(1)
+    expect(sink.mock.calls[0][0]).toMatchObject({ pluginId: 'plugin-b', data: 'v2' })
+  })
 })
 
 describe('createFileSource', () => {

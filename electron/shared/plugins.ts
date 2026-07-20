@@ -9,12 +9,20 @@ export type DockPosition = (typeof DOCK_POSITIONS)[number]
 export const PLUGIN_PERMISSIONS = [
   'data:subscribe',
   'data:publish',
+  // Write a UTF-8 text file inside the conversation cwd (`atelier.data.writeFile`). A distinct
+  // coupling class from reading/observing — mutating the workspace — so a plugin declares it apart
+  // from data:subscribe.
+  'data:write',
   'agent:read',
   'agent:send',
   'storage',
   'tools',
   'context',
-  'net:fetch'
+  'net:fetch',
+  // A live, host-owned Chromium surface (Electron <webview>) composited over the pane and driven
+  // via `atelier.browser.*`. The page runs real JS in its own guest process; the plugin only sends
+  // commands and receives extracted state — page content can never reach the atelier bridge.
+  'browser:embed'
 ] as const
 export type PluginPermission = (typeof PLUGIN_PERMISSIONS)[number]
 
@@ -27,10 +35,15 @@ export const URL_CHANNEL_PREFIX = 'url:'
 export const PluginKind = z.enum(['panel', 'tool', 'both'])
 
 // An agent tool a plugin contributes (registered on the SDK in P4; declared now for the manifest).
+// `inputSchema` is a `{ field: descriptor }` map where a descriptor is EITHER the legacy shorthand
+// string ("string"|"number"|"boolean", trailing "?" = optional) OR a JSON-Schema-subset object
+// ({ type, items, properties, required, enum, description, optional }). `timeoutMs` overrides the
+// default 30s per-call cap for a long-running tool (e.g. a build).
 export const PluginToolSchema = z.object({
   name: z.string().min(1),
   description: z.string().min(1),
-  inputSchema: z.record(z.string(), z.unknown()).optional()
+  inputSchema: z.record(z.string(), z.unknown()).optional(),
+  timeoutMs: z.number().int().positive().max(600000).optional()
 })
 
 // A pinnable context export (injected into agent context in P4; declared now so persistence is
@@ -45,6 +58,12 @@ export const ContextExportSchema = z.object({
   // (e.g. a large scene the agent sends to a pane but doesn't want re-fed to itself). Default true
   // preserves the original sync behavior. Injection is thus per-export, not all-or-nothing.
   inject: z.boolean().default(true),
+  // When true, the export is READ-ONLY to the agent: its value is injected into context each turn
+  // (so the agent is steered by it) but NO `set_`/`edit_` write-tool is registered — only the pane
+  // (i.e. the user) can change it. The mirror image of a push-only export. Used for a user-authored
+  // directive like the cognition "north star". Injected only when non-empty. Default false keeps the
+  // normal read-write behavior.
+  readonly: z.boolean().default(false),
   // Optional extra guidance appended to the agent's `set_<plugin>__<key>` write-tool description —
   // e.g. the exact JSON shape a command export expects. Lets a push-only channel be self-documenting
   // so the agent doesn't have to infer the payload format.
@@ -76,6 +95,11 @@ export const ManifestSchema = z.object({
   kind: PluginKind.default('panel'),
   entry: z.string().min(1).optional(), // required when kind includes "panel" — checked in registry
   backend: z.string().min(1).optional(),
+  // When true the backend is a long-running SERVICE: spawned when the plugin is first enabled in a
+  // conversation (not lazily on a tool call) and kept alive until it's disabled in the last one. A
+  // service may push onto DataBus channels (needs `data:publish`). Requires `backend` (checked in
+  // the registry). Default false = an on-demand tool responder (spawn on first call, idle otherwise).
+  service: z.boolean().default(false),
   permissions: z.array(z.enum(PLUGIN_PERMISSIONS)).default([]),
   defaultDock: z.enum(DOCK_POSITIONS).default('right'),
   tools: z.array(PluginToolSchema).default([]),
@@ -91,6 +115,40 @@ export interface DiscoveredPlugin {
   valid: boolean
   error?: string
   manifest?: Manifest
+  // Discovery source (Phase 7). Absent/'global' = the app-wide /plugins catalog; 'workspace' = a
+  // plugin under the conversation's `<cwd>/.atelier/plugins`. `workspaceKey` (a stable hash of the
+  // cwd) is set for workspace plugins so the renderer can build the encoded asset host.
+  scope?: 'global' | 'workspace'
+  workspaceKey?: string
+}
+
+/** The read surface every plugin consumer needs (global registry OR a merged global+workspace view).
+ *  `PluginRegistry` satisfies it structurally; the merged view (registryView.ts) implements it too. */
+export interface RegistryView {
+  get(id: string): DiscoveredPlugin | undefined
+  dirOf(id: string): string | null
+  list(): DiscoveredPlugin[]
+}
+
+// ---- Workspace plugin asset host encoding (Phase 7) ----
+// A plugin frame loads over `atelier-plugin://<host>/`. A global plugin's host is just its id; a
+// workspace plugin's host embeds a fixed-length cwd hash so the protocol handler resolves it against
+// the right workspace registry (ids can collide across workspaces). One encode/decode pair, shared by
+// the protocol handler, PluginPane (frame src), and the injected runtime (which reads location.host
+// back into the bare pluginId) — three hand-rolled parsers is how this drifts.
+export const WORKSPACE_KEY_LEN = 12
+const WORKSPACE_HOST_RE = /^w--([0-9a-f]{12})--(.+)$/
+
+/** Build the asset host for a plugin frame. Global → the bare id; workspace → `w--<key>--<id>`. */
+export function encodePluginHost(pluginId: string, workspaceKey?: string): string {
+  return workspaceKey ? `w--${workspaceKey}--${pluginId}` : pluginId
+}
+
+/** Parse an asset host back to its bare id (+ workspaceKey when it is a workspace host). The
+ *  fixed-length key makes the split unambiguous even when the id itself contains `--`. */
+export function decodePluginHost(host: string): { pluginId: string; workspaceKey?: string } {
+  const m = WORKSPACE_HOST_RE.exec(host)
+  return m ? { pluginId: m[2], workspaceKey: m[1] } : { pluginId: host }
 }
 
 /** Per-conversation plugin state: which are enabled, which exports are pinned to context. */

@@ -6,7 +6,6 @@ import {
   type ContextChangedEvent,
   type DataMessageEvent
 } from './shared/events.js'
-import type { DiscoveredPlugin } from './shared/plugins.js'
 
 // The ONLY bridge between the sandboxed renderer and the privileged main process.
 const api: AtelierAPI = {
@@ -61,7 +60,8 @@ const api: AtelierAPI = {
     }
   },
   plugins: {
-    list: () => ipcRenderer.invoke(IPC.pluginsList),
+    list: (conversationId) =>
+      ipcRenderer.invoke(IPC.pluginsList, conversationId ? { conversationId } : {}),
     enabledFor: (conversationId) => ipcRenderer.invoke(IPC.pluginsEnabledFor, { conversationId }),
     setEnabled: (conversationId, pluginId, enabled) =>
       ipcRenderer.invoke(IPC.pluginsSetEnabled, { conversationId, pluginId, enabled }),
@@ -82,10 +82,16 @@ const api: AtelierAPI = {
       ipcRenderer.invoke(IPC.pluginDataUnsubscribe, { conversationId, pluginId, channel }),
     dataPublish: (conversationId, pluginId, channel, data) =>
       ipcRenderer.invoke(IPC.pluginDataPublish, { conversationId, pluginId, channel, data }),
+    dataHistory: (conversationId, pluginId, channel, limit) =>
+      ipcRenderer.invoke(IPC.pluginDataHistory, { conversationId, pluginId, channel, limit }),
+    writeFile: (conversationId, pluginId, path, content) =>
+      ipcRenderer.invoke(IPC.pluginWriteFile, { conversationId, pluginId, path, content }),
+    netFetch: (conversationId, pluginId, url, opts) =>
+      ipcRenderer.invoke(IPC.pluginNetFetch, { conversationId, pluginId, url, opts }),
     readAsset: (conversationId, pluginId, path) =>
       ipcRenderer.invoke(IPC.pluginReadAsset, { conversationId, pluginId, path }),
     onChanged: (cb) => {
-      const listener = (_e: IpcRendererEvent, plugins: DiscoveredPlugin[]) => cb(plugins)
+      const listener = (): void => cb()
       ipcRenderer.on(IPC.pluginsChanged, listener)
       return () => {
         ipcRenderer.removeListener(IPC.pluginsChanged, listener)

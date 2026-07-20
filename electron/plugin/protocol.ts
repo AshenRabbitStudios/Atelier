@@ -1,7 +1,7 @@
 import { protocol } from 'electron'
 import { readFileSync, existsSync } from 'node:fs'
 import { join, resolve, extname } from 'node:path'
-import type { PluginRegistry } from './PluginRegistry.js'
+import type { DiscoveredPlugin } from '../shared/plugins.js'
 import { RUNTIME_JS } from './runtime.js'
 
 // Serves plugin assets to sandboxed iframes over a custom scheme:
@@ -23,8 +23,10 @@ const CONTENT_TYPES: Record<string, string> = {
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.gif': 'image/gif',
+  '.webp': 'image/webp',
   '.woff': 'font/woff',
-  '.woff2': 'font/woff2'
+  '.woff2': 'font/woff2',
+  '.wasm': 'application/wasm'
 }
 
 function contentType(p: string): string {
@@ -41,8 +43,14 @@ export function registerPluginScheme(): void {
   ])
 }
 
-/** Wire the handler. Call after app `ready`, once the registry exists. */
-export function handlePluginProtocol(registry: PluginRegistry): void {
+/**
+ * Wire the handler. Call after app `ready`. `resolveHost` maps a request host to the discovered
+ * plugin serving it — the caller decodes `w--<key>--<id>` workspace hosts to the right workspace
+ * registry and bare hosts to the global one (Phase 7), so this stays scheme-mechanics only.
+ */
+export function handlePluginProtocol(
+  resolveHost: (host: string) => DiscoveredPlugin | undefined
+): void {
   protocol.handle(PLUGIN_SCHEME, (request) => {
     const url = new URL(request.url)
     const host = url.hostname
@@ -51,10 +59,11 @@ export function handlePluginProtocol(registry: PluginRegistry): void {
       return new Response(RUNTIME_JS, { headers: { 'content-type': 'text/javascript' } })
     }
 
-    const dir = registry.dirOf(host)
+    const found = resolveHost(host)
+    const dir = found?.dir
     if (!dir) return new Response('plugin not found', { status: 404 })
 
-    const manifest = registry.get(host)?.manifest
+    const manifest = found?.manifest
     let rel = decodeURIComponent(url.pathname).replace(/^\/+/, '')
     if (rel === '') rel = manifest?.entry ?? 'index.html'
 

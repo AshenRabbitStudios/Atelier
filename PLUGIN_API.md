@@ -6,6 +6,25 @@ xterm.js stream). It reaches the rest of the app _only_ through the host API bel
 boundary is what keeps plugins hot-reloadable, crash-isolated, and safe to let the agent
 author.
 
+**Why the sandbox exists (intent, not threat model).** Plugins are authored by the user or
+by the Atelier agent itself; the sandbox is NOT a defense against malicious third-party
+plugins, and no such threat model applies. It exists for three reasons:
+
+1. **Runtime authorability.** A plugin must be creatable, loadable, reloadable, and _wrong_
+   entirely at runtime — the agent can write one mid-conversation, and a broken or crashing
+   plugin must never take down or require restarting Atelier. Isolation is what makes
+   hot-loading agent-authored code safe to attempt freely.
+2. **A standalone, teachable contract.** A plugin is a self-contained little app with one
+   known coupling signature (`window.atelier` + manifest). A conversation that has never
+   seen the Atelier codebase can author one correctly from this contract alone.
+3. **No cross-contamination.** Plugins share nothing with each other or with the app — no
+   shared globals, styles, state, or reach-arounds. Each is its own isolated app, so the
+   workbench composes cleanly instead of accreting into a muddy shared interface.
+
+The one place a genuine security posture applies is **content from the outside world**:
+remote pages in the `browser:embed` surface (and anything fetched via `url:` channels) run
+or carry arbitrary third-party content and are treated as hostile.
+
 ## 1. A plugin is a folder
 
 ```
@@ -15,6 +34,12 @@ author.
   plugin.js         # optional: a backend module, run as a child process/worker (never in-process)
   ...assets
 ```
+
+The pane runs sandboxed at its own origin (`atelier-plugin://<id>`), so a panel may be a normal
+multi-file app: ES modules (`<script type="module">`), `fetch()` of its own folder assets, workers,
+and IndexedDB all work and are self-scoped (no reach into the app or other plugins). Durable state
+still goes only through the host `storage`/`context` API (§8) — IndexedDB/localStorage are a
+per-origin cache, not restorable conversation state.
 
 ### manifest.json
 
@@ -91,13 +116,75 @@ interface AtelierHost {
     // sibling of a file: subscribe (a sandboxed pane can't fetch a cwd file as an <img> subresource).
     // Image types only, size-capped; needs the same "data:subscribe" capability.
     readAsset(path: string): Promise<{ dataUrl: string } | { error: string }>
+    // Write a UTF-8 text file at a cwd-relative path (parents created, atomic, ≤5MB). The write
+    // sibling of the file: source — turns a viewer pane into a tool. Needs "data:write". Refuses a
+    // path that escapes the conversation cwd.
+    writeFile(path: string, content: string): Promise<{ ok: true } | { error: string }>
   }
 
-  // agent — observe and drive agent instances (needs "agent:read" / "agent:send")
+  // net — host-side HTTP (the sandboxed pane has no network of its own). Needs "net:fetch".
+  // A real request verb (method/headers/body/binary) beyond the one-shot GET-only `url:` channel.
+  // http(s) only, capped (2MB request / 4MB response / 60s max), cookie-isolated (never carries the
+  // app/user session cookies). No streaming in v1 — a poller re-fetches.
+  net: {
+    fetch(
+      url: string,
+      opts?: {
+        method?: string // GET|POST|PUT|PATCH|DELETE|HEAD (default GET)
+        headers?: Record<string, string> // `cookie` is dropped
+        body?: string // base64 it yourself for binary + set your own content-type
+        timeoutMs?: number // default 15000, max 60000
+        binary?: boolean // true → bodyBase64, else bodyText
+      }
+    ): Promise<
+      | {
+          status: number
+          statusText: string
+          headers: Record<string, string>
+          bodyText?: string
+          bodyBase64?: string
+        }
+      | { error: string }
+    >
+  }
+
+  // browser — a live, HOST-OWNED Chromium surface composited over this pane (needs
+  // "browser:embed"). The page runs real JS in its own zero-privilege guest process (no preload,
+  // no node, sandboxed, popups denied, http(s)-only) and has NO path to this bridge; the plugin
+  // only sends commands and receives extracted state. Nav events arrive via on('browser', cb):
+  // { type: 'nav'|'loading'|'loaded'|'failed'|'title', url?, title?, error?, canGoBack, canGoForward }.
+  browser: {
+    open(url: string): Promise<void> // http(s) only; creates the surface on first call
+    close(): Promise<void> // hide the surface (its session survives for a later open)
+    back(): Promise<void>
+    forward(): Promise<void>
+    reload(): Promise<void>
+    stop(): Promise<void>
+    setBounds(rect: { x: number; y: number; w: number; h: number }): Promise<void> // pane coords
+    read(opts?: { includeHtml?: boolean }): Promise<{
+      url: string
+      title: string
+      text: string // visible text, capped
+      links: string[] // interactive elements, capped
+      html?: string // capped outerHTML when includeHtml
+      canGoBack: boolean
+      canGoForward: boolean
+    }>
+    // Drive the page. The page is UNTRUSTED — the RESULT is always data, never code.
+    // exec runs JS in the page (statements or an expression) and returns { ok: <json> } | { error };
+    // the result is JSON round-tripped and capped at 64KB. click/fill are convenience wrappers.
+    exec(js: string): Promise<{ ok: unknown } | { error: string }>
+    click(selector: string): Promise<{ ok: true } | { error: string }>
+    fill(selector: string, value: string): Promise<{ ok: true } | { error: string }>
+  }
+
+  // agent — observe and drive THIS pane's conversation (needs "agent:read" / "agent:send").
+  // Scoped to the conversation the pane is mounted in — no cross-conversation reach (matches how
+  // storage/context/data are scoped). onEvent forwards only this conversation's events.
   agent: {
-    list(): Promise<{ id: string; title: string; cwd: string; status: string }[]>
-    onEvent(instanceId: string, cb: (e: unknown) => void): () => void // AgentEvent stream
-    send(instanceId: string, text: string): Promise<void>
+    info(): Promise<{ id: string; title: string; cwd: string; status: string } | null>
+    onEvent(cb: (e: unknown) => void): () => void // AgentEvent stream; returns unsubscribe
+    send(text: string): Promise<void>
   }
 
   // tools — register an agent-callable tool implemented by this plugin
@@ -123,7 +210,8 @@ interface AtelierHost {
 
 **Not exposed:** direct filesystem, direct process spawn, direct SDK access, raw IPC. A
 plugin that needs privileged work declares a `backend` module and a permission; the host
-mediates. This is the line that keeps a malformed or hostile plugin contained.
+mediates. This is the line that keeps a malformed, buggy, or runaway plugin contained —
+fault containment and a clean coupling signature, not a defense against an adversary.
 
 ## 4. Permissions
 
@@ -131,24 +219,51 @@ Declared in the manifest, enforced by the host. Minimum useful set:
 
 - `data:subscribe`, `data:publish` — read / write data channels (conversation-scoped
   sources: files, bash taps, plugin-published topics).
-- `net:fetch` — subscribe to `url:` channels (host-side HTTP fetch). Split from
-  `data:subscribe` because network reach is a different capability class than reading the
+- `data:write` — write UTF-8 text files inside the conversation cwd (`atelier.data.writeFile`).
+  Split from `data:subscribe` because mutating the workspace is a different capability class than
+  observing it. Atomic, size-capped, cwd-bounded host-side.
+- `net:fetch` — host-side HTTP: both subscribing to `url:` channels AND the general
+  `atelier.net.fetch(url, opts)` request verb (method/headers/body/binary, capped, cookie-isolated).
+  Split from `data:subscribe` because network reach is a different capability class than reading the
   conversation's own files.
+- `browser:embed` — a live host-owned Chromium surface over the pane (`atelier.browser.*`).
+  Split from `net:fetch` because executing a remote page's JS is a different capability class
+  than fetching its text. The surface is host-composited and hardened; the plugin sandbox never
+  holds the webview itself.
 - `agent:read`, `agent:send` — observe / drive agent instances.
 - `storage` — per-plugin persisted KV.
 - `tools` — register agent tools (requires a `backend` module).
 
-Least privilege: the host grants only what's declared, and shows the plugin's permissions
-in the sidebar before load.
+Permissions are **capability declarations**, not security enforcement: they document a
+plugin's coupling surface up front (shown in the sidebar before load) and keep an
+agent-authored plugin from _accidentally_ reaching further than intended. The host grants
+only what's declared.
 
 ## 5. Agent tools contributed by plugins
 
 When a plugin with `kind` `tool`/`both` loads, the host registers each `manifest.tools`
 entry as an in-process MCP tool on the SDK side (`tool(name, desc, zodSchema, handler)`),
 available to all agent instances (or scoped — see open question). Invocation flows:
-agent calls the tool → SDK → host → plugin backend's `onInvoke` handler → result back to
+agent calls the tool → SDK → host → plugin backend child process → result back to
 the agent. This is how a plugin gives the agent _new capabilities_, not just a new view.
 Unloading the plugin unregisters the tools.
+
+**Tool input schemas.** Each `tools[]` entry has `{ name, description, inputSchema, timeoutMs? }`.
+`inputSchema` is a `{ field: descriptor }` map; a descriptor is either the shorthand string
+(`"string"|"number"|"boolean"`, trailing `?` = optional) or a JSON-Schema-subset object
+(`{ type, items, properties, required, enum, description, optional }`, nesting capped at depth 4).
+`timeoutMs` overrides the default 30s per-call cap (max 600000).
+
+**Backends: on-demand vs. service.** By default a backend is an on-demand tool responder — spawned
+lazily on the first tool call, idle otherwise, killed on disable/reload. Set `"service": true`
+(requires `backend`) to make it a long-running service: spawned when the plugin is first enabled in a
+conversation, kept alive until it's disabled in the last one. The child talks to the host over
+`process.parentPort`: host → `{ id, tool, input }`, child → `{ id, result | error }`; plus lifecycle
+`{ hello: { pluginId, service } }` on spawn and `{ enable | disable: { conversationId } }` as a
+service is toggled. A service may push unsolicited `{ publish: { conversationId, channel, data } }`
+onto a DataBus channel of a conversation it's enabled in (needs `data:publish`). Containment: a
+backend that crashes within 5s of spawn 3× in a row is wedged (calls rejected) until the plugin is
+reloaded; each child's V8 heap is capped (`--max-old-space-size=512`).
 
 ## 6. The self-hosting loop (why the folder format matters)
 
@@ -156,6 +271,14 @@ Because a plugin is just files under `/plugins/`, an agent instance pointed at t
 repo can author one with its normal Write tool: create the folder, `manifest.json`, and
 entry. The `/plugins` watcher surfaces it in the sidebar; the user loads it; no restart.
 This is the bridge from "I iterate via Claude Code CLI" to "I iterate from inside Atelier."
+
+**Workspace plugins (Phase 7).** An agent working in any project can also author a plugin under
+`<cwd>/.atelier/plugins/<id>` — no access to the Atelier repo needed. A per-cwd registry discovers
+it, it **auto-enables for the authoring conversation**, is shared by any conversation opened on that
+cwd, and travels with the repo (git). Identical contract to a global plugin; same host API, same
+per-(conversation, plugin) storage. On an id collision the **global plugin wins** and the workspace
+copy is shown as invalid ("shadowed"). Asset URLs for a workspace plugin use an encoded host
+(`atelier-plugin://w--<cwd-hash>--<id>/`), but the plugin still sees its bare `id` everywhere.
 
 Provide two worked examples under `/plugins/examples/` so the agent has a pattern to copy:
 

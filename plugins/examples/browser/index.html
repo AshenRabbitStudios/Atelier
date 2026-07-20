@@ -98,6 +98,19 @@
         color: var(--text, #e7eaf0);
       }
 
+      .seg.nav button {
+        min-width: 22px;
+        padding: 3px 6px;
+        font-size: 13px;
+        line-height: 1;
+      }
+
+      .seg button:disabled {
+        color: var(--faint, #5e6677);
+        opacity: 0.5;
+        cursor: default;
+      }
+
       #status {
         flex: 1 1 100%;
         font-size: 10px;
@@ -184,6 +197,12 @@
   <body>
     <div id="root">
       <div id="bar">
+        <span class="seg nav">
+          <button id="nav-back" type="button" title="Back" disabled>‹</button>
+          <button id="nav-fwd" type="button" title="Forward" disabled>›</button>
+          <button id="nav-reload" type="button" title="Reload" disabled>⟳</button>
+          <button id="nav-stop" type="button" title="Stop" disabled>✕</button>
+        </span>
         <input id="path" type="text" placeholder="file path (docs/NOTES.md) or https:// URL" />
         <button id="load">Load</button>
         <button id="clear">Clear</button>
@@ -228,7 +247,13 @@
         label: 'empty', // where it came from (a path, a URL, 'agent', …)
         channel: null, // the file:<path> / url:<href> channel we're subscribed to, if any
         remote: false, // current content arrived from a url: channel → its scripts never run
-        base: '' // the source path/URL images resolve against ('' for pushed content / welcome)
+        base: '', // the source path/URL images resolve against ('' for pushed content / welcome)
+        history: [], // visited sources (paths/URLs), for back/forward
+        histIdx: -1, // index into history of the current source
+        loading: false, // a source load/fetch is in flight (Stop cancels it)
+        live: false, // URL shown live in the host's embedded Chromium surface (browser:embed)
+        liveUrl: '', // the surface's current URL (tracks in-page navigation)
+        webNav: { back: false, fwd: false } // the live surface's own history state
       }
 
       const isUrl = (s) => /^https?:\/\//i.test(s)
@@ -496,6 +521,7 @@
           setExport('page', '')
           return
         }
+        if (state.live) return // the live surface's state is captured via browser.read()
         const d = describe()
         let s = 'SOURCE: ' + state.label + '\n\nVISIBLE TEXT:\n' + d.text.slice(0, 4000)
         if (d.text.length > 4000) s += '\n… [truncated]'
@@ -503,7 +529,23 @@
         setExport('page', s)
       }
 
-      function takeSnapshot() {
+      async function takeSnapshot() {
+        if (state.live) {
+          try {
+            const p = await window.atelier.browser.read({ includeHtml: true })
+            let s =
+              'SNAPSHOT @ ' + new Date().toISOString() + '\nSOURCE: ' + (p.url || state.liveUrl)
+            if (p.title) s += '\nTITLE: ' + p.title
+            s += '\n\nVISIBLE TEXT:\n' + (p.text || '')
+            if (p.links && p.links.length) s += '\n\nINTERACTIVE:\n' + p.links.join('\n')
+            if (p.html) s += '\n\nHTML:\n' + p.html
+            setExport('snapshot', s)
+            toast('Snapshot sent to the agent')
+          } catch (e) {
+            toast('Snapshot failed: ' + (e && e.message ? e.message : String(e)))
+          }
+          return
+        }
         const d = describe()
         // Collapse inlined data: URIs (resolved images) so they don't eat the HTML budget.
         const html = (state.mode === 'source' ? '' : pageEl.innerHTML)
@@ -534,7 +576,9 @@
         statusEl.innerHTML =
           state.label === 'empty'
             ? 'empty — set a source (file or URL) or push content'
-            : state.label + ' · ' + chars + ' chars · ' + state.mode + ' · ' + stream
+            : state.live
+              ? state.label + ' · live browser · ' + stream
+              : state.label + ' · ' + chars + ' chars · ' + state.mode + ' · ' + stream
       }
 
       // Re-capture live state as the user interacts (debounced).
@@ -555,20 +599,135 @@
         state.channel = null
       }
 
-      // `input` is a cwd-relative file path (live-tailed) or an http(s) URL (one-shot host fetch;
-      // loading the same URL again refetches, because the channel is re-opened).
-      function loadSource(input) {
-        const src = (input || '').trim()
-        if (!src) return
+      // ---- Live browsing (host-owned Chromium surface; permission "browser:embed") ----
+      // URLs prefer this: real JS, real in-page navigation, composited over #view. The plugin only
+      // drives it over atelier.browser.* and reads extracted state back for the page/snapshot
+      // exports. When the surface is unavailable (or open fails), URLs fall back to the static
+      // host-fetch render below.
+      let boundsWatched = false
+      function pushBounds() {
+        const r = el('view').getBoundingClientRect()
+        window.atelier.browser
+          .setBounds({ x: r.left, y: r.top, w: r.width, h: r.height })
+          .catch(function () {})
+      }
+      function watchBounds() {
+        if (boundsWatched) return
+        boundsWatched = true
+        new ResizeObserver(pushBounds).observe(el('view'))
+        window.addEventListener('resize', pushBounds)
+      }
+      async function goLive(src) {
+        watchBounds()
+        pushBounds()
+        await window.atelier.browser.open(src) // rejects → caller falls back to the static fetch
+        dropChannel()
+        state.live = true
+        state.liveUrl = src
+        state.remote = true
+        state.base = src
+        state.label = src
+        state.loading = true
+        updateNav()
+        updateStatus()
+      }
+      function endLive() {
+        if (!state.live) return
+        state.live = false
+        state.webNav = { back: false, fwd: false }
+        window.atelier.browser.close().catch(function () {})
+      }
+      let readTimer = null
+      function scheduleRead() {
+        clearTimeout(readTimer)
+        readTimer = setTimeout(readLive, 400)
+      }
+      async function readLive() {
+        if (!state.live) return
+        try {
+          const p = await window.atelier.browser.read()
+          state.label = p.url || state.liveUrl
+          if (streamCb.checked) {
+            let s = 'SOURCE: ' + state.label
+            if (p.title) s += '\nTITLE: ' + p.title
+            s += '\n\nVISIBLE TEXT:\n' + (p.text || '')
+            if (p.links && p.links.length) s += '\n\nINTERACTIVE:\n' + p.links.join('\n')
+            setExport('page', s)
+          }
+          updateStatus()
+        } catch (_) {
+          /* surface gone; next nav re-opens it */
+        }
+      }
+      window.atelier.on('browser', function (p) {
+        if (!p || !state.live) return
+        state.webNav = { back: !!p.canGoBack, fwd: !!p.canGoForward }
+        if (p.type === 'nav' && p.url) {
+          state.liveUrl = p.url
+          state.label = p.url
+          pathInput.value = p.url
+          window.atelier.storage.set('path', p.url)
+          scheduleRead()
+        }
+        if (p.type === 'loading') state.loading = true
+        if (p.type === 'loaded') {
+          state.loading = false
+          scheduleRead()
+        }
+        if (p.type === 'failed') {
+          state.loading = false
+          toast('Load failed: ' + (p.error || 'unknown error'))
+        }
+        updateNav()
+        updateStatus()
+      })
+
+      // ---- Navigation (history + in-flight state) ----
+      function updateNav() {
+        el('nav-back').disabled = !(state.live && state.webNav.back) && state.histIdx <= 0
+        el('nav-fwd').disabled =
+          !(state.live && state.webNav.fwd) && state.histIdx >= state.history.length - 1
+        el('nav-reload').disabled = !state.live && state.histIdx < 0
+        el('nav-stop').disabled = !state.loading
+      }
+
+      // Subscribe to a source's DataBus channel and render whatever arrives. Does NOT touch history —
+      // callers (navigate/back/forward/reload) own that. `src` is a cwd-relative file path
+      // (live-tailed) or an http(s) URL (one-shot host fetch; re-opening the channel refetches).
+      function openSource(src) {
+        if (isUrl(src)) {
+          // Prefer the live Chromium surface; on failure (permission missing, host predates
+          // webview support, bad URL) fall back to the static one-shot fetch render.
+          goLive(src)
+            .then(function () {
+              window.atelier.storage.set('path', src)
+            })
+            .catch(function () {
+              endLive() // a still-showing surface would cover the fallback render
+              openFetched(src)
+            })
+          return
+        }
+        endLive()
+        openFetched(src)
+      }
+      function openFetched(src) {
         dropChannel()
         const remote = isUrl(src)
         const channel = (remote ? 'url:' : 'file:') + src
         state.channel = channel
         state.remote = remote
         state.base = src // images in this content resolve against the source path/URL
+        state.loading = true
+        updateNav()
         if (remote) toast('Fetching ' + src + ' …')
+        const done = () => {
+          state.loading = false
+          updateNav()
+        }
         window.atelier.data
           .subscribe(channel, (data) => {
+            done()
             if (data && typeof data === 'object' && 'error' in data) {
               setContent('# Could not load\n\n' + String(data.error), src)
               return
@@ -576,29 +735,102 @@
             // render() auto-detects: HTML-looking content renders as HTML, otherwise as Markdown.
             setContent(typeof data === 'string' ? data : String(data), src)
           })
-          .catch((e) =>
+          .catch((e) => {
+            done()
             setContent('# Load failed\n\n' + (e && e.message ? e.message : String(e)), src)
-          )
+          })
         // The last-loaded source doubles as the restore key AND the "already consumed" marker
         // that keeps a stale `source` context value from overriding newer input on reload.
         window.atelier.storage.set('path', src)
       }
 
+      // Load `src` and record it as a new history entry (truncating any forward entries — a fresh
+      // navigation abandons the forward stack, like a real browser). Empty input is a no-op.
+      function navigate(input, push) {
+        const src = (input || '').trim()
+        if (!src) return
+        if (push !== false) {
+          state.history = state.history.slice(0, state.histIdx + 1)
+          // Collapse a reload-in-place: navigating to the current source again shouldn't grow history.
+          if (state.history[state.histIdx] !== src) {
+            state.history.push(src)
+            state.histIdx = state.history.length - 1
+          }
+        }
+        pathInput.value = src
+        openSource(src)
+        updateNav()
+      }
+      // Back-compat alias: existing call sites navigate-with-history.
+      const loadSource = (input) => navigate(input, true)
+
+      function goTo(idx) {
+        if (idx < 0 || idx >= state.history.length) return
+        state.histIdx = idx
+        const src = state.history[idx]
+        pathInput.value = src
+        openSource(src)
+        updateNav()
+      }
+      function goBack() {
+        // The live surface's own history first; past its start, fall back to the source history.
+        if (state.live && state.webNav.back) {
+          window.atelier.browser.back().catch(function () {})
+          return
+        }
+        if (state.histIdx > 0) goTo(state.histIdx - 1)
+      }
+      function goForward() {
+        if (state.live && state.webNav.fwd) {
+          window.atelier.browser.forward().catch(function () {})
+          return
+        }
+        if (state.histIdx < state.history.length - 1) goTo(state.histIdx + 1)
+      }
+      function reload() {
+        if (state.live) {
+          window.atelier.browser.reload().catch(function () {})
+          return
+        }
+        if (state.histIdx >= 0) openSource(state.history[state.histIdx])
+      }
+      function stop() {
+        if (!state.loading) return
+        if (state.live) {
+          window.atelier.browser.stop().catch(function () {})
+        } else {
+          dropChannel() // unsubscribe → a pending fetch/tail result is dropped
+        }
+        state.loading = false
+        updateNav()
+        toast('Stopped')
+      }
+
       // ---- Wiring ----
-      el('load').addEventListener('click', () => loadSource(pathInput.value))
+      el('load').addEventListener('click', () => navigate(pathInput.value, true))
       pathInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') loadSource(pathInput.value)
+        if (e.key === 'Enter') navigate(pathInput.value, true)
       })
+      el('nav-back').addEventListener('click', goBack)
+      el('nav-fwd').addEventListener('click', goForward)
+      el('nav-reload').addEventListener('click', reload)
+      el('nav-stop').addEventListener('click', stop)
       el('clear').addEventListener('click', () => {
         dropChannel()
+        endLive()
         state.remote = false
         state.base = ''
+        state.history = []
+        state.histIdx = -1
+        state.loading = false
         window.atelier.storage.set('path', '')
         setContent('', 'empty')
+        updateNav()
       })
       el('snapshot').addEventListener('click', takeSnapshot)
       streamCb.addEventListener('change', () => {
         captureState()
+        if (state.live && streamCb.checked) scheduleRead()
         updateStatus()
         window.atelier.storage.set('stream', streamCb.checked ? '1' : '0')
       })
@@ -630,6 +862,7 @@
             // A direct push replaces whatever was loaded — stop tailing it and clear the restore
             // key so the pushed content (not the old source) is what a reload brings back.
             dropChannel()
+            endLive()
             state.remote = false
             state.base = '' // relative images in a pushed fragment resolve from the cwd root
             window.atelier.storage.set('path', '')

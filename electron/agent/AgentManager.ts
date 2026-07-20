@@ -1723,6 +1723,22 @@ export class AgentManager {
     return [...this.sessions.values()].map((s) => s.toInstance())
   }
 
+  /** Every live conversation's id + cwd — drives the workspace-registry refcount (Phase 7). */
+  openConversations(): { id: string; cwd: string }[] {
+    return [...this.sessions.values()].map((s) => ({ id: s.id, cwd: s.cwd }))
+  }
+
+  /** The conversations `restore()` WILL bring back (persisted open set), read from the store without
+   *  creating sessions — so main can stand up their workspace registries BEFORE restore builds each
+   *  session's query (else a restored conversation's workspace tools/context are missing until a
+   *  rebind). Phase 7. */
+  restorableOpen(): { id: string; cwd: string }[] {
+    const open = new Set(getOpenConversationIds())
+    return listConversations()
+      .filter((m) => open.has(m.id))
+      .map((m) => ({ id: m.id, cwd: m.cwd }))
+  }
+
   /** App quit: serialize + tear down all live sessions, but KEEP the open set so the
    *  next launch restores exactly these conversations. */
   async closeAll(): Promise<void> {

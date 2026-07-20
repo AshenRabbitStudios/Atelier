@@ -1,6 +1,7 @@
 import { app } from 'electron'
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { writeFileAtomic } from '../atomicWrite.js'
 
 // Per-(conversation, plugin) key/value store — the ONLY guaranteed-restorable plugin state
 // (PLUGIN_API.md §8). Scoped by path so conversation A's data is invisible to B, even for the
@@ -48,6 +49,7 @@ export function pluginStorageSet(
 ): void {
   const data = load(conversationId, pluginId)
   data[key] = value
-  mkdirSync(storageDir(conversationId, pluginId), { recursive: true })
-  writeFileSync(storageFile(conversationId, pluginId), JSON.stringify(data, null, 2), 'utf8')
+  // Atomic (temp + rename): a crash mid-write must never corrupt a plugin's storage — for
+  // context-document plugins this file IS the agent's persistent working state.
+  writeFileAtomic(storageFile(conversationId, pluginId), JSON.stringify(data, null, 2))
 }

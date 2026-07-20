@@ -498,6 +498,16 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* "workspace" tag on a plugin discovered under <cwd>/.atelier/plugins (Phase 7). */
+.rail-item-scope {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent-2);
+  border: 1px solid var(--border-2);
+  border-radius: 3px;
+  padding: 0 3px;
+}
 .rail-item-desc {
   font-size: 11px;
   color: var(--faint);
@@ -539,11 +549,28 @@ body {
   border-radius: 4px;
   padding: 0 4px;
 }
+.plugin-pane-wrap {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  /* Clip the absolutely-positioned browser webview to the pane. Without this a plugin could
+     set oversized bounds and composite a live remote page over the whole app — chat, approval
+     cards, everything — a spoofing surface (ARCH_REVIEW_2026-07-19 P0 #3). */
+  overflow: hidden;
+}
 .plugin-frame {
   width: 100%;
   height: 100%;
   border: none;
   background: var(--bg-2);
+}
+/* Host-owned browser surface, DOM-composited over the plugin's iframe (bounds set inline). */
+.plugin-webview {
+  position: absolute;
+  display: none; /* shown on browser.open */
+  background: #fff;
+  border: none;
+  z-index: 1;
 }
 
 /* ---- Top conversation bar ---- */
@@ -1758,6 +1785,57 @@ body {
   color: var(--text);
 }
 .background-detail {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Agent task list (TaskCreate) — a to-do bar docked above the composer, below the background
+   set. No spinner: these are planned work items, not running processes. */
+.tasks {
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.tasks-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 12px;
+  border: none;
+  background: transparent;
+  color: var(--dim);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+.tasks-count {
+  flex: 1 1 auto;
+  font-weight: 600;
+}
+.tasks-caret {
+  color: var(--dim);
+}
+.tasks-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 12px 8px;
+}
+.tasks-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+.tasks-label {
+  flex: 0 0 auto;
+  color: var(--text);
+}
+.tasks-detail {
   flex: 1 1 auto;
   min-width: 0;
   color: var(--dim);

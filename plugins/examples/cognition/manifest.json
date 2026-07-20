@@ -9,6 +9,13 @@
   "permissions": ["context", "storage"],
   "defaultDock": "right",
   "contextExports": [
+    {
+      "key": "north-star",
+      "label": "North Star",
+      "format": "markdown",
+      "maxTokens": 500,
+      "readonly": true
+    },
     { "key": "model", "label": "Mental model", "format": "markdown", "maxTokens": 1800 },
     { "key": "slots", "label": "Working memory (10 slots)", "format": "text", "maxTokens": 1200 },
     { "key": "plan", "label": "Plan (A→B)", "format": "markdown", "maxTokens": 1500 },

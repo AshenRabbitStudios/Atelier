@@ -49,6 +49,16 @@ describe('ManifestSchema', () => {
     expect(r.success).toBe(true)
   })
 
+  it('accepts the browser:embed permission', () => {
+    const r = ManifestSchema.safeParse({
+      id: 'x',
+      name: 'x',
+      version: '1',
+      permissions: ['browser:embed']
+    })
+    expect(r.success).toBe(true)
+  })
+
   it('fills contextExport defaults (format/maxTokens)', () => {
     const r = ManifestSchema.safeParse({
       id: 'x',

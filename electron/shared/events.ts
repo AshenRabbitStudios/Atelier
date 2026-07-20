@@ -412,6 +412,41 @@ export const PluginReadAssetSchema = z.object({
   path: z.string().min(1)
 })
 
+// Recent values on a DataBus channel (bounded ring; newest last). Same permission as subscribe
+// (`data:subscribe`, plus `net:fetch` for `url:` channels), enforced main-side.
+export const PluginDataHistorySchema = z.object({
+  conversationId: z.string().min(1),
+  pluginId: z.string().min(1),
+  channel: z.string().min(1),
+  limit: z.number().int().positive().max(1000).optional()
+})
+
+// Write a UTF-8 text file at a cwd-relative path (permission `data:write`, enforced main-side).
+// `path` is bounded to the conversation cwd host-side; `content` size-capped host-side.
+export const PluginWriteFileSchema = z.object({
+  conversationId: z.string().min(1),
+  pluginId: z.string().min(1),
+  path: z.string().min(1),
+  content: z.string()
+})
+
+// Host-side HTTP request for a pane (permission `net:fetch`, enforced main-side). Caps + method
+// allow-list live in the fetcher; the schema just shapes the payload.
+export const PluginNetFetchSchema = z.object({
+  conversationId: z.string().min(1),
+  pluginId: z.string().min(1),
+  url: z.string().min(1),
+  opts: z
+    .object({
+      method: z.string().optional(),
+      headers: z.record(z.string(), z.string()).optional(),
+      body: z.string().optional(),
+      timeoutMs: z.number().int().positive().optional(),
+      binary: z.boolean().optional()
+    })
+    .optional()
+})
+
 // ---- Auth safety (billing) ----
 
 export interface AuthStatus {
@@ -469,6 +504,9 @@ export const IPC = {
   pluginDataSubscribe: 'plugin:data-subscribe',
   pluginDataUnsubscribe: 'plugin:data-unsubscribe',
   pluginDataPublish: 'plugin:data-publish',
+  pluginDataHistory: 'plugin:data-history',
+  pluginWriteFile: 'plugin:write-file',
+  pluginNetFetch: 'plugin:net-fetch',
   pluginReadAsset: 'plugin:read-asset',
   authStatus: 'auth:status',
   appDefaultCwd: 'app:default-cwd',
@@ -574,7 +612,9 @@ export interface AtelierAPI {
     onEvent(cb: (e: AgentEvent) => void): () => void
   }
   plugins: {
-    list(): Promise<DiscoveredPlugin[]>
+    // Per-conversation catalog: the global list merged with the conversation's workspace plugins.
+    // Omit the id for the bare global list (Phase 7).
+    list(conversationId?: string): Promise<DiscoveredPlugin[]>
     enabledFor(conversationId: string): Promise<Record<string, ConversationPluginState>>
     setEnabled(conversationId: string, pluginId: string, enabled: boolean): Promise<void>
     reload(pluginId: string): Promise<void>
@@ -591,12 +631,47 @@ export interface AtelierAPI {
       channel: string,
       data: unknown
     ): Promise<void>
+    dataHistory(
+      conversationId: string,
+      pluginId: string,
+      channel: string,
+      limit?: number
+    ): Promise<unknown[]>
+    writeFile(
+      conversationId: string,
+      pluginId: string,
+      path: string,
+      content: string
+    ): Promise<{ ok: true } | { error: string }>
+    netFetch(
+      conversationId: string,
+      pluginId: string,
+      url: string,
+      opts?: {
+        method?: string
+        headers?: Record<string, string>
+        body?: string
+        timeoutMs?: number
+        binary?: boolean
+      }
+    ): Promise<
+      | {
+          status: number
+          statusText: string
+          headers: Record<string, string>
+          bodyText?: string
+          bodyBase64?: string
+        }
+      | { error: string }
+    >
     readAsset(
       conversationId: string,
       pluginId: string,
       path: string
     ): Promise<{ dataUrl: string } | { error: string }>
-    onChanged(cb: (plugins: DiscoveredPlugin[]) => void): () => void
+    // Fires when the catalog changes (global rescan or a workspace registry change). A signal —
+    // the renderer refetches list(activeConversation), since the catalog is per-conversation now.
+    onChanged(cb: () => void): () => void
     onContextChanged(cb: (e: ContextChangedEvent) => void): () => void
     onDataMessage(cb: (e: DataMessageEvent) => void): () => void
   }

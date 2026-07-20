@@ -48,7 +48,10 @@ If a confirmed API contradicts SPEC.md, follow the API and note the deviation in
    privileged work (SDK, fs, process spawn) lives in main, behind a preload `contextBridge`.
 3. **Plugins are capability-bounded.** A plugin reaches the app _only_ through the host API
    (PLUGIN_API.md). No direct fs, no direct SDK, no direct IPC. A crashing or malformed
-   plugin must never take down the app.
+   plugin must never take down the app. This is **fault containment for runtime-authored
+   code + a clean coupling contract** — plugins are user/agent-authored and trusted; do not
+   reframe this invariant as a security boundary. Only remote web content (browser surface,
+   URL fetches) is treated as hostile. See PLUGIN_API.md "Why the sandbox exists."
 4. **Every boundary payload is Zod-validated** at the receiving side.
 5. **Agent instances are isolated.** Each has its own `cwd`, session, and transcript. One
    instance's failure does not affect others.

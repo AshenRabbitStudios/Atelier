@@ -1,5 +1,21 @@
 # PROGRESS.md — Atelier build log
 
+## Install/startup system (bugs.txt F1) — landed (2026-07-19)
+
+Design + reference: **docs/INSTALL.md**. `run.bat` / `run.sh` are thin Node-locators; all
+logic is `scripts/bootstrap.mjs` (builtins only — runs pre-`npm install`): version gate →
+`npm ci`+lockfile stamp → electron-binary repair → Claude CLI presence (consent-gated
+official installer) → `claude auth status` login gate → build-staleness → detached launch.
+`launch.ps1` (Desktop shortcut) now delegates to it. Also: `npm run doctor` / `bootstrap`,
+`engines` field, `*.bat` pinned CRLF in .gitattributes.
+
+**NEEDS HUMAN SPOT-CHECK:** (1) true fresh clone on a machine without Node / without the
+Claude CLI / logged out (the interactive `claude auth login` + installer-consent paths);
+(2) plain `run.bat` launch — not exercised headlessly because Atelier has no
+single-instance lock and a second instance would share the live instance's userData.
+Verified headlessly: doctor all-PASS + idempotent re-run, unverified→install→stamp→build
+fix path, both wrappers (cmd + bash), stale-build detection.
+
 ## Plugin capability roadmap Phases 0–7 (2026-07-19)
 
 Design: `docs/roadmap/`. Framing: sandbox = fault containment + coupling contract (DECISIONS

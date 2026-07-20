@@ -5,6 +5,21 @@ a dockable chat interface to the Claude Agent SDK, plus a hot-reloadable, Photos
 plugin system so the surfaces you use to _see what the agent is doing_ can grow over time —
 authored by hand now, and eventually by the agent itself.
 
+## Quick start
+
+Clone, then run the launcher for your OS — it checks/installs everything (Node version,
+dependencies, Claude Code CLI, login), builds, and starts the app. Safe to re-run anytime.
+
+```
+run.bat          # Windows          (./run.sh on macOS/Linux)
+run.bat doctor   # check-only: report what's missing without changing anything
+run.bat dev      # dev mode with hot reload
+```
+
+Only hard prerequisite: [Node.js](https://nodejs.org) ≥ 20.19 (the launcher tells you if
+it's missing). Atelier signs in through your Claude Code session — no API key needed.
+Details: `docs/INSTALL.md`.
+
 ## This is a doc set for an autonomous Claude Code build
 
 Hand these to Claude Code CLI and let it build in phases. Read them in this order:

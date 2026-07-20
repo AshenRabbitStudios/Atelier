@@ -1,6 +1,9 @@
 # Normalize line endings: store text as LF in the repo, check out native.
 * text=auto eol=lf
 
+# cmd.exe misparses goto/labels in LF batch files — always check out CRLF.
+*.bat text eol=crlf
+
 # Generated esbuild artifact — committed so the app runs from a clean checkout, but never
 # hand-merged or reviewed as a diff. On conflict, rebuild it (`npm run build:hologram`) and take
 # the rebuilt version. See docs/MULTI_AGENT.md "The bundle rule".

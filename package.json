@@ -6,7 +6,12 @@
   "license": "MIT",
   "main": "./out/main/main.js",
   "type": "module",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
   "scripts": {
+    "bootstrap": "node scripts/bootstrap.mjs --no-launch",
+    "doctor": "node scripts/bootstrap.mjs doctor",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",

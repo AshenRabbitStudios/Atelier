@@ -232,6 +232,11 @@ class Session {
   // The instruction string baked into the live query's systemPrompt. Compared on each send so we
   // only rebind (and pay the one-time history cache invalidation) when it actually changes.
   private appliedInstruction = ''
+  // A plugin toggle changed the tool set while a turn was in flight. Rebinding immediately would
+  // close the live query and kill the streaming turn, so the rebind is deferred to the next
+  // release (maybeRelease), where no turn can be in flight. Cleared by any rebind — a fresh bind
+  // always reads the current pluginState.
+  private pendingRebind = false
   private q!: Query
   private currentMessageId = ''
   // Live token usage for the in-flight turn (reset each send). Output is summed across the turn's
@@ -362,7 +367,14 @@ class Session {
   ): void {
     this.pluginState[pluginId] = { enabled, pinnedExports: enabled ? exportKeys : [] }
     this.onChange?.()
-    if (exportKeys.length > 0 || hasTools) this.rebind() // tool set changed
+    if (exportKeys.length > 0 || hasTools) {
+      // Tool set changed. Rebind now only when idle — rebinding closes the live query, which
+      // would kill an in-flight turn mid-stream (bugs.txt bug 2). Mid-turn, defer to the next
+      // release; the new tool set applies from the next turn, which is also the earliest the
+      // SDK could honor it anyway.
+      if (this.ledger.released !== null) this.pendingRebind = true
+      else this.rebind()
+    }
   }
 
   pluginStateFor(): Record<string, ConversationPluginState> {
@@ -559,6 +571,7 @@ class Session {
     } catch {
       /* already dead */
     }
+    this.pendingRebind = false // a fresh bind reads the current pluginState
     this.background.clear() // the torn-down query owned any running subagents/tasks
     this.emitBackground()
     this.ledger.settle() // the in-flight turn (if any) will never produce a result
@@ -1054,7 +1067,8 @@ class Session {
   private maybeRelease(): void {
     if (this.closed || this.ledger.released !== null || this.ledger.depth === 0) return
     const want = (this.instructionProvider?.(this.id, this.pluginState) ?? '').trim()
-    if (want !== this.appliedInstruction) this.rebind() // safe: no turn in flight (recurses once, then no-ops)
+    // Also apply a plugin-toggle rebind deferred from mid-turn (setPluginEnabled).
+    if (want !== this.appliedInstruction || this.pendingRebind) this.rebind() // safe: no turn in flight (recurses once, then no-ops)
     const turn = this.ledger.release()
     if (!turn) return // a recursive release (via rebind) already took it
     // Fresh token count for this turn (the live "N tokens" readout).

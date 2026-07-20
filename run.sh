@@ -18,13 +18,22 @@ if ! command -v node >/dev/null 2>&1; then
 fi
 
 if ! command -v node >/dev/null 2>&1; then
-  echo "Node.js is required but was not found on this machine."
+  echo "============================================================"
+  echo " Atelier needs Node.js, which was not found on this machine."
+  echo "============================================================"
+  echo
+  echo " Node.js is the runtime Atelier is built on. To install it,"
+  echo " paste ONE of these into this same terminal and press Enter:"
+  echo
   if [ "$(uname)" = "Darwin" ]; then
-    echo "Install it with:   brew install node"
+    echo "     brew install node          # if you use Homebrew"
+    echo "     (or download the installer from https://nodejs.org)"
   else
-    echo "Install it via your package manager or https://nodejs.org"
+    echo "     sudo apt install nodejs npm   # Debian/Ubuntu"
+    echo "     (or your distro's package manager / https://nodejs.org)"
   fi
-  echo "Then run ./run.sh again."
+  echo
+  echo " When it finishes, run ./run.sh again from this folder."
   exit 10
 fi
 

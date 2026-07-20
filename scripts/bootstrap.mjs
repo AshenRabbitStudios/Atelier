@@ -4,8 +4,10 @@
 //
 //   node scripts/bootstrap.mjs [run|dev|doctor] [--yes] [--no-launch]
 //
-// Every step is check → explain → fix → re-check, and idempotent: a healthy tree
-// re-runs in seconds with no side effects. Exit codes are distinct per failure class
+// Every step narrates what it found, explains what it wants to do about it, and asks
+// before acting (Enter = the default in brackets; --yes accepts everything). Re-running
+// is always safe: a healthy tree re-runs in seconds with no prompts and no side effects.
+// Exit codes are distinct per failure class
 // (10 node, 11 deps, 12 electron binary, 13 claude cli, 14 auth, 15 build, 16 launch).
 
 import { createHash } from 'node:crypto'
@@ -17,6 +19,8 @@ import { fileURLToPath } from 'node:url'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const win = process.platform === 'win32'
+const terminalName = win ? 'PowerShell' : 'a terminal'
+const runCmdName = win ? 'run.bat' : './run.sh'
 
 // ---- CLI parsing ------------------------------------------------------------
 const args = process.argv.slice(2)
@@ -41,28 +45,46 @@ function fix(label, detail) {
   console.log(`  [FIX ] ${label} — ${detail}`)
   issues.push(label)
 }
-function fail(code, label, remedy) {
+// Indented free-text block under a step: explanations, instructions.
+function say(...lines) {
+  for (const l of lines) console.log(`         ${l}`)
+}
+function fail(code, label, ...remedyLines) {
   console.error(`  [FAIL] ${label}`)
-  console.error(`         → ${remedy}`)
+  for (const l of remedyLines) console.error(`         ${l}`)
+  console.error('')
+  console.error(`         When that is done, run ${runCmdName} again — it re-checks`)
+  console.error('         everything and picks up where it left off.')
   process.exit(code)
 }
 
 // ---- helpers ----------------------------------------------------------------
 // shell:true so Windows .cmd/.exe shims (npm, claude) resolve like they do in a terminal.
+// Args are joined into one line (all static strings from this file, never user input):
+// Node 24 deprecates the args-array + shell:true combination (DEP0190).
 function run(cmd, argv, opts = {}) {
-  return spawnSync(cmd, argv, { cwd: root, shell: true, encoding: 'utf8', ...opts })
+  const line = [cmd, ...argv.map((a) => (/\s/.test(a) ? `"${a}"` : a))].join(' ')
+  return spawnSync(line, { cwd: root, shell: true, encoding: 'utf8', ...opts })
 }
 function runLoud(cmd, argv) {
   return run(cmd, argv, { stdio: 'inherit', encoding: undefined })
 }
-async function consent(question) {
+
+// Ask before acting. Enter accepts the bracketed default. --yes accepts everything.
+// Without a terminal to ask on (CI, pipes), safe in-repo actions proceed by default;
+// system-level actions (defaultYes:false) refuse unless --yes was passed.
+async function consent(question, { defaultYes = true } = {}) {
   if (assumeYes) return true
-  if (!process.stdin.isTTY) return false
+  if (!process.stdin.isTTY) return defaultYes
   const rl = createInterface({ input: process.stdin, output: process.stdout })
-  const answer = await new Promise((res) => rl.question(`${question} [y/N] `, res))
+  const suffix = defaultYes ? '[Y/n]' : '[y/N]'
+  const answer = await new Promise((res) => rl.question(`\n         ${question} ${suffix} `, res))
   rl.close()
-  return /^y(es)?$/i.test(answer.trim())
+  const a = String(answer).trim()
+  if (a === '') return defaultYes
+  return /^y(es)?$/i.test(a)
 }
+
 function newestMtime(paths) {
   let newest = 0
   const walk = (p) => {
@@ -88,13 +110,28 @@ function checkNode() {
   const [maj, min] = process.versions.node.split('.').map(Number)
   const supported = (maj === 20 && min >= 19) || (maj >= 22 && !(maj === 22 && min < 12))
   if (supported) return ok('Node.js', `v${process.versions.node}`)
-  fail(
-    10,
-    `Node.js v${process.versions.node} is too old (need ^20.19 or >=22.12)`,
-    win
-      ? 'Upgrade with:  winget install OpenJS.NodeJS.LTS   (or https://nodejs.org), then re-run run.bat'
-      : 'Upgrade via your version manager or https://nodejs.org, then re-run ./run.sh'
+  console.error(
+    `  [FAIL] Node.js v${process.versions.node} is too old — Atelier needs 20.19+ or 22.12+`
   )
+  if (win) {
+    say(
+      'To upgrade: open PowerShell (press the Windows key, type "powershell",',
+      'press Enter), then paste this line and press Enter:',
+      '',
+      '    winget install OpenJS.NodeJS.LTS',
+      '',
+      'Or download the installer from https://nodejs.org and run it.',
+      'Afterwards CLOSE this window and any open terminals (they keep the old',
+      `PATH), open a fresh one, and run ${runCmdName} again.`
+    )
+  } else {
+    say(
+      'Upgrade via your version manager (e.g. `nvm install --lts`) or download',
+      'it from https://nodejs.org. Then open a fresh terminal and run',
+      `${runCmdName} again.`
+    )
+  }
+  process.exit(10)
 }
 
 // ---- step 2: dependencies in sync with the lockfile -------------------------
@@ -116,18 +153,39 @@ function depsState() {
     return 'unverified'
   }
 }
-function checkDeps() {
+async function checkDeps() {
   const state = depsState()
   if (state === 'ok') return ok('Dependencies', 'node_modules matches package-lock.json')
   if (doctor) return fix('Dependencies', `${state} — \`npm ci\` (or npm install) needed`)
-  console.log(`  [....] Dependencies ${state} — installing (this can take a few minutes)...`)
+  const why = {
+    missing: "Atelier's libraries (node_modules) have not been downloaded yet.",
+    stale: 'The dependency list changed since the last install (lockfile mismatch).',
+    unverified: 'node_modules exists but has not been verified by this launcher yet.'
+  }[state]
+  console.log(`  [FIX ] Dependencies — ${state}`)
+  say(
+    why,
+    'Fix: run npm to download/sync them into the node_modules folder INSIDE',
+    'this project directory — nothing outside this folder is touched.',
+    state === 'missing'
+      ? 'First-time download is a few hundred MB and can take a few minutes.'
+      : 'This is usually quick when most packages are already present.'
+  )
+  if (!(await consent('Install dependencies now?')))
+    fail(
+      11,
+      'Dependencies are required to continue',
+      `Install them yourself by running \`npm ci\` in ${terminalName}`,
+      `from this folder (${root}).`
+    )
+  console.log('')
   const useCi = state === 'stale' || state === 'missing'
   let r = runLoud('npm', useCi ? ['ci'] : ['install'])
   if (r.status !== 0 && useCi) r = runLoud('npm', ['install']) // npm ci can fail on odd trees; install is the fallback
   if (r.status !== 0)
-    fail(11, 'npm could not install dependencies', 'Fix the npm error above and re-run')
+    fail(11, 'npm could not install dependencies', 'Fix the npm error shown above.')
   writeFileSync(stampPath, JSON.stringify({ lockHash: lockHash(), at: new Date().toISOString() }))
-  ok('Dependencies', 'installed')
+  ok('Dependencies', 'installed and verified')
 }
 
 // ---- step 3: electron binary ------------------------------------------------
@@ -148,14 +206,32 @@ function electronBin() {
     )
   return join(root, 'node_modules', 'electron', 'dist', 'electron')
 }
-function checkElectron() {
+async function checkElectron() {
   if (existsSync(electronBin())) return ok('Electron binary')
   if (doctor)
     return fix('Electron binary', 'missing — `node node_modules/electron/install.js` needed')
-  console.log('  [....] Electron binary missing — running its installer...')
+  console.log('  [FIX ] Electron binary — missing')
+  say(
+    'Electron is the desktop shell Atelier runs in. Its download step was',
+    'skipped during install (a known npm quirk), so the app binary is absent.',
+    "Fix: run Electron's own repair script; it downloads the binary into",
+    'node_modules inside this project folder. Nothing outside it is touched.'
+  )
+  if (!(await consent('Download the Electron binary now?')))
+    fail(
+      12,
+      'The Electron binary is required to run the app',
+      `Repair it yourself with \`node node_modules/electron/install.js\``,
+      `run in ${terminalName} from this folder (${root}).`
+    )
+  console.log('')
   const r = runLoud('node', [join('node_modules', 'electron', 'install.js')])
   if (r.status !== 0 || !existsSync(electronBin()))
-    fail(12, 'Electron binary still missing after install.js', 'Delete node_modules and re-run')
+    fail(
+      12,
+      'The Electron binary is still missing after the repair script',
+      'Delete the node_modules folder inside this project directory.'
+    )
   ok('Electron binary', 'repaired')
 }
 
@@ -170,27 +246,42 @@ async function checkClaudeCli() {
   const v = claudeVersion()
   if (v) return ok('Claude Code CLI', v)
   const installCmd = win
-    ? 'powershell -c "irm https://claude.ai/install.ps1 | iex"'
+    ? 'irm https://claude.ai/install.ps1 | iex'
     : 'curl -fsSL https://claude.ai/install.sh | bash'
-  if (doctor) return fix('Claude Code CLI', `not found — install with: ${installCmd}`)
-  console.log(
-    '  [....] Claude Code CLI not found. Atelier signs in through it (no API key needed).'
+  if (doctor) return fix('Claude Code CLI', `not found — official installer needed (${installCmd})`)
+  console.log('  [FIX ] Claude Code CLI — not found')
+  say(
+    "Claude Code is Anthropic's command-line app; Atelier signs in to Claude",
+    'THROUGH it (your Claude subscription — no API key needed), so it must be',
+    'installed once on this machine.',
+    "Fix: run Anthropic's official installer. This is the one step that",
+    'installs something OUTSIDE this project folder (into your user profile,',
+    `and it adds a \`claude\` command to your PATH).`
   )
-  if (!(await consent('Install Claude Code now via the official installer?')))
-    fail(13, 'Claude Code CLI is required', `Install it with:  ${installCmd}   then re-run`)
+  if (!(await consent('Run the official Claude Code installer now?', { defaultYes: false })))
+    fail(
+      13,
+      'Claude Code is required for Atelier to sign in to Claude',
+      `To install it yourself: open ${terminalName}, paste this line, press Enter:`,
+      '',
+      `    ${installCmd}`,
+      '',
+      '(It is the official installer from claude.ai.) Then close that terminal.'
+    )
+  console.log('')
   const r = win
-    ? runLoud('powershell', [
-        '-ExecutionPolicy',
-        'Bypass',
-        '-c',
-        'irm https://claude.ai/install.ps1 | iex'
-      ])
-    : runLoud('bash', ['-c', 'curl -fsSL https://claude.ai/install.sh | bash'])
+    ? runLoud('powershell', ['-ExecutionPolicy', 'Bypass', '-c', installCmd])
+    : runLoud('bash', ['-c', installCmd])
   if (r.status !== 0 || !claudeVersion())
     fail(
       13,
-      'Claude Code install did not complete',
-      `Install manually:  ${installCmd}   then re-run`
+      'The Claude Code install did not complete (or `claude` is not on PATH yet)',
+      `A just-installed \`claude\` may only be visible to NEW terminals: close`,
+      `this window, open a fresh ${terminalName}, and try again. If it still`,
+      `fails, install manually by pasting this into ${terminalName}:`,
+      '',
+      `    ${installCmd}`,
+      ''
     )
   ok('Claude Code CLI', 'installed')
 }
@@ -208,27 +299,44 @@ function loggedIn() {
   }
 }
 async function checkAuth() {
-  if (loggedIn()) return ok('Claude login', 'signed in')
-  if (doctor) return fix('Claude login', 'not signed in — `claude auth login` needed')
-  console.log('  [....] Not signed in to Claude. Opening the login flow...')
-  if (!process.stdin.isTTY && !assumeYes)
+  if (loggedIn()) return ok('Claude sign-in', 'signed in')
+  if (doctor) return fix('Claude sign-in', 'not signed in — `claude auth login` needed')
+  console.log('  [FIX ] Claude sign-in — not signed in')
+  say(
+    'Atelier talks to Claude using your Claude account session, and this',
+    'machine is not signed in yet.',
+    'Fix: start the sign-in flow. Your web browser will open on a Claude page;',
+    'sign in with your Claude account (Pro/Max subscription or Console), then',
+    'come back to this window — it continues automatically.'
+  )
+  if (!(await consent('Open the Claude sign-in flow now?')))
     fail(
       14,
-      'Not signed in to Claude (and no terminal to log in with)',
-      'Run `claude auth login`, then re-run'
+      'Atelier cannot talk to Claude without a signed-in session',
+      `To sign in yourself: open ${terminalName}, type \`claude auth login\`,`,
+      'press Enter, and finish the sign-in in your browser.'
     )
+  console.log('')
   runLoud('claude', ['auth', 'login'])
-  if (!loggedIn()) fail(14, 'Still not signed in', 'Run `claude auth login` manually, then re-run')
-  ok('Claude login', 'signed in')
+  if (!loggedIn())
+    fail(
+      14,
+      'Still not signed in after the sign-in flow',
+      `Try it directly: open ${terminalName}, type \`claude auth login\`, press`,
+      'Enter, and finish the sign-in in your browser.'
+    )
+  ok('Claude sign-in', 'signed in')
 }
 
-// ---- step 6: API-key warning (informational) --------------------------------
+// ---- step 6: API-key note (informational) -----------------------------------
 function warnApiKey() {
-  if (process.env.ANTHROPIC_API_KEY)
-    console.log(
-      '  [NOTE] ANTHROPIC_API_KEY is set in this environment. Atelier ignores it at launch\n' +
-        '         and uses your Claude subscription session instead (see electron/main.ts).'
+  if (process.env.ANTHROPIC_API_KEY) {
+    console.log('  [NOTE] ANTHROPIC_API_KEY is set in this environment.')
+    say(
+      'Atelier ignores it on purpose and uses your Claude subscription session',
+      'instead, so this app never bills your API account. Nothing to do.'
     )
+  }
 }
 
 // ---- step 7: build freshness ------------------------------------------------
@@ -242,53 +350,72 @@ function buildStale() {
   )
   return newestMtime(inputs) > statSync(outMain).mtimeMs
 }
-function checkBuild() {
-  if (!buildStale()) return ok('Build', 'out/ is up to date')
-  if (doctor) return fix('Build', 'out/ stale or missing — `npm run build` needed')
-  console.log('  [....] Building...')
+async function checkBuild() {
+  if (!buildStale()) return ok('App build', 'up to date')
+  if (doctor) return fix('App build', 'out/ stale or missing — `npm run build` needed')
+  console.log('  [FIX ] App build — missing or older than the source code')
+  say(
+    'The app needs to be compiled (source → the out/ folder inside this',
+    'project) before it can start. Takes ~30 seconds, all inside this folder.'
+  )
+  if (!(await consent('Build the app now?')))
+    fail(
+      15,
+      'Atelier cannot start without a build',
+      `Build it yourself by running \`npm run build\` in ${terminalName}`,
+      `from this folder (${root}).`
+    )
+  console.log('')
   const r = runLoud('npm', ['run', 'build'])
-  if (r.status !== 0) fail(15, 'Build failed', 'Fix the build error above and re-run')
-  ok('Build', 'rebuilt')
+  if (r.status !== 0) fail(15, 'The build failed', 'Fix the build error shown above.')
+  ok('App build', 'rebuilt')
 }
 
 // ---- step 8: launch ---------------------------------------------------------
 function launch() {
-  if (noLaunch)
-    return console.log('\n--no-launch: everything is ready. Start with run.bat / ./run.sh')
+  if (noLaunch) {
+    console.log(`\nEverything is ready (--no-launch: not starting). Start with ${runCmdName}`)
+    return
+  }
   if (command === 'dev') {
-    console.log('\nStarting dev mode (electron-vite dev)...')
+    console.log('\nStarting Atelier in dev mode (hot reload; Ctrl+C here to stop)...')
     const r = runLoud('npm', ['run', 'dev'])
     process.exit(r.status ?? 0)
   }
-  console.log('\nStarting Atelier...')
+  console.log('\nStarting Atelier... (the app opens in its own window; this window can be closed)')
   try {
     const child = spawn(electronBin(), [root], { cwd: root, detached: true, stdio: 'ignore' })
     child.unref()
   } catch (e) {
-    fail(
-      16,
-      `Could not start Electron: ${e.message}`,
-      'Re-run; if it persists, delete node_modules and re-run'
-    )
+    fail(16, `Could not start Electron: ${e.message}`, 'If it persists, delete node_modules.')
   }
 }
 
 // ---- pipeline ---------------------------------------------------------------
-console.log(`Atelier ${doctor ? 'doctor' : 'startup'} — ${root}\n`)
+console.log(`Atelier ${doctor ? 'health check (doctor)' : 'startup'} — ${root}`)
+if (doctor) {
+  console.log('Checking every prerequisite; nothing will be changed.\n')
+} else {
+  console.log(
+    'Checking prerequisites (dependencies, Claude Code, sign-in, build) and\n' +
+      'fixing what is missing — each fix asks first. Safe to re-run anytime.\n'
+  )
+}
 checkNode()
-checkDeps()
-if (!doctor || depsState() !== 'missing') checkElectron()
+await checkDeps()
+if (!doctor || depsState() !== 'missing') await checkElectron()
 await checkClaudeCli()
 await checkAuth()
 warnApiKey()
-checkBuild()
+await checkBuild()
 if (doctor) {
   if (issues.length === 0) {
-    console.log('\nAll checks passed. `run.bat` / `./run.sh` will start immediately.')
+    console.log(`\nAll checks passed. ${runCmdName} will start the app immediately.`)
     process.exit(0)
   }
   console.log(
-    `\n${issues.length} issue(s) need fixing: ${issues.join(', ')}. Run run.bat / ./run.sh to fix them.`
+    `\n${issues.length} issue(s) found: ${issues.join(', ')}.` +
+      `\nRun ${runCmdName} to fix them — it explains and asks before each fix.`
   )
   process.exit(1)
 }

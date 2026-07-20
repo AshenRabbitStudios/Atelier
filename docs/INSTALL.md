@@ -60,8 +60,13 @@ Principles applied (standard doctor/bootstrap practice):
 - **Idempotent:** every step is "verify, and only act if needed"; running twice in a
   row does nothing the second time and finishes in seconds.
 - **Fail with the fix:** every failure message states the exact command to run next.
-- **Consent for system-level installs:** the script never installs software outside
-  the repo (Claude CLI) without asking; `--yes` opts into unattended mode.
+- **Narrate + ask before every fix:** each step explains what it found, why the fix
+  is needed, and what the fix touches, then asks (Enter = bracketed default). In-repo
+  fixes (deps, electron, build) default **Yes**; the one system-level install (the
+  Claude CLI, which writes outside the repo) defaults **No**. Without a terminal to
+  ask on (CI/pipes) the defaults apply; `--yes` accepts everything unattended.
+- **Fail with a where/how:** every printed command comes with where to paste it
+  (which terminal, which folder) and what to do afterwards.
 - **Distinct exit codes** per failure class so wrappers/CI can react.
 - **Deterministic installs:** `npm ci` against the committed lockfile, not
   `npm install` drift.

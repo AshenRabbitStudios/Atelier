@@ -1,5 +1,26 @@
 # PROGRESS.md — Atelier build log
 
+## Default plugin suite: proposals + bugs.txt fixes (2026-07-19, autonomous session)
+
+- **bugs.txt bug 2 fixed** (commit `fix(agent): defer plugin-toggle rebind…`): toggling a
+  plugin with tools/context exports rebound the SDK query immediately, closing the live
+  query mid-turn and killing the streaming chain of thought. `setPluginEnabled` now rebinds
+  only when idle; mid-turn it sets `pendingRebind`, applied at the next release in
+  `maybeRelease` (same pattern as the standing-instruction rebind). **Spot-check:** toggle a
+  plugin while Claude is mid-response — the response must finish; new tools apply next turn.
+- **bugs.txt bug 1 verified as already implemented** (☰ Conversations dropdown lists all
+  persisted conversations, reopen + delete; `AgentManager.listAll`). Marked done-pending-
+  spot-check in bugs.txt.
+- **Default plugin suite proposals**: `docs/plugin-proposals/PROPOSALS.md` — 13 researched
+  candidates (git-workbench, change-review, agent-timeline, cost-dashboard, test-lens,
+  proc-manager, workspace-explorer, mission-control, http-workbench, db-explorer,
+  prompt-library, pr-watch, attention) with need/usage/pitch + suggested tiers and build
+  order. Per-plugin design docs in `docs/plugin-proposals/designs/` (one Opus subagent
+  each). Recurring HOST-GAP themes across designs (agent-event feed for plugins,
+  composer-insert verb, chat-injection verb) should be reconciled before building.
+- **Open question for Brandon:** bugs.txt F2's remaining half (conversation-local plugin
+  discovery/registration) still awaits your call per the 2026-07-18 writeup.
+
 ## Install/startup system (bugs.txt F1) — landed (2026-07-19)
 
 Design + reference: **docs/INSTALL.md**. `run.bat` / `run.sh` are thin Node-locators; all

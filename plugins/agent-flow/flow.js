@@ -1138,64 +1138,107 @@
   })
 
   /* ═══════════════════════ WIRING ═════════════════════════════════════════ */
-  atelier.agent.onEvent(function (ev) {
-    var entry = ingest(ev, true)
-    appendLive(entry)
-    // A completed file-writing tool refreshes the working tree when Repo is visible.
-    if (ev && ev.kind === 'tool_result' && state.tab === 'repo') {
-      var t = toolStarts[ev.toolUseId]
-      if (t && t.entry.file) {
-        rpc('status').then(function (r) {
-          repo.status = r
-          renderHealth()
-          renderNav()
-        })
+  // Guarded: a missing capability must degrade that feed, not kill the whole script
+  // (a top-level throw here would leave a completely dead pane).
+  try {
+    atelier.agent.onEvent(function (ev) {
+      var entry = ingest(ev, true)
+      appendLive(entry)
+      // A completed file-writing tool refreshes the working tree when Repo is visible.
+      if (ev && ev.kind === 'tool_result' && state.tab === 'repo') {
+        var t = toolStarts[ev.toolUseId]
+        if (t && t.entry.file) {
+          rpc('status').then(function (r) {
+            repo.status = r
+            renderHealth()
+            renderNav()
+          })
+        }
       }
-    }
-  })
+    })
+  } catch (e) {
+    /* agent:read unavailable — the log stays on backfill only */
+  }
 
   // Pushed refresh from the backend's debounced flow:status timer.
-  atelier.data.subscribe('flow:status', function (status) {
-    repo.status = status
-    if (state.tab === 'repo') {
-      renderHealth()
-      renderNav()
-    }
+  try {
+    atelier.data.subscribe('flow:status', function (status) {
+      repo.status = status
+      if (state.tab === 'repo') {
+        renderHealth()
+        renderNav()
+      }
+    })
+  } catch (e) {
+    /* data:subscribe unavailable — manual/RPC refreshes still work */
+  }
+
+  // Fail-visible guard: an uncaught error must render INTO the pane, never leave a
+  // silent blank (which is indistinguishable from "the plugin does nothing").
+  function showFatal(msg) {
+    var bar = document.createElement('div')
+    bar.className = 'pane-empty'
+    bar.style.color = 'var(--err, #e06c75)'
+    bar.textContent = 'agent-flow error: ' + msg + ' — try reloading the plugin.'
+    document.body.insertBefore(bar, document.body.firstChild)
+  }
+  window.addEventListener('error', function (e) {
+    showFatal((e && e.message) || 'uncaught error')
+  })
+  window.addEventListener('unhandledrejection', function (e) {
+    showFatal((e && e.reason && e.reason.message) || 'unhandled rejection')
   })
 
   var mounted = false
   function mount() {
     if (mounted) return
     mounted = true
+    // Show the default tab IMMEDIATELY — restores/backfill only refine it. The previous
+    // version activated a tab only at the end of the storage→history promise chain, so
+    // any rejection left BOTH panels display:none (a blank pane with two dead-looking
+    // tabs). Never gate first paint on async work.
+    setTab(state.tab)
     atelier.agent
       .info()
       .then(function (info) {
         if (info && info.cwd) cwd = info.cwd
       })
       .catch(function () {})
-    atelier.storage.get('ui').then(function (saved) {
-      if (saved && typeof saved === 'object') {
-        if (saved.tab === 'repo' || saved.tab === 'agent') state.tab = saved.tab
-        if (saved.level >= 1 && saved.level <= 4) state.level = saved.level
-        if (saved.filter) state.filter = saved.filter
-        if (saved.sections && typeof saved.sections === 'object') state.sections = saved.sections
-        if (saved.selectedFile) state.selectedFile = saved.selectedFile
-        state.selectedStaged = !!saved.selectedStaged
-      }
-      agLevel.value = String(state.level)
-      agLevelName.textContent = LEVEL_NAMES[state.level]
-      agPin.classList.toggle('active', state.follow)
-      Array.prototype.forEach.call($('#ag-filters').children, function (b) {
-        b.classList.toggle('active', b.getAttribute('data-filter') === state.filter)
+    atelier.storage
+      .get('ui')
+      .catch(function () {
+        return null
       })
-      atelier.agent.history(1000).then(function (hist) {
+      .then(function (saved) {
+        if (saved && typeof saved === 'object') {
+          if (saved.tab === 'repo' || saved.tab === 'agent') state.tab = saved.tab
+          if (saved.level >= 1 && saved.level <= 4) state.level = saved.level
+          if (saved.filter) state.filter = saved.filter
+          if (saved.sections && typeof saved.sections === 'object') state.sections = saved.sections
+          if (saved.selectedFile) state.selectedFile = saved.selectedFile
+          state.selectedStaged = !!saved.selectedStaged
+        }
+        agLevel.value = String(state.level)
+        agLevelName.textContent = LEVEL_NAMES[state.level]
+        agPin.classList.toggle('active', state.follow)
+        Array.prototype.forEach.call($('#ag-filters').children, function (b) {
+          b.classList.toggle('active', b.getAttribute('data-filter') === state.filter)
+        })
+        return atelier.agent.history(1000).catch(function () {
+          return null
+        })
+      })
+      .then(function (hist) {
         if (Array.isArray(hist))
           hist.forEach(function (ev) {
             ingest(ev, false)
           })
         setTab(state.tab)
       })
-    })
+      .catch(function (err) {
+        // Belt and braces — the pane still shows the default tab from the sync setTab.
+        showFatal((err && err.message) || 'mount failed')
+      })
   }
 
   atelier.on('load', mount)

@@ -55,8 +55,14 @@ export function handlePluginProtocol(
     const url = new URL(request.url)
     const host = url.hostname
 
+    // no-store on every plugin asset: these are local files whose whole point is hot reload.
+    // Without it Chromium's in-session cache can serve a STALE script against a fresh
+    // index.html after a plugin update — mixed-version panes crash at load (observed with
+    // agent-flow 2026-07-21: old flow.js + new index.html → null addEventListener, dead pane).
     if (host === RUNTIME_HOST) {
-      return new Response(RUNTIME_JS, { headers: { 'content-type': 'text/javascript' } })
+      return new Response(RUNTIME_JS, {
+        headers: { 'content-type': 'text/javascript', 'cache-control': 'no-store' }
+      })
     }
 
     const found = resolveHost(host)
@@ -76,7 +82,9 @@ export function handlePluginProtocol(
     if (!existsSync(full)) return new Response('not found', { status: 404 })
 
     try {
-      return new Response(readFileSync(full), { headers: { 'content-type': contentType(full) } })
+      return new Response(readFileSync(full), {
+        headers: { 'content-type': contentType(full), 'cache-control': 'no-store' }
+      })
     } catch {
       return new Response('read error', { status: 500 })
     }

@@ -216,7 +216,14 @@ function heatStyle(h) {
 // Tree listing (lazy, one level per fs.list call — spec §6)
 // =====================================================================================
 async function listDir(dirPath) {
-  const res = await atelier.fs.list(dirPath || '')
+  let res
+  try {
+    res = await atelier.fs.list(dirPath || '')
+  } catch (err) {
+    // A rejected fs.list must surface as an in-tree error row, not an unhandled
+    // rejection that leaves a silently blank pane (the agent-flow dead-pane lesson).
+    return { error: (err && err.message) || 'listing failed' }
+  }
   if (!res || 'error' in res) {
     return { error: (res && res.error) || 'listing failed' }
   }
@@ -1099,7 +1106,17 @@ let mounted = false
 function mountOnce() {
   if (mounted) return
   mounted = true
-  void mount()
+  mount().catch((err) => {
+    // Fail visible: whatever broke the mount, say so in the pane instead of a blank tree.
+    const tree = document.getElementById('tree')
+    if (tree && !tree.childNodes.length) {
+      const e = document.createElement('div')
+      e.className = 'err-note'
+      e.textContent = 'explorer failed to mount: ' + ((err && err.message) || err)
+      tree.appendChild(e)
+    }
+    toast('Explorer mount error: ' + ((err && err.message) || err))
+  })
 }
 
 atelier.on('load', mountOnce)

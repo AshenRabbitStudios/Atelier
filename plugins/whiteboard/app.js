@@ -75,6 +75,9 @@
       })
       .catch(function (e) {
         status('load error: ' + (e && e.message))
+        // Still render — the onboarding/empty state must appear even when the initial
+        // context read fails; a status-line-only error reads as a blank, broken pane.
+        renderAll()
       })
   }
 

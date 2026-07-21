@@ -6,7 +6,7 @@
   "icon": "M4 2.5v4a2 2 0 0 0 2 2h4a2 2 0 0 1 2 2v2.5M4 2.5a1.5 1.5 0 1 0 0-.01M12 13.5a1.5 1.5 0 1 0 0 .01M4 8.5a1.5 1.5 0 1 0 0 .01",
   "kind": "panel",
   "entry": "index.html",
-  "backend": "backend.js",
+  "backend": "backend.cjs",
   "service": true,
   "permissions": ["agent:read", "storage", "data:subscribe", "data:publish"],
   "defaultDock": "right"

@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      HTTP Workbench — a shared request/response console (designs/http-workbench.md).
+        user  → builder → atelier.net.fetch (host fetcher, net:fetch permission)
+        agent → http_request tool → backend fetch (same constraints via shared.cjs)
+      Both append to one storage history; agent entries arrive live over the http:entry
+      DataBus channel. The readonly ctx:history digest is rebuilt by this pane on every
+      history change. Responses render as INERT data — JSON tree / escaped text — never
+      innerHTML'd or executed (remote content is hostile; design §4.6).
+      Host runtime MUST be first; no external network beyond net.fetch.
+    -->
+    <script src="atelier-plugin://__runtime__/atelier.js"></script>
+    <title>HTTP Workbench</title>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: var(--surface, #14171e);
+        color: var(--text, #e7eaf0);
+        font-family: var(--font, system-ui, sans-serif);
+        font-size: 12px;
+      }
+      #root {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+      .hidden {
+        display: none !important;
+      }
+      button {
+        font-family: inherit;
+        cursor: pointer;
+      }
+
+      /* ── builder ── */
+      #builder {
+        flex: 0 0 auto;
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--border, #252b37);
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .b-row {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+      select,
+      input[type='text'],
+      textarea {
+        background: var(--input, #0f1117);
+        color: var(--text, #e7eaf0);
+        border: 1px solid var(--border, #252b37);
+        border-radius: 4px;
+        font-family: var(--mono, monospace);
+        font-size: 11px;
+        padding: 4px 7px;
+        outline: none;
+      }
+      select:focus,
+      input:focus,
+      textarea:focus {
+        border-color: var(--accent, #5b9cff);
+      }
+      #url {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      #send {
+        padding: 4px 14px;
+        border: 1px solid var(--accent, #5b9cff);
+        border-radius: 4px;
+        background: var(--accent, #5b9cff);
+        color: var(--on-accent, #fff);
+        font-size: 11px;
+        font-weight: 600;
+      }
+      #send:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+      .hdr-row {
+        display: flex;
+        gap: 6px;
+      }
+      .hdr-row input.k {
+        flex: 0 0 34%;
+      }
+      .hdr-row input.v {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      button.mini {
+        padding: 2px 8px;
+        border: 1px solid var(--border, #252b37);
+        border-radius: 4px;
+        background: none;
+        color: var(--dim, #8b97ae);
+        font-size: 10px;
+      }
+      button.mini:hover {
+        border-color: var(--accent, #5b9cff);
+        color: var(--text, #e7eaf0);
+      }
+      #body-wrap textarea {
+        width: 100%;
+        min-height: 64px;
+        resize: vertical;
+      }
+      .b-note {
+        font-size: 9px;
+        color: var(--faint, #5e6677);
+      }
+
+      /* ── response ── */
+      #resp {
+        flex: 1 1 0;
+        min-height: 0;
+        overflow: auto;
+        border-bottom: 1px solid var(--border, #252b37);
+      }
+      #resp-status {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 6px 10px;
+        border-bottom: 1px solid var(--border, #252b37);
+        font-family: var(--mono, monospace);
+        font-size: 11px;
+        position: sticky;
+        top: 0;
+        background: var(--surface, #14171e);
+      }
+      .code-2xx {
+        color: var(--ok, #4caf82);
+        font-weight: 700;
+      }
+      .code-3xx {
+        color: var(--dim, #8b97ae);
+        font-weight: 700;
+      }
+      .code-4xx,
+      .code-5xx {
+        color: var(--err, #e06c75);
+        font-weight: 700;
+      }
+      .resp-meta {
+        color: var(--faint, #5e6677);
+        font-size: 10px;
+      }
+      #resp-empty {
+        padding: 16px;
+        color: var(--faint, #5e6677);
+        font-style: italic;
+      }
+      .err-card {
+        margin: 10px;
+        padding: 8px 10px;
+        border: 1px solid var(--err, #e06c75);
+        border-left-width: 3px;
+        border-radius: 4px;
+        color: var(--err, #e06c75);
+        font-family: var(--mono, monospace);
+        font-size: 11px;
+        word-break: break-word;
+      }
+      details.h-sec {
+        border-bottom: 1px solid var(--border, #252b37);
+      }
+      details.h-sec > summary {
+        padding: 4px 10px;
+        cursor: pointer;
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--dim, #8b97ae);
+        user-select: none;
+      }
+      .hdr-table {
+        padding: 2px 10px 8px;
+        font-family: var(--mono, monospace);
+        font-size: 10.5px;
+        line-height: 1.5;
+      }
+      .hdr-table .hk {
+        color: var(--accent, #5b9cff);
+      }
+      #resp-body {
+        padding: 8px 10px;
+        font-family: var(--mono, monospace);
+        font-size: 11px;
+        line-height: 1.5;
+      }
+      #resp-body pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      /* JSON tree (details-based, inert) */
+      .jt {
+        margin-left: 14px;
+      }
+      .jt-root {
+        margin-left: 0;
+      }
+      .jt summary {
+        cursor: pointer;
+        user-select: none;
+        list-style: none;
+      }
+      .jt summary::before {
+        content: '▸ ';
+        color: var(--faint, #5e6677);
+        font-size: 9px;
+      }
+      .jt details[open] > summary::before {
+        content: '▾ ';
+      }
+      .jk {
+        color: var(--accent, #5b9cff);
+      }
+      .js {
+        color: var(--ok, #7bbf88);
+      }
+      .jn {
+        color: var(--warn, #d8a657);
+      }
+      .jb {
+        color: var(--err, #db61a2);
+      }
+      .jnull {
+        color: var(--faint, #5e6677);
+        font-style: italic;
+      }
+      .jmeta {
+        color: var(--faint, #5e6677);
+        font-size: 9px;
+      }
+      .pretty-toggle {
+        margin-left: auto;
+      }
+
+      /* ── history ── */
+      #hist {
+        flex: 0 0 32%;
+        min-height: 90px;
+        display: flex;
+        flex-direction: column;
+      }
+      #hist-head {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 10px;
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--dim, #8b97ae);
+        border-bottom: 1px solid var(--border, #252b37);
+      }
+      #hist-clear {
+        margin-left: auto;
+      }
+      #hist-list {
+        flex: 1 1 0;
+        min-height: 0;
+        overflow: auto;
+      }
+      .h-row {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 3px 10px;
+        cursor: pointer;
+        font-family: var(--mono, monospace);
+        font-size: 10.5px;
+      }
+      .h-row:hover {
+        background: var(--surface-2, #1a1e27);
+      }
+      .h-row.selected {
+        background: var(--accent-weak, #23324a);
+      }
+      .h-method {
+        flex: 0 0 46px;
+        font-weight: 700;
+        font-size: 9px;
+        text-align: center;
+        border: 1px solid var(--border, #252b37);
+        border-radius: 3px;
+        padding: 0 3px;
+        color: var(--accent, #5b9cff);
+      }
+      .h-url {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--text, #e7eaf0);
+      }
+      .h-status {
+        flex: 0 0 auto;
+        font-size: 9px;
+      }
+      .h-src {
+        flex: 0 0 auto;
+        font-size: 9px;
+        padding: 0 5px;
+        border-radius: 8px;
+        border: 1px solid var(--border, #252b37);
+        color: var(--faint, #5e6677);
+      }
+      .h-src.agent {
+        color: var(--warn, #d8a657);
+        border-color: var(--warn, #d8a657);
+      }
+      .h-time {
+        flex: 0 0 auto;
+        color: var(--faint, #5e6677);
+        font-size: 9px;
+      }
+      .hist-empty {
+        padding: 12px;
+        color: var(--faint, #5e6677);
+        font-style: italic;
+        font-size: 11px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div id="builder">
+        <div class="b-row">
+          <select id="method"></select>
+          <input id="url" type="text" placeholder="http://localhost:3000/api/…" />
+          <button id="send">Send</button>
+        </div>
+        <div id="headers"></div>
+        <div class="b-row">
+          <button class="mini" id="add-header">+ header</button>
+          <select id="ct-quick">
+            <option value="">content-type…</option>
+            <option value="application/json">application/json</option>
+            <option value="text/plain">text/plain</option>
+            <option value="application/x-www-form-urlencoded">form-urlencoded</option>
+            <option value="application/xml">application/xml</option>
+          </select>
+          <span class="b-note"
+            >cookie headers are dropped by the host — use Authorization instead. http(s) only.</span
+          >
+        </div>
+        <div id="body-wrap" class="hidden">
+          <textarea id="req-body" placeholder='{"key": "value"}' spellcheck="false"></textarea>
+        </div>
+      </div>
+
+      <div id="resp">
+        <div id="resp-empty">
+          Send a request (or let the agent fire one via http_request) — the response renders here.
+        </div>
+        <div id="resp-view" class="hidden">
+          <div id="resp-status"></div>
+          <details class="h-sec" id="resp-headers-sec">
+            <summary>Response headers</summary>
+            <div class="hdr-table" id="resp-headers"></div>
+          </details>
+          <div id="resp-body"></div>
+        </div>
+      </div>
+
+      <div id="hist">
+        <div id="hist-head">
+          Shared history
+          <button class="mini" id="hist-clear">clear</button>
+        </div>
+        <div id="hist-list"></div>
+      </div>
+    </div>
+    <script src="atelier-plugin://http-workbench/shared.cjs"></script>
+    <script src="atelier-plugin://http-workbench/workbench.js"></script>
+  </body>
+</html>

@@ -1,0 +1,45 @@
+{
+  "id": "http-workbench",
+  "name": "HTTP Workbench",
+  "version": "0.1.0",
+  "description": "A shared HTTP request/response console. Build a request (method, URL, headers, body), see a pretty response (status, timing, JSON tree), and replay from history. The agent fires requests through the same console via the http_request tool, so you and the agent share one history. Recent request history is pinned to context.",
+  "icon": "M2.5 8h11M8 2.5a7 7 0 0 1 0 11M8 2.5a7 7 0 0 0 0 11M2.5 8a13 13 0 0 1 11 0M2.5 8a13 13 0 0 0 11 0",
+  "kind": "both",
+  "entry": "index.html",
+  "backend": "backend.cjs",
+  "permissions": ["net:fetch", "storage", "context", "tools", "data:subscribe", "data:publish"],
+  "defaultDock": "right",
+  "tools": [
+    {
+      "name": "http_request",
+      "description": "Fire an HTTP request through the shared HTTP Workbench console. The request and its response appear in the user's pane and are added to the shared history. Returns status, headers, round-trip timing, and body (truncated if large). http(s) only; the cookie header is dropped.",
+      "inputSchema": {
+        "url": "string",
+        "method": {
+          "type": "string",
+          "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"],
+          "description": "HTTP method (default GET)",
+          "optional": true
+        },
+        "headers": {
+          "type": "object",
+          "description": "Request headers as a flat string map. The cookie header is dropped.",
+          "optional": true
+        },
+        "body": "string?",
+        "timeoutMs": "number?"
+      },
+      "timeoutMs": 65000
+    }
+  ],
+  "contextExports": [
+    {
+      "key": "history",
+      "label": "HTTP request history",
+      "format": "markdown",
+      "maxTokens": 1500,
+      "readonly": true,
+      "description": "Recent HTTP requests fired in this conversation (method, URL, status, timing, trimmed snippets). Maintained automatically by the pane; read-only. Fire your own requests with the http_request tool — they land in the same history."
+    }
+  ]
+}

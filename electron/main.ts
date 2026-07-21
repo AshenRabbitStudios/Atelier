@@ -8,6 +8,7 @@ import {
   ipcMain,
   dialog,
   shell,
+  session,
   utilityProcess,
   Notification
 } from 'electron'
@@ -761,12 +762,19 @@ function registerIpc(): void {
     applyPluginEnabled(conversationId, pluginId, enabled, registryFor(conversationId))
   })
 
-  ipcMain.handle(IPC.pluginsReload, (_e, payload) => {
+  ipcMain.handle(IPC.pluginsReload, async (_e, payload) => {
     const { pluginId } = PluginIdSchema.parse(payload)
     // Reset ONLY the reloaded plugin's backend (fresh module + cleared crash/wedge state, re-spawned
     // if it's a still-enabled service) — reloading one plugin must not kill unrelated backends
     // mid-call (ARCH_REVIEW_2026-07-19 P1 #11).
     backends.reset(pluginId)
+    // Reload must guarantee fresh files BY CONSTRUCTION, not via header semantics: flush the
+    // HTTP + compiled-script caches BEFORE the renderer remounts panes, so a pane can never
+    // come back with a stale script against a fresh index.html (the dead-pane class of bug —
+    // protocol.ts serves no-store now, but this also evicts anything cached before that and
+    // survives any future header regression). Local-file cache; clearing it costs nothing.
+    await session.defaultSession.clearCache()
+    await session.defaultSession.clearCodeCaches({}).catch(() => {})
     plugins.scan() // re-read global manifests; workspace registries self-watch their own dirs
     notifyPluginsChanged() // renderer refetches per-conversation + remounts affected panes
   })

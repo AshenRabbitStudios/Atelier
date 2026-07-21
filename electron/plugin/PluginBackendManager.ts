@@ -150,18 +150,27 @@ export class PluginBackendManager {
     })
   }
 
-  /** Enable a SERVICE plugin for a conversation: spawn the child on the first enable and tell it. */
+  /** Enable a SERVICE plugin for a conversation: spawn the child on the first enable and tell it.
+   *  Idempotent — safe to call as a per-RPC "ensure" (the A7 handler does, so a service is
+   *  lazy-respawned after an app restart): the `enable` lifecycle message is only posted when the
+   *  child was just spawned or the conversation is new to it, never once per RPC. */
   startService(pluginId: string, backendPath: string, conversationId: string): void {
     let convs = this.serviceConvs.get(pluginId)
     if (!convs) {
       convs = new Set()
       this.serviceConvs.set(pluginId, convs)
     }
+    const newConv = !convs.has(conversationId)
     convs.add(conversationId)
     this.backendPaths.set(pluginId, backendPath)
     if (this.wedged.has(pluginId)) return // stays down until reload clears the wedge
+    const wasRunning = this.children.has(pluginId)
     const child = this.ensure(pluginId, backendPath)
-    this.post(child, { enable: { conversationId, cwd: this.cwdFor(conversationId) ?? undefined } })
+    if (!wasRunning || newConv) {
+      this.post(child, {
+        enable: { conversationId, cwd: this.cwdFor(conversationId) ?? undefined }
+      })
+    }
   }
 
   /** Disable a SERVICE plugin for a conversation; kill the child when the last one drops. */

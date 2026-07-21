@@ -175,6 +175,28 @@ describe('PluginBackendManager — service lifecycle + crash budget', () => {
     expect(enables).toEqual(['conv-1', 'conv-2'])
   })
 
+  it('startService is idempotent as a per-RPC ensure: repeat calls post no duplicate enable', () => {
+    const f = backendFactory()
+    const mgr = new PluginBackendManager(f.spawn)
+    mgr.startService('p', '/b', 'conv-1')
+    // The A7 handler ensures the service before EVERY rpc — repeats must not respawn or re-enable.
+    mgr.startService('p', '/b', 'conv-1')
+    mgr.startService('p', '/b', 'conv-1')
+    expect(f.spawned.length).toBe(1)
+    const enables = f.last().posted.filter((m) => m.enable)
+    expect(enables).toHaveLength(1)
+  })
+
+  it('re-ensuring after a stop (app-restart shape) respawns the child and re-posts enable', () => {
+    const f = backendFactory()
+    const mgr = new PluginBackendManager(f.spawn)
+    mgr.startService('p', '/b', 'conv-1')
+    mgr.stop('p') // child gone (quit/reload), enablement knowledge notionally persisted
+    mgr.startService('p', '/b', 'conv-1') // the lazy per-RPC ensure path
+    expect(f.spawned.length).toBe(2)
+    expect(f.last().posted.filter((m) => m.enable)).toHaveLength(1)
+  })
+
   it('kills the service only when the last conversation disables it', () => {
     const f = backendFactory()
     const mgr = new PluginBackendManager(f.spawn)

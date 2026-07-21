@@ -927,6 +927,12 @@ function registerIpc(): void {
     if (!(manifest.service && manifest.backend)) {
       return { error: 'plugin does not declare a service backend' }
     }
+    // Lazy ensure: services spawn on the enable TOGGLE, so after an app restart an
+    // already-enabled plugin has no child until re-toggled — every RPC then failed with
+    // "no running service backend" (observed as agent-flow's all-empty Repo sections,
+    // 2026-07-21). startService is idempotent and re-spawns here on the first RPC.
+    const dir = registryFor(conversationId).dirOf(pluginId)
+    if (dir) backends.startService(pluginId, join(dir, manifest.backend), conversationId)
     try {
       const result = await backends.callRpc(pluginId, op, conversationId, params, timeoutMs)
       return { result }

@@ -21,9 +21,12 @@ const path = require('node:path')
 const {
   parseStatus,
   parseLog,
+  parseStashList,
+  parseSubmodules,
   parseBranches,
   parseWorktrees,
-  parseDiff
+  parseDiff,
+  parseDiffMulti
 } = require('./gitParse.cjs')
 
 const DIFF_CAP = 500 * 1024 // 500KB — larger diffs are truncated with a marker (spec §3)
@@ -41,6 +44,10 @@ let statusTimer = null
 // truncated } — never rejects on a non-zero exit; the caller decides what a failure means. Rejects
 // only if git can't be spawned at all (ENOENT), which the caller maps to a friendly error.
 function runGit(args, maxBytes) {
+  return runCmd('git', args, maxBytes)
+}
+
+function runCmd(cmd, args, maxBytes) {
   return new Promise((resolve, reject) => {
     if (!cwd) {
       reject(new Error('no cwd'))
@@ -48,7 +55,7 @@ function runGit(args, maxBytes) {
     }
     let child
     try {
-      child = spawn('git', args, { cwd, windowsHide: true })
+      child = spawn(cmd, args, { cwd, windowsHide: true })
     } catch (err) {
       reject(err)
       return
@@ -67,7 +74,7 @@ function runGit(args, maxBytes) {
       } catch {
         /* already gone */
       }
-      reject(new Error('git timed out'))
+      reject(new Error(cmd + ' timed out'))
     }, GIT_TIMEOUT_MS)
 
     child.stdout.on('data', (d) => {
@@ -153,14 +160,31 @@ async function opDiff(params) {
   }
 }
 
+// A whole commit's diff, per file (multi-file shape so the pane can render file headers).
+async function opCommitDiff(params) {
+  if (!(await isRepo())) return NOT_A_REPO
+  const hash = params && typeof params.hash === 'string' ? params.hash : null
+  if (!hash) return { error: 'commit hash required' }
+  try {
+    const r = await runGit(['diff', '--no-color', hash + '^!'], DIFF_CAP)
+    const parsed = parseDiffMulti(r.stdout)
+    parsed.truncated = r.truncated || false
+    return parsed
+  } catch (err) {
+    return { error: errMsg(err) }
+  }
+}
+
+// US (\x1f) between fields, RS (\x1e) after each record — robust vs. subjects with newlines/
+// pipes. Trailing %D (refs) + %b (body) power decorations + full-message detail.
+const LOG_FMT = '\x1f%H\x1f%h\x1f%an\x1f%ae\x1f%aI\x1f%s\x1f%P\x1f%D\x1f%b\x1e'
+
 async function opLog(params) {
   if (!(await isRepo())) return NOT_A_REPO
   const limit = clampInt(params && params.limit, 1, LOG_CAP, LOG_CAP)
-  // US (\x1f) between fields, RS (\x1e) after each record — robust vs. subjects with newlines/pipes.
-  const fmt = '\x1f%H\x1f%h\x1f%an\x1f%ae\x1f%aI\x1f%s\x1f%P\x1e'
   try {
     const r = await runGit(
-      ['log', '-n', String(limit), '--no-color', '--pretty=format:' + fmt],
+      ['log', '-n', String(limit), '--no-color', '--pretty=format:' + LOG_FMT],
       8 * 1024 * 1024
     )
     return { commits: parseLog(r.stdout) }
@@ -175,10 +199,9 @@ async function opCommit(params) {
   if (!hash) return { error: 'commit hash required' }
   try {
     // Details: one log record for the header, plus a name-status file list.
-    const fmt = '\x1f%H\x1f%h\x1f%an\x1f%ae\x1f%aI\x1f%s\x1f%P\x1e'
     const head = await runGit(
-      ['show', '-s', '--no-color', '--pretty=format:' + fmt, hash],
-      64 * 1024
+      ['show', '-s', '--no-color', '--pretty=format:' + LOG_FMT, hash],
+      256 * 1024
     )
     const commits = parseLog(head.stdout)
     const files = await runGit(
@@ -199,6 +222,74 @@ async function opBranches() {
     const w = await runGit(['worktree', 'list', '--porcelain'], 1 * 1024 * 1024)
     return { branches: parseBranches(b.stdout), worktrees: parseWorktrees(w.stdout) }
   } catch (err) {
+    return { error: errMsg(err) }
+  }
+}
+
+async function opStashes() {
+  if (!(await isRepo())) return NOT_A_REPO
+  try {
+    const r = await runGit(
+      ['stash', 'list', '--no-color', '--pretty=format:\x1f%gd\x1f%aI\x1f%s\x1e'],
+      1 * 1024 * 1024
+    )
+    return { stashes: parseStashList(r.stdout) }
+  } catch (err) {
+    return { error: errMsg(err) }
+  }
+}
+
+async function opStashDiff(params) {
+  if (!(await isRepo())) return NOT_A_REPO
+  const ref = params && typeof params.ref === 'string' ? params.ref : null
+  if (!ref || !/^stash@\{\d+\}$/.test(ref)) return { error: 'stash ref required' }
+  try {
+    const r = await runGit(['stash', 'show', '-p', '--no-color', ref], DIFF_CAP)
+    const parsed = parseDiffMulti(r.stdout)
+    parsed.truncated = r.truncated || false
+    return parsed
+  } catch (err) {
+    return { error: errMsg(err) }
+  }
+}
+
+async function opSubmodules() {
+  if (!(await isRepo())) return NOT_A_REPO
+  try {
+    const r = await runGit(['submodule', 'status'], 1 * 1024 * 1024)
+    if (r.code !== 0) return { submodules: [] } // no .gitmodules / old git — treat as none
+    return { submodules: parseSubmodules(r.stdout) }
+  } catch (err) {
+    return { error: errMsg(err) }
+  }
+}
+
+// CI status via the GitHub CLI. `gh` absent, logged-out, or a non-GitHub remote all
+// degrade to { error } — the pane renders a quiet dash, never breaks.
+const GH_RUN_FIELDS =
+  'databaseId,name,displayTitle,status,conclusion,headBranch,event,createdAt,updatedAt,url'
+
+async function opCi(params) {
+  if (!(await isRepo())) return NOT_A_REPO
+  const branch = params && typeof params.branch === 'string' ? params.branch : null
+  const args = ['run', 'list', '--limit', '15', '--json', GH_RUN_FIELDS]
+  if (branch) args.push('--branch', branch)
+  try {
+    const r = await runCmd('gh', args, 4 * 1024 * 1024)
+    if (r.code !== 0) {
+      const line = (r.stderr || '').split('\n')[0].trim()
+      return { error: line || 'gh failed (exit ' + r.code + ')' }
+    }
+    let runs
+    try {
+      runs = JSON.parse(r.stdout || '[]')
+    } catch {
+      return { error: 'gh returned unparseable JSON' }
+    }
+    if (!Array.isArray(runs)) return { error: 'unexpected gh output' }
+    return { runs }
+  } catch (err) {
+    if (err && err.code === 'ENOENT') return { error: 'gh not found' }
     return { error: errMsg(err) }
   }
 }
@@ -245,9 +336,14 @@ function publish(channel, data) {
 const OPS = {
   status: opStatus,
   diff: opDiff,
+  commitDiff: opCommitDiff,
   log: opLog,
   commit: opCommit,
-  branches: opBranches
+  branches: opBranches,
+  stashes: opStashes,
+  stashDiff: opStashDiff,
+  submodules: opSubmodules,
+  ci: opCi
 }
 
 async function handleRpc(id, rpc) {

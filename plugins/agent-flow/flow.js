@@ -1,15 +1,22 @@
 /* ───────────────────────────────────────────────────────────────────────────
-   Agent Flow — pane logic. Self-contained vanilla JS, no external resources.
-   Four tabs over one service backend (git reader) + the agent event trace.
+   Agent Flow — pane logic (2026-07-21 rework: git-first).
 
-   Data sources:
-     - Timeline: atelier.agent.history() (backfill) + atelier.agent.onEvent (live)   [agent:read]
-     - Changes/History/Branches: atelier.backend.call(op, params)                     [service RPC]
-     - Pushed refresh: atelier.data.subscribe('flow:status', …)                       [data:subscribe]
-   Persisted (per-conversation) via atelier.storage: active tab, timeline filter, selected file.
+   Repo tab (primary): health strip + accordion navigator (working tree / history /
+   branches & worktrees / stashes / submodules / CI) + a detail pane (diffs, commit
+   details with full message + per-file diffs, stash diffs, CI runs). All git/gh data
+   comes from the service backend over atelier.backend.call; read-only.
 
-   The backend returns { error:'not a git repository' } on a non-git cwd; each git tab then shows a
-   friendly empty state instead of throwing.
+   Agent tab: a flat, exactly-ordered event log — every AgentEvent from
+   atelier.agent.history (backfill) + atelier.agent.onEvent (live), rendered per a
+   tiered verbosity slider:
+     L1 turns    — results/errors only
+     L2 tools    — + tool calls/results/tokens
+     L3 all      — + text/thinking/permissions/questions/status/atelier events
+     L4 raw      — L3, every row expandable to its raw JSON payload
+   plus filter chips, substring search, and follow-scroll.
+
+   Persisted (per-conversation) via atelier.storage key 'ui': active tab, verbosity
+   level, filter, repo section collapse states, selected file.
    ─────────────────────────────────────────────────────────────────────────── */
 ;(function () {
   'use strict'
@@ -21,33 +28,52 @@
     return document.querySelector(sel)
   }
   var tabsEl = $('#tabs')
-  var panels = {}
-  ;['timeline', 'changes', 'history', 'branches'].forEach(function (t) {
-    panels[t] = document.querySelector('.panel[data-panel="' + t + '"]')
-  })
-  var tlList = $('#tl-list')
-  var chFiles = $('#ch-files')
-  var chDiff = $('#ch-diff')
-  var chFileTitle = $('#ch-file')
-  var chBranch = $('#ch-branch')
-  var chTurns = $('#ch-turns')
-  var hiList = $('#hi-list')
-  var hiDetail = $('#hi-detail')
-  var hiTitle = $('#hi-title')
-  var brList = $('#br-list')
+  var panels = {
+    repo: document.querySelector('.panel[data-panel="repo"]'),
+    agent: document.querySelector('.panel[data-panel="agent"]')
+  }
+  var healthEl = $('#health')
+  var navEl = $('#repo-nav')
+  var rdTitle = $('#rd-title')
+  var rdMeta = $('#rd-meta')
+  var rdBody = $('#rd-body')
+  var agList = $('#ag-list')
+  var agLevel = $('#ag-level')
+  var agLevelName = $('#ag-level-name')
+  var agSearch = $('#ag-search')
+  var agPin = $('#ag-pin')
 
   /* ── State ─────────────────────────────────────────────────────────────── */
   var state = {
-    tab: 'timeline',
+    tab: 'repo',
+    level: 2, // agent verbosity L1–L4
     filter: 'all',
+    search: '',
+    follow: true,
+    sections: {}, // repo nav section id -> collapsed?
     selectedFile: null,
-    selectedStaged: false,
-    selectedCommit: null
+    selectedStaged: false
   }
-  var sessionStart = Date.now() // pane-mount time; commits after this are "this session" (best-effort)
-  var turns = [] // [{ id, events:[…], result, tokens }]
-  var fileIndex = {} // path -> Set of turn indices that touched it (cross-link, §4)
-  var collapsed = {} // turnId -> bool
+  var sessionStart = Date.now() // commits after this are "this session" (best-effort)
+  var cwd = null // this conversation's cwd (worktree annotation)
+
+  // Repo data caches (latest RPC results).
+  var repo = {
+    status: null,
+    log: null,
+    branches: null,
+    stashes: null,
+    submodules: null,
+    ci: null,
+    historySearch: ''
+  }
+  var ciTimer = null
+
+  // Agent log: flat, ordered.
+  var events = [] // [{ seq, ts, ev, text? (coalesced), open? }]
+  var seqNo = 0
+  var toolStarts = {} // toolUseId -> { entry, at }
+  var fileIndex = {} // normalized path -> count of tool events touching it
 
   /* ── helpers ───────────────────────────────────────────────────────────── */
   function el(tag, cls, text) {
@@ -71,20 +97,42 @@
     s = String(s == null ? '' : s)
     return s.length > n ? s.slice(0, n - 1) + '…' : s
   }
+  function relTime(iso) {
+    var t = typeof iso === 'number' ? iso : Date.parse(iso || '')
+    if (!isFinite(t)) return ''
+    var d = Date.now() - t
+    if (d < 60e3) return Math.max(1, Math.round(d / 1e3)) + 's ago'
+    if (d < 3600e3) return Math.round(d / 60e3) + 'm ago'
+    if (d < 86400e3) return Math.round(d / 3600e3) + 'h ago'
+    return Math.round(d / 86400e3) + 'd ago'
+  }
+  function clock(ts) {
+    if (!ts) return ''
+    var d = new Date(ts)
+    var p = function (n) {
+      return (n < 10 ? '0' : '') + n
+    }
+    return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds())
+  }
+  function normPath(p) {
+    return String(p == null ? '' : p)
+      .replace(/\\/g, '/')
+      .toLowerCase()
+  }
   function persist() {
     try {
       atelier.storage.set('ui', {
         tab: state.tab,
+        level: state.level,
         filter: state.filter,
+        sections: state.sections,
         selectedFile: state.selectedFile,
         selectedStaged: state.selectedStaged
       })
     } catch (e) {
-      /* storage best-effort */
+      /* best-effort */
     }
   }
-
-  /* ── backend RPC (with graceful non-git handling) ──────────────────────── */
   function rpc(op, params) {
     return atelier.backend.call(op, params).then(
       function (r) {
@@ -94,6 +142,13 @@
         return { error: (err && err.message) || 'backend unavailable' }
       }
     )
+  }
+  function paneEmpty(msg) {
+    if (msg === 'not a git repository')
+      return el('div', 'pane-empty', 'This folder is not a git repository.')
+    if (msg === 'git not found')
+      return el('div', 'pane-empty', 'git is not installed or not on PATH.')
+    return el('div', 'pane-empty', msg || 'Nothing to show.')
   }
 
   /* ── tabs ──────────────────────────────────────────────────────────────── */
@@ -106,356 +161,628 @@
       b.classList.toggle('active', b.getAttribute('data-tab') === tab)
     })
     persist()
-    // Refresh git tabs on focus (spec: tab focus is a Changes refresh trigger).
-    if (tab === 'changes') refreshChanges()
-    else if (tab === 'history') refreshHistory()
-    else if (tab === 'branches') refreshBranches()
+    if (tab === 'repo') {
+      refreshRepo()
+      startCiPoll()
+    } else {
+      stopCiPoll()
+      renderAgent()
+    }
   }
   tabsEl.addEventListener('click', function (e) {
     var b = e.target.closest('.tab')
     if (b) setTab(b.getAttribute('data-tab'))
   })
 
-  /* ═══════════════════════ TIMELINE ═══════════════════════════════════════ */
-  // AgentEvents carry no turn ids; we segment turns by result boundaries: a new turn starts on the
-  // first event after a 'result', and 'result'/'tokens' close the current turn's footer.
-  var curTurn = null
-  function ensureTurn() {
-    if (!curTurn) {
-      curTurn = {
-        id: 't' + turns.length,
-        index: turns.length,
-        events: [],
-        result: null,
-        tokens: null
-      }
-      turns.push(curTurn)
-    }
-    return curTurn
+  /* ═══════════════════════ REPO ═══════════════════════════════════════════ */
+  function refreshRepo() {
+    rpc('status').then(function (r) {
+      repo.status = r
+      renderHealth()
+      renderNav()
+    })
+    rpc('log', { limit: 200 }).then(function (r) {
+      repo.log = r
+      renderHealth()
+      renderNav()
+    })
+    rpc('branches').then(function (r) {
+      repo.branches = r
+      renderHealth()
+      renderNav()
+    })
+    rpc('stashes').then(function (r) {
+      repo.stashes = r
+      renderNav()
+    })
+    rpc('submodules').then(function (r) {
+      repo.submodules = r
+      renderNav()
+    })
+    refreshCi()
   }
-  function FILE_TOOLS() {
-    return { Write: 1, Edit: 1, MultiEdit: 1, NotebookEdit: 1, str_replace_editor: 1 }
-  }
-  function toolFile(name, input) {
-    if (!input || typeof input !== 'object') return null
-    if (FILE_TOOLS()[name]) return input.file_path || input.path || input.filePath || null
-    return null
-  }
-  function relPath(p) {
-    if (!p) return p
-    // Normalize to a cwd-relative-ish tail for cross-linking with git paths (best-effort).
-    return String(p).replace(/\\/g, '/')
-  }
-
-  function ingest(ev) {
-    if (!ev || typeof ev !== 'object') return
-    var k = ev.kind
-    if (k === 'result') {
-      var t = ensureTurn()
-      t.result = { costUsd: ev.costUsd, durationMs: ev.durationMs, isError: !!ev.isError }
-      curTurn = null // next event opens a new turn
-      return
-    }
-    if (k === 'tokens') {
-      var tt = curTurn || (turns.length ? turns[turns.length - 1] : ensureTurn())
-      tt.tokens = { output: ev.output, input: ev.input }
-      return
-    }
-    if (k === 'status' || k === 'permission_resolved' || k === 'question_resolved') return
-    if (k === 'permission_mode' || k === 'auto_resume' || k === 'background') return
-    if (k === 'task_activity' || k === 'system_init') return
-    var turn = ensureTurn()
-    if (k === 'tool_use') {
-      var fp = toolFile(ev.name, ev.input)
-      var entry = {
-        kind: 'tool',
-        toolUseId: ev.toolUseId,
-        name: ev.name,
-        input: ev.input,
-        file: fp ? relPath(fp) : null,
-        ok: null,
-        durationMs: null,
-        startedAt: Date.now()
-      }
-      turn.events.push(entry)
-      if (fp) {
-        var rp = relPath(fp)
-        if (!fileIndex[rp]) fileIndex[rp] = {}
-        fileIndex[rp][turn.index] = 1
-      }
-    } else if (k === 'tool_result') {
-      // attach to the matching tool_use in any open/last turn
-      var found = findTool(ev.toolUseId)
-      if (found) {
-        found.ok = !!ev.ok
-        found.durationMs = Date.now() - (found.startedAt || Date.now())
-        found.output = ev.output
-      }
-    } else if (k === 'text') {
-      // Coalesce consecutive text deltas into one snippet entry.
-      var last = turn.events[turn.events.length - 1]
-      if (last && last.kind === 'text' && last.messageId === ev.messageId) last.text += ev.delta
-      else turn.events.push({ kind: 'text', messageId: ev.messageId, text: ev.delta || '' })
-    } else if (k === 'thinking') {
-      /* omit thinking from the timeline to keep it about actions */
-    } else if (k === 'permission_request') {
-      turn.events.push({ kind: 'block', block: 'permission', title: ev.title || ev.toolName })
-    } else if (k === 'question_request') {
-      turn.events.push({ kind: 'block', block: 'question', title: 'Question for you' })
-    } else if (k === 'error') {
-      turn.events.push({ kind: 'error', text: ev.message || 'error' })
-    }
-  }
-  function findTool(toolUseId) {
-    for (var i = turns.length - 1; i >= 0; i--) {
-      var evs = turns[i].events
-      for (var j = evs.length - 1; j >= 0; j--) {
-        if (evs[j].kind === 'tool' && evs[j].toolUseId === toolUseId) return evs[j]
-      }
-    }
-    return null
-  }
-
-  // One-line summary for a tool call (name + a short input hint).
-  function toolSummary(name, input, file) {
-    if (file) return file
-    if (!input || typeof input !== 'object') return ''
-    if (name === 'Bash') return short(input.command || '', 80)
-    if (name === 'Read') return input.file_path || input.path || ''
-    if (name === 'Grep' || name === 'Glob') return short(input.pattern || input.query || '', 60)
-    if (name === 'Task') return short(input.description || '', 60)
-    try {
-      return short(JSON.stringify(input), 70)
-    } catch (e) {
-      return ''
-    }
-  }
-
-  function passesFilter(entry) {
-    if (state.filter === 'all') return true
-    if (state.filter === 'tools') return entry.kind === 'tool'
-    if (state.filter === 'files') return entry.kind === 'tool' && !!entry.file
-    if (state.filter === 'errors')
-      return entry.kind === 'error' || (entry.kind === 'tool' && entry.ok === false)
-    return true
-  }
-
-  function renderTimeline() {
-    clear(tlList)
-    if (!turns.length) {
-      tlList.appendChild(el('div', 'pane-empty', 'No agent activity yet in this conversation.'))
-      return
-    }
-    turns.forEach(function (turn) {
-      var visible = turn.events.filter(passesFilter)
-      if (!visible.length && state.filter !== 'all') return
-      var wrap = el('div', 'turn' + (collapsed[turn.id] ? ' collapsed' : ''))
-      var head = el('div', 'turn-head')
-      head.appendChild(el('span', 'turn-caret', collapsed[turn.id] ? '▸' : '▾'))
-      head.appendChild(el('span', 'turn-title', 'Turn ' + (turn.index + 1)))
-      var meta = el('span', 'turn-meta')
-      if (turn.result) {
-        var bits = []
-        if (turn.result.durationMs != null) bits.push(fmtDur(turn.result.durationMs))
-        if (turn.tokens && turn.tokens.output != null) bits.push(turn.tokens.output + ' tok')
-        if (turn.result.costUsd != null) bits.push('$' + turn.result.costUsd.toFixed(4))
-        if (turn.result.isError) bits.push('error')
-        meta.textContent = bits.join(' · ')
-      } else if (turn.tokens && turn.tokens.output != null) {
-        meta.textContent = turn.tokens.output + ' tok'
-      }
-      head.appendChild(meta)
-      head.addEventListener('click', function () {
-        collapsed[turn.id] = !collapsed[turn.id]
-        renderTimeline()
-      })
-      wrap.appendChild(head)
-
-      var body = el('div', 'turn-body')
-      ;(state.filter === 'all' ? turn.events : visible).forEach(function (entry) {
-        if (state.filter !== 'all' && !passesFilter(entry)) return
-        body.appendChild(renderEntry(entry))
-      })
-      wrap.appendChild(body)
-      tlList.appendChild(wrap)
+  function refreshCi() {
+    var branch = repo.status && !isErr(repo.status) ? repo.status.branch : null
+    rpc('ci', branch ? { branch: branch } : {}).then(function (r) {
+      repo.ci = r
+      renderHealth()
+      renderNav()
     })
   }
+  function startCiPoll() {
+    if (ciTimer) return
+    ciTimer = setInterval(function () {
+      if (state.tab === 'repo') refreshCi()
+    }, 60000)
+  }
+  function stopCiPoll() {
+    if (ciTimer) {
+      clearInterval(ciTimer)
+      ciTimer = null
+    }
+  }
 
-  function renderEntry(entry) {
-    if (entry.kind === 'text') {
-      var row = el('div', 'ev text')
-      row.appendChild(el('span', 'summary', short(entry.text.trim(), 200)))
-      return row
+  /* ── health strip ──────────────────────────────────────────────────────── */
+  function renderHealth() {
+    clear(healthEl)
+    var s = repo.status
+    if (isErr(s)) {
+      healthEl.appendChild(
+        el('span', 'seg', s.error === 'not a git repository' ? 'not a git repo' : s.error)
+      )
+      return
     }
-    if (entry.kind === 'error') {
-      var er = el('div', 'ev err')
-      er.appendChild(el('span', 'tool', 'error'))
-      er.appendChild(el('span', 'summary', short(entry.text, 200)))
-      return er
-    }
-    if (entry.kind === 'block') {
-      var br = el('div', 'ev block')
-      br.appendChild(
-        el(
-          'span',
-          'summary',
-          (entry.block === 'permission' ? '⚑ permission: ' : '❓ ') + short(entry.title, 120)
+    if (!s) return
+
+    var br = seg(
+      '⎇ ' +
+        (s.branch || '(detached)') +
+        (s.ahead || s.behind ? '  ↑' + s.ahead + ' ↓' + s.behind : ''),
+      'branches',
+      s.upstream ? 'tracking ' + s.upstream : 'no upstream'
+    )
+    healthEl.appendChild(br)
+
+    var dirty =
+      (s.staged || []).length +
+      (s.unstaged || []).length +
+      (s.untracked || []).length +
+      (s.conflicted || []).length
+    var d = seg(
+      dirty ? '● ' + dirty + ' change' + (dirty > 1 ? 's' : '') : '✓ clean',
+      'worktree',
+      'working tree'
+    )
+    if ((s.conflicted || []).length) d.classList.add('bad')
+    else if (dirty) d.classList.add('warn')
+    else d.classList.add('good')
+    healthEl.appendChild(d)
+
+    var log = repo.log
+    if (log && !isErr(log) && log.commits && log.commits.length) {
+      healthEl.appendChild(
+        seg(
+          '◷ ' + relTime(log.commits[0].date),
+          'history',
+          'last commit: ' + log.commits[0].subject
         )
       )
-      return br
     }
-    // tool
-    var r = el('div', 'ev' + (entry.ok === false ? ' err' : ''))
-    r.appendChild(el('span', 'tool', entry.name))
-    r.appendChild(el('span', 'summary', toolSummary(entry.name, entry.input, entry.file)))
-    if (entry.durationMs != null) r.appendChild(el('span', 'dur', fmtDur(entry.durationMs)))
-    if (entry.file) {
-      var vd = el('span', 'viewdiff', 'view diff')
-      var f = entry.file
-      vd.addEventListener('click', function () {
-        openFileInChanges(f)
-      })
-      r.appendChild(vd)
+
+    // CI badge from the latest run on the current branch.
+    var ci = repo.ci
+    var ciSeg
+    if (isErr(ci)) {
+      ciSeg = seg('CI –', 'ci', ci.error)
+    } else if (ci && ci.runs && ci.runs.length) {
+      var run = ci.runs[0]
+      var glyph = run.status === 'completed' ? (run.conclusion === 'success' ? '✓' : '✗') : '●'
+      ciSeg = seg('CI ' + glyph, 'ci', run.name + ' — ' + (run.conclusion || run.status))
+      ciSeg.classList.add(
+        run.status !== 'completed' ? 'warn' : run.conclusion === 'success' ? 'good' : 'bad'
+      )
+    } else {
+      ciSeg = seg('CI –', 'ci', 'no runs found')
     }
-    return r
-  }
+    healthEl.appendChild(ciSeg)
 
-  // Cross-link: Timeline "view diff" → Changes tab, file selected. Match a git-status path by suffix.
-  function openFileInChanges(file) {
-    setTab('changes')
-    pendingSelectFile = file
-    refreshChanges()
+    var b = repo.branches
+    if (b && !isErr(b) && (b.worktrees || []).length > 1) {
+      healthEl.appendChild(
+        seg(
+          '⌂ ' + b.worktrees.length + ' worktrees',
+          'worktrees',
+          'parallel checkouts of this repo'
+        )
+      )
+    }
   }
-  var pendingSelectFile = null
-
-  // Filter chips
-  $('#tl-filters').addEventListener('click', function (e) {
-    var c = e.target.closest('.chip')
-    if (!c) return
-    state.filter = c.getAttribute('data-filter')
-    Array.prototype.forEach.call(this.children, function (b) {
-      b.classList.toggle('active', b === c)
+  function seg(text, sectionId, tip) {
+    var e = el('span', 'seg', text)
+    if (tip) e.title = tip
+    e.addEventListener('click', function () {
+      state.sections[sectionId === 'worktrees' ? 'branches' : sectionId] = false
+      persist()
+      renderNav()
+      var sec = navEl.querySelector(
+        '[data-section="' + (sectionId === 'worktrees' ? 'branches' : sectionId) + '"]'
+      )
+      if (sec) sec.scrollIntoView({ block: 'start' })
     })
-    persist()
-    renderTimeline()
-  })
-
-  /* ═══════════════════════ CHANGES ════════════════════════════════════════ */
-  var lastStatus = null
-  function refreshChanges() {
-    rpc('status').then(function (r) {
-      renderChanges(r)
-    })
+    return e
   }
-  function renderChanges(status) {
-    lastStatus = status
-    clear(chFiles)
-    if (isErr(status)) {
-      chBranch.textContent = '—'
-      chFiles.appendChild(paneEmpty(status.error))
-      clear(chDiff)
-      return
-    }
-    chBranch.textContent = status.branch
-      ? status.branch +
-        (status.ahead || status.behind ? ' ↑' + status.ahead + ' ↓' + status.behind : '')
-      : '(detached)'
-    var groups = [
-      ['Staged', status.staged || [], true],
-      ['Unstaged', status.unstaged || [], false],
-      [
-        'Untracked',
-        (status.untracked || []).map(function (u) {
-          return { path: u.path, status: '?' }
-        }),
-        false
-      ],
-      [
-        'Conflicted',
-        (status.conflicted || []).map(function (c) {
-          return { path: c.path, status: 'U' }
-        }),
-        false
+
+  /* ── navigator (accordion) ─────────────────────────────────────────────── */
+  function renderNav() {
+    clear(navEl)
+    navEl.appendChild(buildWorktreeSection())
+    navEl.appendChild(buildHistorySection())
+    navEl.appendChild(buildBranchesSection())
+    var st = buildStashSection()
+    if (st) navEl.appendChild(st)
+    var sm = buildSubmoduleSection()
+    if (sm) navEl.appendChild(sm)
+    navEl.appendChild(buildCiSection())
+  }
+
+  function section(id, title, count) {
+    var sec = el('div', 'nav-sec')
+    sec.dataset.section = id
+    var head = el('div', 'nav-sec-head')
+    head.appendChild(el('span', 'caret', state.sections[id] ? '▸' : '▾'))
+    head.appendChild(el('span', 'nav-sec-title', title))
+    if (count != null) head.appendChild(el('span', 'nav-sec-count', String(count)))
+    head.addEventListener('click', function () {
+      state.sections[id] = !state.sections[id]
+      persist()
+      renderNav()
+    })
+    sec.appendChild(head)
+    var body = el('div', 'nav-sec-body')
+    if (state.sections[id]) body.classList.add('hidden')
+    sec.appendChild(body)
+    return { sec: sec, body: body }
+  }
+
+  /* Working tree */
+  function buildWorktreeSection() {
+    var s = repo.status
+    var dirty =
+      !s || isErr(s)
+        ? 0
+        : (s.staged || []).length +
+          (s.unstaged || []).length +
+          (s.untracked || []).length +
+          (s.conflicted || []).length
+    var x = section('worktree', 'Working tree', dirty)
+    if (!s) x.body.appendChild(paneEmpty('Loading…'))
+    else if (isErr(s)) x.body.appendChild(paneEmpty(s.error))
+    else {
+      var groups = [
+        ['Staged', s.staged || [], true],
+        ['Unstaged', s.unstaged || [], false],
+        [
+          'Untracked',
+          (s.untracked || []).map(function (u) {
+            return { path: u.path, status: '?' }
+          }),
+          false
+        ],
+        [
+          'Conflicted',
+          (s.conflicted || []).map(function (c) {
+            return { path: c.path, status: 'U' }
+          }),
+          false
+        ]
       ]
-    ]
-    var any = false
-    groups.forEach(function (g) {
-      var label = g[0]
-      var items = g[1]
-      var staged = g[2]
-      if (!items.length) return
-      any = true
-      chFiles.appendChild(el('div', 'group-label', label + ' (' + items.length + ')'))
-      items.forEach(function (it) {
-        chFiles.appendChild(fileRow(it, staged))
+      var any = false
+      groups.forEach(function (g) {
+        if (!g[1].length) return
+        any = true
+        x.body.appendChild(el('div', 'group-label', g[0] + ' (' + g[1].length + ')'))
+        g[1].forEach(function (it) {
+          x.body.appendChild(fileRow(it, g[2]))
+        })
       })
-    })
-    if (!any) chFiles.appendChild(paneEmpty('Working tree clean.'))
-
-    // Honor a pending cross-link selection, else re-select the persisted file if still present.
-    var want = pendingSelectFile || state.selectedFile
-    pendingSelectFile = null
-    if (want) selectFileBySuffix(want)
+      if (!any) x.body.appendChild(paneEmpty('Working tree clean.'))
+    }
+    return x.sec
   }
 
   function fileRow(it, staged) {
     var row = el('div', 'file-row')
     var st = (it.status || '?').toUpperCase()
     row.appendChild(el('span', 'st ' + st, st))
-    var fp = el('span', 'fp', it.path)
-    fp.setAttribute('title', it.path)
+    var fp = el('span', 'fp', it.orig ? it.orig + ' → ' + it.path : it.path)
+    fp.title = it.path
     row.appendChild(fp)
-    // Cross-link chip: how many recent turns touched this file (§4).
-    var idx = fileIndex[relPath(it.path)]
-    var n = idx ? Object.keys(idx).length : 0
+    var n = fileIndex[normPath(it.path)] || suffixTouches(it.path)
     if (n > 0) {
-      var chip = el('span', 'turns-chip', n + ' turn' + (n > 1 ? 's' : ''))
-      chip.setAttribute('title', 'Show timeline entries touching this file')
+      var chip = el('span', 'turns-chip', n + '×')
+      chip.title = 'The agent touched this file ' + n + ' time(s) — click to see those events'
       chip.addEventListener('click', function (e) {
         e.stopPropagation()
-        showTurnsForFile(it.path)
+        showFileInAgent(it.path)
       })
       row.appendChild(chip)
     }
-    row.dataset.path = it.path
-    row.dataset.staged = staged ? '1' : ''
+    if (state.selectedFile === it.path && state.selectedStaged === staged)
+      row.classList.add('selected')
     row.addEventListener('click', function () {
-      selectFile(it.path, staged, row)
+      state.selectedFile = it.path
+      state.selectedStaged = staged
+      persist()
+      Array.prototype.forEach.call(navEl.querySelectorAll('.file-row'), function (r) {
+        r.classList.toggle('selected', r === row)
+      })
+      showFileDiff(it.path, staged)
+    })
+    return row
+  }
+  // Agent events carry absolute paths; git paths are repo-relative — match by suffix.
+  function suffixTouches(gitPath) {
+    var suffix = normPath(gitPath)
+    var n = 0
+    Object.keys(fileIndex).forEach(function (p) {
+      if (p.length >= suffix.length && p.slice(-suffix.length) === suffix) n += fileIndex[p]
+    })
+    return n
+  }
+
+  function showFileDiff(path, staged) {
+    rdTitle.textContent = path
+    rdMeta.textContent = staged ? 'staged' : ''
+    clear(rdBody)
+    rdBody.appendChild(el('div', 'pane-empty', 'Loading diff…'))
+    rpc('diff', { file: path, staged: staged }).then(function (r) {
+      clear(rdBody)
+      renderDiffInto(rdBody, r)
+    })
+  }
+
+  /* History */
+  function buildHistorySection() {
+    var x = section('history', 'History', null)
+    var log = repo.log
+    var search = el('input', 'hist-search')
+    search.type = 'text'
+    search.placeholder = 'filter subject / author / hash…'
+    search.value = repo.historySearch
+    search.addEventListener('input', function () {
+      repo.historySearch = search.value
+      renderCommitList(list)
+    })
+    search.addEventListener('click', function (e) {
+      e.stopPropagation()
+    })
+    x.body.appendChild(search)
+    var list = el('div', 'commit-list')
+    x.body.appendChild(list)
+    if (!log) list.appendChild(paneEmpty('Loading…'))
+    else if (isErr(log)) list.appendChild(paneEmpty(log.error))
+    else renderCommitList(list)
+    return x.sec
+  }
+
+  // Simple lane assignment for the graph gutter: newest-first walk; a commit takes the
+  // lane expecting its hash (or a new one), then bequeaths the lane to its first parent.
+  function assignLanes(commits) {
+    var lanes = [] // lane index -> next expected hash (or null when free)
+    commits.forEach(function (c) {
+      var lane = lanes.indexOf(c.hash)
+      if (lane < 0) {
+        lane = lanes.indexOf(null)
+        if (lane < 0) {
+          lane = lanes.length
+          lanes.push(null)
+        }
+      }
+      c._lane = lane
+      var parents = c.parents || []
+      lanes[lane] = parents.length ? parents[0] : null
+      for (var i = 1; i < parents.length; i++) {
+        if (lanes.indexOf(parents[i]) < 0) {
+          var free = lanes.indexOf(null)
+          if (free < 0) lanes.push(parents[i])
+          else lanes[free] = parents[i]
+        }
+      }
+      c._lanesActive = lanes.filter(function (h) {
+        return h !== null
+      }).length
+      c._laneCount = lanes.length
+    })
+    return commits
+  }
+  var LANE_COLORS = ['#5b9cff', '#3fb950', '#f0883e', '#db61a2', '#a371f7', '#39c5cf', '#e3b341']
+
+  function renderCommitList(list) {
+    clear(list)
+    var log = repo.log
+    if (!log || isErr(log)) return
+    var commits = assignLanes((log.commits || []).slice())
+    var q = repo.historySearch.trim().toLowerCase()
+    var shown = 0
+    commits.forEach(function (c) {
+      if (q) {
+        var hay = (c.subject + ' ' + c.author + ' ' + c.short + ' ' + c.hash).toLowerCase()
+        if (hay.indexOf(q) < 0) return
+      }
+      shown++
+      list.appendChild(commitRow(c, !q))
+    })
+    if (!shown) list.appendChild(paneEmpty(q ? 'No commits match.' : 'No commits.'))
+  }
+
+  function commitRow(c, withGraph) {
+    var inSession = c.date && Date.parse(c.date) >= sessionStart
+    var row = el('div', 'commit-row' + (inSession ? ' session' : ''))
+    if (withGraph) {
+      var gutterWidth = Math.min(c._laneCount || 1, 6) * 8 + 4
+      var g = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+      g.setAttribute('class', 'lane-svg')
+      g.setAttribute('width', gutterWidth)
+      g.setAttribute('height', 30)
+      for (var li = 0; li < Math.min(c._laneCount || 1, 6); li++) {
+        var xPos = 5 + li * 8
+        var line = document.createElementNS('http://www.w3.org/2000/svg', 'line')
+        line.setAttribute('x1', xPos)
+        line.setAttribute('x2', xPos)
+        line.setAttribute('y1', 0)
+        line.setAttribute('y2', 30)
+        line.setAttribute('stroke', LANE_COLORS[li % LANE_COLORS.length])
+        line.setAttribute('stroke-opacity', '0.35')
+        g.appendChild(line)
+      }
+      var laneShown = Math.min(c._lane, 5)
+      var dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
+      dot.setAttribute('cx', 5 + laneShown * 8)
+      dot.setAttribute('cy', 15)
+      dot.setAttribute('r', (c.parents || []).length > 1 ? 2.4 : 3.2)
+      dot.setAttribute('fill', LANE_COLORS[laneShown % LANE_COLORS.length])
+      g.appendChild(dot)
+      row.appendChild(g)
+    }
+    var main = el('div', 'commit-main')
+    var subj = el('div', 'commit-subj')
+    ;(c.refs || []).forEach(function (ref) {
+      var chip = el(
+        'span',
+        'ref-chip' + (/^tag:/.test(ref) ? ' tag' : /HEAD/.test(ref) ? ' head' : ''),
+        ref.replace(/^tag:\s*/, '')
+      )
+      subj.appendChild(chip)
+    })
+    subj.appendChild(document.createTextNode(c.subject))
+    if (inSession) subj.appendChild(el('span', 'session-badge', 'this session'))
+    main.appendChild(subj)
+    var meta = el('div', 'commit-meta')
+    meta.appendChild(el('span', 'hash', c.short))
+    meta.appendChild(el('span', 'author', c.author))
+    meta.appendChild(el('span', 'date', relTime(c.date)))
+    main.appendChild(meta)
+    row.appendChild(main)
+    row.addEventListener('click', function () {
+      Array.prototype.forEach.call(navEl.querySelectorAll('.commit-row'), function (x) {
+        x.classList.toggle('selected', x === row)
+      })
+      showCommit(c)
     })
     return row
   }
 
-  function selectFile(path, staged, row) {
-    state.selectedFile = path
-    state.selectedStaged = staged
-    persist()
-    Array.prototype.forEach.call(chFiles.querySelectorAll('.file-row'), function (r) {
-      r.classList.toggle('selected', r === row)
-    })
-    chFileTitle.textContent = path
-    var idx = fileIndex[relPath(path)]
-    var n = idx ? Object.keys(idx).length : 0
-    chTurns.textContent = n ? n + ' turn' + (n > 1 ? 's' : '') + ' touched this' : ''
-    clear(chDiff)
-    chDiff.appendChild(el('div', 'pane-empty', 'Loading diff…'))
-    rpc('diff', { file: path, staged: staged }).then(function (r) {
-      renderDiff(chDiff, r)
-    })
-  }
-  function selectFileBySuffix(want) {
-    var w = relPath(want)
-    var rows = chFiles.querySelectorAll('.file-row')
-    for (var i = 0; i < rows.length; i++) {
-      var p = relPath(rows[i].dataset.path)
-      if (p === w || w.slice(-p.length) === p || p.slice(-w.length) === w) {
-        rows[i].click()
-        return
-      }
+  function showCommit(c) {
+    rdTitle.textContent = short(c.subject, 70)
+    rdMeta.textContent = c.short
+    clear(rdBody)
+    var head = el('div', 'commit-detail-head')
+    var subj = el('div', 'commit-subj big', c.subject)
+    head.appendChild(subj)
+    var hm = el('div', 'commit-meta')
+    hm.appendChild(el('span', 'hash', c.hash))
+    hm.appendChild(el('span', 'author', c.author + ' <' + c.email + '>'))
+    hm.appendChild(el('span', 'date', c.date))
+    head.appendChild(hm)
+    if ((c.refs || []).length) {
+      var refs = el('div', 'commit-refs')
+      c.refs.forEach(function (ref) {
+        refs.appendChild(el('span', 'ref-chip' + (/^tag:/.test(ref) ? ' tag' : ''), ref))
+      })
+      head.appendChild(refs)
     }
+    rdBody.appendChild(head)
+
+    // Full message body + file list arrive via the commit op; diffs via commitDiff.
+    rpc('commit', { hash: c.hash }).then(function (info) {
+      if (isErr(info)) return
+      if (info.commit && info.commit.body) {
+        rdBody.insertBefore(el('pre', 'commit-body', info.commit.body), head.nextSibling)
+      }
+      var files = el('div', 'commit-files')
+      ;(info.files || []).forEach(function (f) {
+        var row = el('div', 'file-row static')
+        row.appendChild(
+          el('span', 'st ' + (f.status || '?').toUpperCase(), (f.status || '?').toUpperCase())
+        )
+        row.appendChild(el('span', 'fp', f.orig ? f.orig + ' → ' + f.path : f.path))
+        files.appendChild(row)
+      })
+      rdBody.appendChild(files)
+      var diffBox = el('div', 'diff')
+      diffBox.appendChild(el('div', 'pane-empty', 'Loading diff…'))
+      rdBody.appendChild(diffBox)
+      rpc('commitDiff', { hash: c.hash }).then(function (d) {
+        clear(diffBox)
+        renderMultiDiffInto(diffBox, d)
+      })
+    })
   }
 
-  function renderDiff(target, r) {
-    clear(target)
+  /* Branches & worktrees */
+  function buildBranchesSection() {
+    var r = repo.branches
+    var x = section(
+      'branches',
+      'Branches & worktrees',
+      r && !isErr(r) ? (r.branches || []).length : null
+    )
+    if (!r) x.body.appendChild(paneEmpty('Loading…'))
+    else if (isErr(r)) x.body.appendChild(paneEmpty(r.error))
+    else {
+      ;(r.branches || []).forEach(function (b) {
+        var row = el('div', 'br-row' + (b.current ? ' current' : ''))
+        row.appendChild(el('span', 'br-name', (b.current ? '● ' : '') + b.name))
+        if (b.ahead || b.behind) {
+          var ab = el('span', 'br-ab')
+          if (b.ahead) ab.appendChild(el('span', 'ahead', '↑' + b.ahead))
+          if (b.behind) ab.appendChild(el('span', 'behind', ' ↓' + b.behind))
+          row.appendChild(ab)
+        }
+        row.appendChild(el('span', 'br-subj', b.subject || ''))
+        row.title = b.upstream ? 'tracks ' + b.upstream : 'no upstream'
+        x.body.appendChild(row)
+      })
+      if ((r.worktrees || []).length) {
+        x.body.appendChild(el('div', 'group-label', 'Worktrees (' + r.worktrees.length + ')'))
+        r.worktrees.forEach(function (w, wi) {
+          var row = el('div', 'wt-row')
+          row.appendChild(
+            el('span', 'br-name', w.branch || (w.detached ? '(detached)' : w.bare ? '(bare)' : '?'))
+          )
+          var note = worktreeNote(w, wi)
+          if (note) row.appendChild(el('span', 'wt-agent ' + note.cls, note.text))
+          row.appendChild(el('span', 'br-subj', w.path))
+          if (w.locked) row.appendChild(el('span', 'br-track', 'locked'))
+          x.body.appendChild(row)
+        })
+      }
+    }
+    return x.sec
+  }
+
+  // Which agent/session is on a worktree — best-effort from this repo's conventions
+  // (docs/MULTI_AGENT.md: one worktree + one feat/<topic> branch per parallel session).
+  function worktreeNote(w, index) {
+    if (cwd && normPath(w.path) === normPath(cwd)) {
+      return { cls: 'me', text: 'this conversation' }
+    }
+    if (index === 0) return { cls: '', text: 'primary checkout' }
+    if (w.branch && /^(feat|fix|wt)\//.test(w.branch)) {
+      return { cls: 'other', text: 'agent session · ' + w.branch.replace(/^[^/]+\//, '') }
+    }
+    return { cls: 'other', text: 'other session' }
+  }
+
+  /* Stashes (hidden when none) */
+  function buildStashSection() {
+    var r = repo.stashes
+    var list = r && !isErr(r) ? r.stashes || [] : []
+    if (r && !isErr(r) && !list.length) return null
+    var x = section('stashes', 'Stashes', list.length)
+    if (!r) x.body.appendChild(paneEmpty('Loading…'))
+    else if (isErr(r)) x.body.appendChild(paneEmpty(r.error))
+    else
+      list.forEach(function (st) {
+        var row = el('div', 'stash-row')
+        row.appendChild(el('span', 'hash', st.ref))
+        row.appendChild(el('span', 'br-subj', st.subject))
+        row.appendChild(el('span', 'date', relTime(st.date)))
+        row.addEventListener('click', function () {
+          rdTitle.textContent = st.ref
+          rdMeta.textContent = st.subject
+          clear(rdBody)
+          rdBody.appendChild(el('div', 'pane-empty', 'Loading stash diff…'))
+          rpc('stashDiff', { ref: st.ref }).then(function (d) {
+            clear(rdBody)
+            renderMultiDiffInto(rdBody, d)
+          })
+        })
+        x.body.appendChild(row)
+      })
+    return x.sec
+  }
+
+  /* Submodules (hidden when none) */
+  function buildSubmoduleSection() {
+    var r = repo.submodules
+    var list = r && !isErr(r) ? r.submodules || [] : []
+    if (!list.length) return null
+    var x = section('submodules', 'Submodules', list.length)
+    list.forEach(function (sm) {
+      var row = el('div', 'stash-row')
+      row.appendChild(el('span', 'sm-flag ' + sm.flag, sm.flag))
+      row.appendChild(el('span', 'br-name', sm.path))
+      row.appendChild(el('span', 'hash', sm.sha.slice(0, 7)))
+      if (sm.describe) row.appendChild(el('span', 'br-subj', sm.describe))
+      x.body.appendChild(row)
+    })
+    return x.sec
+  }
+
+  /* CI */
+  function buildCiSection() {
+    var r = repo.ci
+    var x = section('ci', 'CI (GitHub)', r && !isErr(r) ? (r.runs || []).length : null)
+    if (!r) x.body.appendChild(paneEmpty('Loading…'))
+    else if (isErr(r)) {
+      var msg =
+        r.error === 'gh not found'
+          ? 'GitHub CLI (gh) not installed — CI status unavailable.'
+          : r.error === 'not a git repository'
+            ? 'This folder is not a git repository.'
+            : 'gh: ' + r.error
+      x.body.appendChild(paneEmpty(msg))
+    } else if (!(r.runs || []).length) {
+      x.body.appendChild(paneEmpty('No workflow runs for this branch.'))
+    } else {
+      r.runs.forEach(function (run) {
+        var glyph = run.status === 'completed' ? (run.conclusion === 'success' ? '✓' : '✗') : '●'
+        var cls =
+          run.status !== 'completed'
+            ? 'run-live'
+            : run.conclusion === 'success'
+              ? 'run-ok'
+              : 'run-bad'
+        var row = el('div', 'ci-row')
+        row.appendChild(el('span', 'ci-glyph ' + cls, glyph))
+        var main = el('div', 'commit-main')
+        main.appendChild(
+          el('div', 'commit-subj', run.name + ' — ' + short(run.displayTitle || '', 60))
+        )
+        var meta = el('div', 'commit-meta')
+        meta.appendChild(el('span', 'author', run.headBranch || ''))
+        meta.appendChild(
+          el('span', 'date', (run.event || '') + ' · ' + relTime(run.updatedAt || run.createdAt))
+        )
+        meta.appendChild(el('span', 'hash', run.conclusion || run.status))
+        main.appendChild(meta)
+        row.appendChild(main)
+        if (run.url) {
+          var cp = el('span', 'turns-chip', 'copy url')
+          cp.title = run.url
+          cp.addEventListener('click', function (e) {
+            e.stopPropagation()
+            try {
+              navigator.clipboard.writeText(run.url)
+              cp.textContent = 'copied ✓'
+              setTimeout(function () {
+                cp.textContent = 'copy url'
+              }, 1500)
+            } catch (err) {
+              /* clipboard unavailable */
+            }
+          })
+          row.appendChild(cp)
+        }
+        x.body.appendChild(row)
+      })
+    }
+    return x.sec
+  }
+
+  /* ── diff rendering (shared) ───────────────────────────────────────────── */
+  function renderDiffInto(target, r) {
     if (isErr(r)) {
       target.appendChild(paneEmpty(r.error))
       return
@@ -468,6 +795,36 @@
       target.appendChild(paneEmpty('No changes to show.'))
       return
     }
+    appendHunks(target, r)
+    if (r.truncated) target.appendChild(el('div', 'pane-empty', '… diff truncated at 500KB …'))
+  }
+  function renderMultiDiffInto(target, d) {
+    if (isErr(d)) {
+      target.appendChild(paneEmpty(d.error))
+      return
+    }
+    var files = (d && d.files) || []
+    if (!files.length) {
+      target.appendChild(paneEmpty('No changes to show.'))
+      return
+    }
+    files.forEach(function (f) {
+      var head = el('div', 'diff-file-head')
+      head.appendChild(
+        el(
+          'span',
+          'fp',
+          f.oldPath && f.oldPath !== f.file ? f.oldPath + ' → ' + f.file : f.file || ''
+        )
+      )
+      head.appendChild(el('span', 'diff-counts', '+' + f.additions + ' −' + f.deletions))
+      target.appendChild(head)
+      if (f.binary) target.appendChild(paneEmpty('Binary file.'))
+      else appendHunks(target, f)
+    })
+    if (d.truncated) target.appendChild(el('div', 'pane-empty', '… diff truncated at 500KB …'))
+  }
+  function appendHunks(target, r) {
     r.hunks.forEach(function (h) {
       target.appendChild(el('div', 'hunk-head', h.header))
       h.lines.forEach(function (ln) {
@@ -484,197 +841,359 @@
         target.appendChild(row)
       })
     })
-    if (r.truncated) target.appendChild(el('div', 'pane-empty', '… diff truncated at 500KB …'))
   }
 
-  // Reverse cross-link: Changes turns-chip → Timeline filtered to entries touching this file.
-  function showTurnsForFile(path) {
-    setTab('timeline')
-    // Expand all turns that touched the file; collapse others; keep filter but highlight scroll.
-    var idx = fileIndex[relPath(path)] || {}
-    turns.forEach(function (t) {
-      collapsed[t.id] = !idx[t.index]
-    })
-    renderTimeline()
+  /* ═══════════════════════ AGENT LOG ══════════════════════════════════════ */
+  var LEVEL_NAMES = { 1: 'turns', 2: 'tools', 3: 'all', 4: 'raw' }
+  function tierOf(kind) {
+    if (kind === 'result' || kind === 'error') return 1
+    if (kind === 'tool_use' || kind === 'tool_result' || kind === 'tokens') return 2
+    return 3
   }
 
-  $('#ch-refresh').addEventListener('click', refreshChanges)
-
-  /* ═══════════════════════ HISTORY ════════════════════════════════════════ */
-  function refreshHistory() {
-    rpc('log', { limit: 200 }).then(function (r) {
-      renderHistory(r)
-    })
-  }
-  function renderHistory(r) {
-    clear(hiList)
-    if (isErr(r)) {
-      hiList.appendChild(paneEmpty(r.error))
-      clear(hiDetail)
-      return
-    }
-    var commits = r.commits || []
-    if (!commits.length) {
-      hiList.appendChild(paneEmpty('No commits.'))
-      return
-    }
-    commits.forEach(function (c) {
-      var inSession = c.date && Date.parse(c.date) >= sessionStart
-      var row = el('div', 'commit-row' + (inSession ? ' session' : ''))
-      var subj = el('div', 'commit-subj')
-      subj.textContent = c.subject
-      if (inSession) {
-        var badge = el('span', 'session-badge', 'this session')
-        subj.appendChild(document.createTextNode(' '))
-        subj.appendChild(badge)
+  function ingest(ev, live) {
+    if (!ev || typeof ev !== 'object') return null
+    var k = ev.kind
+    // Coalesce consecutive text/thinking deltas of the same message into one row
+    // (keeps the row at its first-delta position — order stays exact).
+    if ((k === 'text' || k === 'thinking') && events.length) {
+      var last = events[events.length - 1]
+      if (last.ev.kind === k && last.ev.messageId === ev.messageId) {
+        last.text = (last.text || '') + (ev.delta || '')
+        return last
       }
-      row.appendChild(subj)
-      var meta = el('div', 'commit-meta')
-      meta.appendChild(el('span', 'hash', c.short))
-      meta.appendChild(el('span', 'author', c.author))
-      meta.appendChild(el('span', 'date', (c.date || '').slice(0, 10)))
-      row.appendChild(meta)
-      row.addEventListener('click', function () {
-        Array.prototype.forEach.call(hiList.querySelectorAll('.commit-row'), function (x) {
-          x.classList.toggle('selected', x === row)
-        })
-        selectCommit(c.hash)
-      })
-      hiList.appendChild(row)
-    })
-  }
-  function selectCommit(hash) {
-    state.selectedCommit = hash
-    hiTitle.textContent = short(hash, 10)
-    clear(hiDetail)
-    hiDetail.appendChild(el('div', 'pane-empty', 'Loading commit…'))
-    rpc('commit', { hash: hash }).then(function (info) {
-      clear(hiDetail)
-      if (isErr(info)) {
-        hiDetail.appendChild(paneEmpty(info.error))
-        return
-      }
-      var c = info.commit
-      if (c) {
-        hiTitle.textContent = short(c.subject, 60)
-        var head = el('div', 'commit-detail-head')
-        head.appendChild(el('div', 'commit-subj', c.subject))
-        var hm = el('div', 'commit-meta')
-        hm.appendChild(el('span', 'hash', c.hash))
-        hm.appendChild(el('span', 'author', c.author + ' <' + c.email + '>'))
-        hm.appendChild(el('span', 'date', c.date))
-        head.appendChild(hm)
-        hiDetail.appendChild(head)
-      }
-      ;(info.files || []).forEach(function (f) {
-        var row = el('div', 'file-row')
-        var st = (f.status || '?').toUpperCase()
-        row.appendChild(el('span', 'st ' + st, st))
-        row.appendChild(el('span', 'fp', f.orig ? f.orig + ' → ' + f.path : f.path))
-        hiDetail.appendChild(row)
-      })
-      // The commit's own diff, reusing the Changes renderer.
-      var diffBox = el('div', 'diff')
-      hiDetail.appendChild(diffBox)
-      diffBox.appendChild(el('div', 'pane-empty', 'Loading diff…'))
-      rpc('diff', { commit: hash }).then(function (d) {
-        renderDiff(diffBox, d)
-      })
-    })
-  }
-  $('#hi-refresh').addEventListener('click', refreshHistory)
-
-  /* ═══════════════════════ BRANCHES (read-only) ═══════════════════════════ */
-  function refreshBranches() {
-    rpc('branches').then(function (r) {
-      renderBranches(r)
-    })
-  }
-  function renderBranches(r) {
-    clear(brList)
-    if (isErr(r)) {
-      brList.appendChild(paneEmpty(r.error))
-      return
     }
-    brList.appendChild(el('div', 'br-section-title', 'Branches'))
-    ;(r.branches || []).forEach(function (b) {
-      var row = el('div', 'br-row' + (b.current ? ' current' : ''))
-      row.appendChild(el('span', 'br-name', (b.current ? '● ' : '') + b.name))
-      if (b.upstream) {
-        row.appendChild(el('span', 'br-track', '→ ' + b.upstream))
-        if (b.ahead || b.behind) {
-          var ab = el('span', 'br-ab')
-          if (b.ahead) ab.appendChild(el('span', 'ahead', '↑' + b.ahead + ' '))
-          if (b.behind) ab.appendChild(el('span', 'behind', '↓' + b.behind))
-          row.appendChild(ab)
+    var entry = {
+      seq: ++seqNo,
+      ts: typeof ev.ts === 'number' ? ev.ts : live ? Date.now() : null,
+      ev: ev,
+      text: k === 'text' || k === 'thinking' ? ev.delta || '' : null
+    }
+    events.push(entry)
+    if (k === 'tool_use') {
+      toolStarts[ev.toolUseId] = { entry: entry, at: Date.now() }
+      var fp = toolFile(ev.name, ev.input)
+      if (fp) {
+        var p = normPath(fp)
+        entry.file = fp
+        fileIndex[p] = (fileIndex[p] || 0) + 1
+      }
+    } else if (k === 'tool_result') {
+      var t = toolStarts[ev.toolUseId]
+      if (t) {
+        entry.forTool = t.entry
+        if (live) entry.durationMs = Date.now() - t.at
+      }
+    }
+    return entry
+  }
+
+  function toolFile(name, input) {
+    if (!input || typeof input !== 'object') return null
+    var fileTools = { Write: 1, Edit: 1, MultiEdit: 1, NotebookEdit: 1, Read: 1 }
+    if (fileTools[name]) return input.file_path || input.path || input.filePath || null
+    return null
+  }
+
+  function passes(entry) {
+    var ev = entry.ev
+    if (tierOf(ev.kind) > state.level && state.level < 3) return false
+    if (state.level >= 3) {
+      /* L3/L4 show everything */
+    }
+    var f = state.filter
+    if (f === 'tools' && !(ev.kind === 'tool_use' || ev.kind === 'tool_result')) return false
+    if (f === 'files' && !entry.file && !(entry.forTool && entry.forTool.file)) return false
+    if (f === 'errors') {
+      var isError =
+        ev.kind === 'error' ||
+        (ev.kind === 'tool_result' && ev.ok === false) ||
+        (ev.kind === 'result' && ev.isError)
+      if (!isError) return false
+    }
+    if (f === 'atelier') {
+      var atelierKinds = {
+        permission_request: 1,
+        permission_resolved: 1,
+        question_request: 1,
+        question_resolved: 1,
+        permission_mode: 1,
+        status: 1,
+        auto_resume: 1,
+        background: 1,
+        system_init: 1,
+        task_activity: 1
+      }
+      if (!atelierKinds[ev.kind]) return false
+    }
+    if (state.search) {
+      var hay = (summaryFor(entry) + ' ' + ev.kind + ' ' + (entry.file || '')).toLowerCase()
+      if (hay.indexOf(state.search.toLowerCase()) < 0) return false
+    }
+    return true
+  }
+
+  function summaryFor(entry) {
+    var ev = entry.ev
+    var k = ev.kind
+    if (k === 'tool_use') {
+      var input = ev.input
+      var hint = ''
+      if (entry.file) hint = String(entry.file)
+      else if (input && typeof input === 'object') {
+        if (ev.name === 'Bash') hint = input.command || ''
+        else if (input.pattern || input.query) hint = input.pattern || input.query
+        else if (input.description) hint = input.description
+        else {
+          try {
+            hint = JSON.stringify(input)
+          } catch (e) {
+            hint = ''
+          }
         }
       }
-      row.appendChild(el('span', 'br-subj', b.subject || ''))
-      brList.appendChild(row)
-    })
-    if (!(r.branches || []).length) brList.appendChild(paneEmpty('No branches.'))
-
-    brList.appendChild(el('div', 'br-section-title', 'Worktrees'))
-    ;(r.worktrees || []).forEach(function (w) {
-      var row = el('div', 'wt-row')
-      row.appendChild(
-        el('span', 'br-name', w.branch || (w.detached ? '(detached)' : w.bare ? '(bare)' : '?'))
+      return ev.name + '  ' + short(hint, 100)
+    }
+    if (k === 'tool_result') {
+      var base =
+        (ev.ok === false ? 'failed' : 'ok') +
+        (entry.durationMs != null ? ' · ' + fmtDur(entry.durationMs) : '')
+      var out = ev.output != null ? short(String(ev.output).trim(), 80) : ''
+      return base + (out ? ' · ' + out : '')
+    }
+    if (k === 'text' || k === 'thinking') return short((entry.text || '').trim(), 140)
+    if (k === 'result') {
+      var bits = []
+      if (ev.durationMs != null) bits.push(fmtDur(ev.durationMs))
+      if (ev.costUsd != null) bits.push('$' + Number(ev.costUsd).toFixed(4))
+      if (ev.isError) bits.push('ERROR')
+      return 'turn finished' + (bits.length ? ' · ' + bits.join(' · ') : '')
+    }
+    if (k === 'tokens')
+      return (
+        (ev.output != null ? ev.output + ' out' : '') +
+        (ev.input != null ? ' / ' + ev.input + ' in' : '')
       )
-      row.appendChild(el('span', 'br-subj', w.path))
-      if (w.locked) row.appendChild(el('span', 'br-track', 'locked'))
-      brList.appendChild(row)
-    })
-    if (!(r.worktrees || []).length) brList.appendChild(paneEmpty('No worktrees.'))
+    if (k === 'error') return short(ev.message || 'error', 160)
+    if (k === 'permission_request')
+      return short(ev.title || ev.toolName || 'permission needed', 100)
+    if (k === 'question_request') return 'question for you'
+    if (k === 'permission_resolved' || k === 'question_resolved') return 'resolved'
+    if (k === 'status') return short(ev.text || ev.status || '', 80)
+    if (k === 'system_init') return 'session initialized'
+    try {
+      return short(JSON.stringify(ev), 100)
+    } catch (e) {
+      return ''
+    }
   }
-  $('#br-refresh').addEventListener('click', refreshBranches)
 
-  /* ── shared empty-state ────────────────────────────────────────────────── */
-  function paneEmpty(msg) {
-    if (msg === 'not a git repository')
-      return el('div', 'pane-empty', 'This folder is not a git repository.')
-    if (msg === 'git not found')
-      return el('div', 'pane-empty', 'git is not installed or not on PATH.')
-    return el('div', 'pane-empty', msg || 'Nothing to show.')
+  function badgeClass(kind) {
+    if (kind === 'tool_use') return 'b-tool'
+    if (kind === 'tool_result') return 'b-toolr'
+    if (kind === 'result') return 'b-result'
+    if (kind === 'error') return 'b-err'
+    if (kind === 'text') return 'b-text'
+    if (kind === 'thinking') return 'b-think'
+    if (/^permission|^question/.test(kind)) return 'b-perm'
+    return 'b-sys'
   }
+
+  function agentRow(entry) {
+    var ev = entry.ev
+    var row = el('div', 'ag-row')
+    if (ev.kind === 'error' || (ev.kind === 'tool_result' && ev.ok === false))
+      row.classList.add('err')
+    row.appendChild(el('span', 'ag-seq', '#' + entry.seq))
+    row.appendChild(el('span', 'ag-time', entry.ts ? clock(entry.ts) : '·'))
+    row.appendChild(el('span', 'ag-kind ' + badgeClass(ev.kind), ev.kind))
+    row.appendChild(el('span', 'ag-sum', summaryFor(entry)))
+    if (entry.file) {
+      var vd = el('span', 'viewdiff', 'view diff')
+      vd.addEventListener('click', function (e) {
+        e.stopPropagation()
+        openFileInRepo(entry.file)
+      })
+      row.appendChild(vd)
+    }
+    if (state.level === 4) {
+      row.classList.add('expandable')
+      row.addEventListener('click', function () {
+        var next = row.nextSibling
+        if (next && next.classList && next.classList.contains('ag-raw')) {
+          next.remove()
+          return
+        }
+        var pre = el('pre', 'ag-raw')
+        try {
+          pre.textContent = JSON.stringify(ev, null, 2)
+        } catch (e) {
+          pre.textContent = String(ev)
+        }
+        row.after(pre)
+      })
+    }
+    return row
+  }
+
+  function renderAgent() {
+    clear(agList)
+    if (!events.length) {
+      agList.appendChild(el('div', 'pane-empty', 'No agent activity yet in this conversation.'))
+      return
+    }
+    var frag = document.createDocumentFragment()
+    var shown = 0
+    events.forEach(function (entry) {
+      if (!passes(entry)) return
+      shown++
+      frag.appendChild(agentRow(entry))
+    })
+    if (!shown) agList.appendChild(el('div', 'pane-empty', 'Nothing at this verbosity/filter.'))
+    else agList.appendChild(frag)
+    if (state.follow) agList.scrollTop = agList.scrollHeight
+  }
+
+  function appendLive(entry) {
+    if (state.tab !== 'agent' || !entry) return
+    if (!passes(entry)) return
+    var empty = agList.querySelector('.pane-empty')
+    if (empty) empty.remove()
+    agList.appendChild(agentRow(entry))
+    if (state.follow) agList.scrollTop = agList.scrollHeight
+  }
+
+  /* Cross-links */
+  function openFileInRepo(file) {
+    setTab('repo')
+    state.sections.worktree = false
+    persist()
+    // After the status refresh renders, click the matching row (suffix match — agent
+    // paths are absolute, git paths repo-relative).
+    setTimeout(function () {
+      var rows = navEl.querySelectorAll('.file-row')
+      var want = normPath(file)
+      for (var i = 0; i < rows.length; i++) {
+        var fp = rows[i].querySelector('.fp')
+        var p = normPath(fp ? fp.title || fp.textContent : '')
+        if (p && (want.slice(-p.length) === p || p.slice(-want.length) === want)) {
+          rows[i].click()
+          return
+        }
+      }
+    }, 350)
+  }
+  function showFileInAgent(path) {
+    setTab('agent')
+    if (state.level < 2) setLevel(2)
+    agSearch.value = path.split('/').pop()
+    state.search = agSearch.value
+    renderAgent()
+  }
+
+  /* Agent bar wiring */
+  function setLevel(lv) {
+    state.level = lv
+    agLevel.value = String(lv)
+    agLevelName.textContent = LEVEL_NAMES[lv]
+    persist()
+    renderAgent()
+  }
+  agLevel.addEventListener('input', function () {
+    setLevel(parseInt(agLevel.value, 10) || 2)
+  })
+  $('#ag-filters').addEventListener('click', function (e) {
+    var c = e.target.closest('.chip')
+    if (!c) return
+    state.filter = c.getAttribute('data-filter')
+    Array.prototype.forEach.call(this.children, function (b) {
+      b.classList.toggle('active', b === c)
+    })
+    persist()
+    renderAgent()
+  })
+  var searchDeb = null
+  agSearch.addEventListener('input', function () {
+    clearTimeout(searchDeb)
+    searchDeb = setTimeout(function () {
+      state.search = agSearch.value
+      renderAgent()
+    }, 150)
+  })
+  agPin.addEventListener('click', function () {
+    state.follow = !state.follow
+    agPin.classList.toggle('active', state.follow)
+    if (state.follow) agList.scrollTop = agList.scrollHeight
+  })
+  agList.addEventListener('scroll', function () {
+    // Scrolling up unpins; returning to the bottom re-pins.
+    var atBottom = agList.scrollTop + agList.clientHeight >= agList.scrollHeight - 8
+    if (!atBottom && state.follow) {
+      state.follow = false
+      agPin.classList.remove('active')
+    } else if (atBottom && !state.follow) {
+      state.follow = true
+      agPin.classList.add('active')
+    }
+  })
 
   /* ═══════════════════════ WIRING ═════════════════════════════════════════ */
-  // Live agent events: ingest + re-render the timeline; a file-touching tool triggers a Changes refresh.
   atelier.agent.onEvent(function (ev) {
-    ingest(ev)
-    if (state.tab === 'timeline') renderTimeline()
-    if (ev && ev.kind === 'tool_result') {
-      var t = findTool(ev.toolUseId)
-      if (t && t.file && state.tab === 'changes') refreshChanges()
+    var entry = ingest(ev, true)
+    appendLive(entry)
+    // A completed file-writing tool refreshes the working tree when Repo is visible.
+    if (ev && ev.kind === 'tool_result' && state.tab === 'repo') {
+      var t = toolStarts[ev.toolUseId]
+      if (t && t.entry.file) {
+        rpc('status').then(function (r) {
+          repo.status = r
+          renderHealth()
+          renderNav()
+        })
+      }
     }
   })
 
   // Pushed refresh from the backend's debounced flow:status timer.
   atelier.data.subscribe('flow:status', function (status) {
-    if (state.tab === 'changes') renderChanges(status)
-    else lastStatus = status // cache for when Changes is next shown
+    repo.status = status
+    if (state.tab === 'repo') {
+      renderHealth()
+      renderNav()
+    }
   })
 
-  // Mount: restore UI state, backfill the timeline, show the last tab.
   var mounted = false
   function mount() {
-    if (mounted) return // guard: 'load' hook + the direct call must not double-run
+    if (mounted) return
     mounted = true
+    atelier.agent
+      .info()
+      .then(function (info) {
+        if (info && info.cwd) cwd = info.cwd
+      })
+      .catch(function () {})
     atelier.storage.get('ui').then(function (saved) {
       if (saved && typeof saved === 'object') {
-        if (saved.tab) state.tab = saved.tab
+        if (saved.tab === 'repo' || saved.tab === 'agent') state.tab = saved.tab
+        if (saved.level >= 1 && saved.level <= 4) state.level = saved.level
         if (saved.filter) state.filter = saved.filter
+        if (saved.sections && typeof saved.sections === 'object') state.sections = saved.sections
         if (saved.selectedFile) state.selectedFile = saved.selectedFile
         state.selectedStaged = !!saved.selectedStaged
       }
-      // reflect restored filter chip
-      Array.prototype.forEach.call($('#tl-filters').children, function (b) {
+      agLevel.value = String(state.level)
+      agLevelName.textContent = LEVEL_NAMES[state.level]
+      agPin.classList.toggle('active', state.follow)
+      Array.prototype.forEach.call($('#ag-filters').children, function (b) {
         b.classList.toggle('active', b.getAttribute('data-filter') === state.filter)
       })
-      // backfill timeline
       atelier.agent.history(1000).then(function (hist) {
-        if (Array.isArray(hist)) hist.forEach(ingest)
-        setTab(state.tab) // renders the active tab (and triggers its git refresh)
-        if (state.tab !== 'timeline') renderTimeline()
+        if (Array.isArray(hist))
+          hist.forEach(function (ev) {
+            ingest(ev, false)
+          })
+        setTab(state.tab)
       })
     })
   }

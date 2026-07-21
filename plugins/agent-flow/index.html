@@ -3,22 +3,19 @@
   <head>
     <meta charset="utf-8" />
     <!--
-      Agent Flow — one pane, four tabs (Timeline / Changes / History / Branches).
+      Agent Flow — TWO tabs (2026-07-21 rework; git is the primary pillar).
 
-      Host runtime injects window.atelier (all methods async). MUST be the first element in <head>;
-      no external network / no CDN.
+      - Repo: full git exploration — health strip (branch/dirty/last commit/CI/worktrees),
+        working tree + diffs, commit history with graph gutter/refs/full message + per-file
+        commit diffs, branches & worktrees annotated with which agent session is where,
+        stashes, submodules, and GitHub CI status via `gh`. All read-only.
+      - Agent: the debug log — every AgentEvent in exact arrival order with a tiered
+        verbosity slider (turns → +tools → +everything → +raw JSON), filter chips, search.
 
-      - Timeline: this conversation's AgentEvent trace, turn-grouped (agent.history backfill +
-        agent.onEvent live). Tool calls with one-line summaries/durations/errors, permission/question
-        blocks, a per-turn result/token line, filter chips, and "view diff" links that jump to Changes.
-      - Changes: staged/unstaged/untracked list + a per-file unified diff, refreshed on file-write
-        agent events, tab focus, a manual button, and the backend's debounced flow:status push.
-      - History: recent commits (cap 200) + commit details + per-commit diff; session-window commits
-        are marked.
-      - Branches: branches + worktrees, READ-ONLY (destructive git stays with the agent/user in chat).
-
-      All git data comes from the service backend (backend.js) over atelier.backend.call — the pane
-      never parses .git itself. A non-git cwd yields a friendly empty state, not an error.
+      Host runtime injects window.atelier (all methods async). MUST be the first element in
+      <head>; no external network / no CDN. All git/gh output is parsed in the service
+      backend (backend.js + gitParse.cjs); the pane never parses .git itself. A non-git cwd
+      or missing gh yields friendly empty states, never errors.
     -->
     <script src="atelier-plugin://__runtime__/atelier.js"></script>
     <title>Agent Flow</title>
@@ -27,73 +24,48 @@
   <body>
     <div id="app">
       <nav id="tabs" role="tablist">
-        <button class="tab" data-tab="timeline" role="tab">Timeline</button>
-        <button class="tab" data-tab="changes" role="tab">Changes</button>
-        <button class="tab" data-tab="history" role="tab">History</button>
-        <button class="tab" data-tab="branches" role="tab">Branches</button>
+        <button class="tab" data-tab="repo" role="tab">Repo</button>
+        <button class="tab" data-tab="agent" role="tab">Agent</button>
       </nav>
 
-      <!-- Timeline -->
-      <section class="panel" data-panel="timeline">
-        <div class="toolbar">
-          <div class="chips" id="tl-filters">
+      <!-- Repo (primary) -->
+      <section class="panel" data-panel="repo">
+        <div id="health"></div>
+        <div class="split">
+          <div class="nav-col">
+            <div class="scroll" id="repo-nav"></div>
+          </div>
+          <div class="detail-col">
+            <div class="toolbar">
+              <span class="col-title" id="rd-title">Select something on the left</span>
+              <span class="rd-meta" id="rd-meta"></span>
+            </div>
+            <div class="scroll" id="rd-body"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Agent (debug log) -->
+      <section class="panel" data-panel="agent">
+        <div class="toolbar agent-bar">
+          <span class="vb-label">verbosity</span>
+          <input id="ag-level" type="range" min="1" max="4" step="1" value="2" />
+          <span class="vb-name" id="ag-level-name">tools</span>
+          <span class="bar-sep"></span>
+          <div class="chips" id="ag-filters">
             <button class="chip active" data-filter="all">All</button>
             <button class="chip" data-filter="tools">Tools</button>
             <button class="chip" data-filter="files">Files</button>
             <button class="chip" data-filter="errors">Errors</button>
+            <button class="chip" data-filter="atelier">Atelier</button>
           </div>
+          <input id="ag-search" type="text" placeholder="search…" />
+          <button class="btn" id="ag-pin" title="Keep scrolled to the newest event">
+            ⇊ follow
+          </button>
         </div>
-        <div class="scroll" id="tl-list"></div>
+        <div class="scroll" id="ag-list"></div>
       </section>
-
-      <!-- Changes -->
-      <section class="panel" data-panel="changes">
-        <div class="split">
-          <div class="list-col">
-            <div class="toolbar">
-              <span class="col-title" id="ch-branch">—</span>
-              <button class="btn" id="ch-refresh" title="Refresh">Refresh</button>
-            </div>
-            <div class="scroll" id="ch-files"></div>
-          </div>
-          <div class="diff-col">
-            <div class="toolbar">
-              <span class="col-title" id="ch-file">Select a file</span>
-              <span class="diff-turns" id="ch-turns"></span>
-            </div>
-            <div class="scroll diff" id="ch-diff"></div>
-          </div>
-        </div>
-      </section>
-
-      <!-- History -->
-      <section class="panel" data-panel="history">
-        <div class="split">
-          <div class="list-col">
-            <div class="toolbar">
-              <span class="col-title">Recent commits</span>
-              <button class="btn" id="hi-refresh" title="Refresh">Refresh</button>
-            </div>
-            <div class="scroll" id="hi-list"></div>
-          </div>
-          <div class="diff-col">
-            <div class="toolbar"><span class="col-title" id="hi-title">Select a commit</span></div>
-            <div class="scroll" id="hi-detail"></div>
-          </div>
-        </div>
-      </section>
-
-      <!-- Branches -->
-      <section class="panel" data-panel="branches">
-        <div class="toolbar">
-          <span class="col-title">Branches &amp; worktrees</span>
-          <span class="readonly-note">read-only</span>
-          <button class="btn" id="br-refresh" title="Refresh">Refresh</button>
-        </div>
-        <div class="scroll" id="br-list"></div>
-      </section>
-
-      <div id="empty" class="empty hidden"></div>
     </div>
 
     <script src="atelier-plugin://agent-flow/flow.js"></script>

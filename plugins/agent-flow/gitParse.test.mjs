@@ -7,9 +7,12 @@ const require = createRequire(import.meta.url)
 const {
   parseStatus,
   parseLog,
+  parseStashList,
+  parseSubmodules,
   parseBranches,
   parseWorktrees,
-  parseDiff
+  parseDiff,
+  parseDiffMulti
 } = require('./gitParse.cjs')
 
 const NUL = '\x00'
@@ -134,6 +137,80 @@ describe('parseLog (US/RS-delimited pretty format)', () => {
   it('empty input → empty array', () => {
     expect(parseLog('')).toEqual([])
     expect(parseLog(null)).toEqual([])
+  })
+
+  it('old 7-field records get empty refs/body (backward compat)', () => {
+    const raw = rec(['h', 's', 'a', 'e', '2026-01-01T00:00:00Z', 'subj', 'p'])
+    const r = parseLog(raw)
+    expect(r[0].refs).toEqual([])
+    expect(r[0].body).toBe('')
+  })
+
+  it('parses trailing refs (%D) and multi-line body (%b)', () => {
+    const raw = rec([
+      'h1',
+      'h1s',
+      'a',
+      'e',
+      '2026-01-01T00:00:00Z',
+      'feat: subject',
+      'p1',
+      'HEAD -> main, origin/main, tag: v1.2',
+      'Body line one.\nBody line two.\n'
+    ])
+    const r = parseLog(raw)
+    expect(r[0].refs).toEqual(['HEAD -> main', 'origin/main', 'tag: v1.2'])
+    expect(r[0].body).toBe('Body line one.\nBody line two.')
+  })
+})
+
+describe('parseStashList (US/RS-delimited)', () => {
+  it('parses refs, dates, and subjects', () => {
+    const raw =
+      US +
+      'stash@{0}' +
+      US +
+      '2026-07-21T01:00:00+00:00' +
+      US +
+      'WIP on main: 1a2b3c4 subject' +
+      RS +
+      US +
+      'stash@{1}' +
+      US +
+      '2026-07-20T00:00:00+00:00' +
+      US +
+      'On feat/x: custom message' +
+      RS
+    const r = parseStashList(raw)
+    expect(r).toHaveLength(2)
+    expect(r[0]).toMatchObject({ ref: 'stash@{0}', index: 0 })
+    expect(r[1]).toMatchObject({ index: 1, subject: 'On feat/x: custom message' })
+  })
+
+  it('empty input → empty array', () => {
+    expect(parseStashList('')).toEqual([])
+    expect(parseStashList(undefined)).toEqual([])
+  })
+})
+
+describe('parseSubmodules (submodule status)', () => {
+  it('parses sync/modified/uninitialized/conflict flags', () => {
+    const raw = [
+      ' 1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d vendor/lib (v1.0)',
+      '+2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e vendor/dirty (v1.1-2-gabc)',
+      '-3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f vendor/uninit',
+      'U4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f70 vendor/conflict (broken)'
+    ].join('\n')
+    const r = parseSubmodules(raw)
+    expect(r).toHaveLength(4)
+    expect(r[0]).toMatchObject({ flag: 'ok', path: 'vendor/lib', describe: 'v1.0' })
+    expect(r[1].flag).toBe('modified')
+    expect(r[2]).toMatchObject({ flag: 'uninit', describe: '' })
+    expect(r[3].flag).toBe('conflict')
+  })
+
+  it('empty input → empty array', () => {
+    expect(parseSubmodules('')).toEqual([])
   })
 })
 
@@ -279,5 +356,51 @@ describe('parseDiff (unified)', () => {
     const r = parseDiff('')
     expect(r.hunks).toEqual([])
     expect(r.binary).toBe(false)
+  })
+})
+
+describe('parseDiffMulti (commit/stash diffs spanning files)', () => {
+  it('splits a two-file diff into per-file sections', () => {
+    const raw = [
+      'diff --git a/one.ts b/one.ts',
+      '--- a/one.ts',
+      '+++ b/one.ts',
+      '@@ -1 +1 @@',
+      '-a',
+      '+b',
+      'diff --git a/two.md b/two.md',
+      '--- a/two.md',
+      '+++ b/two.md',
+      '@@ -1 +1,2 @@',
+      ' keep',
+      '+added'
+    ].join('\n')
+    const r = parseDiffMulti(raw)
+    expect(r.files).toHaveLength(2)
+    expect(r.files[0].file).toBe('one.ts')
+    expect(r.files[0].additions).toBe(1)
+    expect(r.files[0].deletions).toBe(1)
+    expect(r.files[1].file).toBe('two.md')
+    expect(r.files[1].additions).toBe(1)
+  })
+
+  it('binary sections are kept with their flag', () => {
+    const raw = [
+      'diff --git a/img.png b/img.png',
+      'Binary files a/img.png and b/img.png differ',
+      'diff --git a/t.txt b/t.txt',
+      '--- a/t.txt',
+      '+++ b/t.txt',
+      '@@ -1 +1 @@',
+      '-x',
+      '+y'
+    ].join('\n')
+    const r = parseDiffMulti(raw)
+    expect(r.files[0].binary).toBe(true)
+    expect(r.files[1].file).toBe('t.txt')
+  })
+
+  it('empty input → empty files array', () => {
+    expect(parseDiffMulti('').files).toEqual([])
   })
 })

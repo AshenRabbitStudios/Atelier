@@ -208,6 +208,65 @@
         margin-top: 4px;
         min-height: 12px;
       }
+      /* ---- setup help ---- */
+      button.help-btn {
+        flex: 0 0 auto;
+        width: 18px;
+        height: 18px;
+        padding: 0;
+        border-radius: 50%;
+        font-size: 11px;
+        line-height: 1;
+        color: var(--dim, #8b97ae);
+        border-color: var(--border, #252b37);
+      }
+      button.help-btn:hover,
+      button.help-btn.open {
+        color: var(--accent, #5b9cff);
+        border-color: var(--accent, #5b9cff);
+      }
+      .help-box {
+        margin: 6px 0 4px;
+        padding: 7px 9px;
+        border: 1px solid var(--border, #252b37);
+        border-left: 3px solid var(--accent, #5b9cff);
+        border-radius: 4px;
+        background: var(--surface, #14171e);
+        font-size: 11px;
+        line-height: 1.5;
+        color: var(--dim, #8b97ae);
+      }
+      .help-box .help-summary {
+        color: var(--text, #e7eaf0);
+        margin-bottom: 4px;
+      }
+      .help-box ol {
+        margin: 0 0 4px;
+        padding-left: 18px;
+      }
+      .help-box li {
+        margin: 2px 0;
+      }
+      .help-box .help-note {
+        color: var(--faint, #5e6677);
+        font-size: 10px;
+      }
+      .field-hint {
+        margin: -2px 0 4px 94px;
+        font-size: 10px;
+        color: var(--faint, #5e6677);
+        line-height: 1.4;
+      }
+      h2 .help-btn {
+        margin-left: 6px;
+        vertical-align: middle;
+      }
+      .section-help {
+        display: none;
+      }
+      .section-help.open {
+        display: block;
+      }
     </style>
   </head>
   <body>
@@ -237,16 +296,52 @@
             <option value="pushover">Pushover</option>
           </select>
           <button id="add-btn" type="button">+ Add channel</button>
+          <button id="add-help-btn" class="help-btn" type="button" title="What are these?">
+            ?
+          </button>
         </div>
+        <div id="add-help" class="help-box section-help"></div>
       </section>
 
       <section>
-        <h2>Auto-ping on</h2>
+        <h2>
+          Auto-ping on<button
+            class="help-btn"
+            type="button"
+            title="How auto-pings work"
+            data-help="toggles-help"
+          >
+            ?
+          </button>
+        </h2>
+        <div id="toggles-help" class="help-box section-help">
+          <div class="help-summary">When Atelier pings you on its own</div>
+          Auto-pings fire from this pane, so they only work once the pane has been opened in this
+          session (it can stay in a background tab). Each class fires at most once per occurrence:
+          one ping per finished turn, one per unresolved permission/question (re-armed when you
+          answer). The agent's own <code>notify_user</code> tool is independent — it works even with
+          the pane closed and ignores these toggles except "Agent-initiated".
+        </div>
         <div class="toggles" id="toggles"></div>
       </section>
 
       <section>
-        <h2>Quiet hours</h2>
+        <h2>
+          Quiet hours<button
+            class="help-btn"
+            type="button"
+            title="How quiet hours work"
+            data-help="quiet-help"
+          >
+            ?
+          </button>
+        </h2>
+        <div id="quiet-help" class="help-box section-help">
+          <div class="help-summary">Silence auto-pings on a schedule</div>
+          Times are local, 24-hour HH:MM. A window may wrap midnight (22:00 to 08:00). Only
+          auto-pings are suppressed — <code>notify_user</code> from the agent always goes through,
+          on the theory that if it explicitly decided to wake you, it should.
+        </div>
         <div class="quiet-row">
           <label class="row"><input type="checkbox" id="quiet-on" /> enabled</label>
           <input type="text" id="quiet-start" placeholder="22:00" />
@@ -371,7 +466,27 @@
         enabled.appendChild(cb)
         enabled.appendChild(document.createTextNode('on'))
         head.appendChild(enabled)
+
+        // Setup help: a ? that expands concrete how-to steps for this channel type.
+        const helpBox = buildHelpBox(CH.HELP && CH.HELP[c.type])
+        if (helpBox) {
+          const helpBtn = document.createElement('button')
+          helpBtn.type = 'button'
+          helpBtn.className = 'help-btn'
+          helpBtn.textContent = '?'
+          helpBtn.title = 'How to set up ' + c.type
+          helpBtn.addEventListener('click', () => {
+            const open = helpBox.style.display !== 'block'
+            helpBox.style.display = open ? 'block' : 'none'
+            helpBtn.classList.toggle('open', open)
+          })
+          head.appendChild(helpBtn)
+        }
         wrap.appendChild(head)
+        if (helpBox) {
+          helpBox.style.display = 'none'
+          wrap.appendChild(helpBox)
+        }
 
         c.config = c.config || {}
         fieldsFor(c.type).forEach((f) => {
@@ -392,6 +507,12 @@
           })
           label.appendChild(inp)
           wrap.appendChild(label)
+          if (f.hint) {
+            const hint = document.createElement('div')
+            hint.className = 'field-hint'
+            hint.textContent = f.hint
+            wrap.appendChild(hint)
+          }
         })
 
         const btns = document.createElement('div')
@@ -447,11 +568,75 @@
         return wrap
       }
 
+      // Build a help box element from a HELP entry ({summary, steps[], note?}); null if absent.
+      function buildHelpBox(h) {
+        if (!h) return null
+        const box = document.createElement('div')
+        box.className = 'help-box'
+        const sum = document.createElement('div')
+        sum.className = 'help-summary'
+        sum.textContent = h.summary || ''
+        box.appendChild(sum)
+        if (Array.isArray(h.steps) && h.steps.length) {
+          const ol = document.createElement('ol')
+          h.steps.forEach((s) => {
+            const li = document.createElement('li')
+            li.textContent = s
+            ol.appendChild(li)
+          })
+          box.appendChild(ol)
+        }
+        if (h.note) {
+          const note = document.createElement('div')
+          note.className = 'help-note'
+          note.textContent = h.note
+          box.appendChild(note)
+        }
+        return box
+      }
+
       el('add-btn').addEventListener('click', () => {
         const type = el('add-type').value
         settings.channels.push({ id: makeId(), type, name: '', enabled: true, config: {} })
         renderChannels()
         saveSettings()
+      })
+
+      // Add-row ?: one-line summary of every channel type so picking one is informed.
+      el('add-help-btn').addEventListener('click', () => {
+        const box = el('add-help')
+        const open = !box.classList.contains('open')
+        box.classList.toggle('open', open)
+        el('add-help-btn').classList.toggle('open', open)
+        if (open && !box.childNodes.length) {
+          const sum = document.createElement('div')
+          sum.className = 'help-summary'
+          sum.textContent = 'Channel types at a glance'
+          box.appendChild(sum)
+          const ol = document.createElement('ol')
+          Object.keys(CH.HELP || {}).forEach((type) => {
+            const li = document.createElement('li')
+            li.textContent = type + ' — ' + (CH.HELP[type].summary || '')
+            ol.appendChild(li)
+          })
+          box.appendChild(ol)
+          const note = document.createElement('div')
+          note.className = 'help-note'
+          note.textContent =
+            'After adding a channel, its own ? explains setup step by step. Every channel has a "Send test".'
+          box.appendChild(note)
+        }
+      })
+
+      // Section-header ?s (auto-ping / quiet hours) toggle their pre-authored help boxes.
+      document.querySelectorAll('button.help-btn[data-help]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const box = el(btn.dataset.help)
+          if (!box) return
+          const open = !box.classList.contains('open')
+          box.classList.toggle('open', open)
+          btn.classList.toggle('open', open)
+        })
       })
 
       // ---- event toggles ----

@@ -1,0 +1,20 @@
+{
+  "id": "mission-control",
+  "name": "Mission Control",
+  "version": "0.1.0",
+  "description": "What's in flight, what's blocked, what finished while you were gone: a live board of the conversation's tasks, subagent fleet with elapsed clocks, background commands, an inbox of completed-while-away work, one-click nudges back into the chat, and an agent-maintained open-work summary pinned to context.",
+  "icon": "M2 2h5v5H2zM9 2h5v3H9zM2 9h5v5H2zM9 8h5v6H9z",
+  "kind": "panel",
+  "entry": "index.html",
+  "permissions": ["agent:read", "agent:send", "storage", "data:subscribe", "context"],
+  "defaultDock": "bottom",
+  "contextExports": [
+    {
+      "key": "work_summary",
+      "label": "Open work summary",
+      "format": "markdown",
+      "maxTokens": 600,
+      "description": "A compact bullet list of the work currently in flight in this conversation: active tasks and their states, running subagents, blockers, and what just finished. Keep it current with the set tool as work starts/finishes — it is pinned to your context each turn so you never re-derive it from scroll. The Mission Control pane renders it to the user live."
+    }
+  ]
+}

@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      Mission Control — read-only board over this conversation's live agent-work state
+      (per docs/plugin-proposals/designs/mission-control.md, v1 = M1–M6):
+
+        in  ← agent.onEvent: 'background' snapshots (running tasks + subagents) and
+              'task_activity' (per-subagent latest activity); 'status' for the working guard.
+        in  ← data.subscribe('bash:stdout'): background command start/output/error frames.
+        in  ← context.get('work_summary'): the agent-maintained open-work summary.
+        out → agent.send(text): templated one-click nudges (the board's only write).
+
+      The inbox ("finished while you were away") is a diff over successive background
+      snapshots, persisted in storage; a wholesale many→0 snapshot (rebind/clear) is
+      suppressed, not flooded. Completion is reported as "finished", never "succeeded" —
+      outcome is not in the feed today (design §4 HOST-GAP).
+
+      Host runtime MUST be first; no external network.
+    -->
+    <script src="atelier-plugin://__runtime__/atelier.js"></script>
+    <title>Mission Control</title>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: var(--surface, #14171e);
+        color: var(--text, #e7eaf0);
+        font-family: var(--font, system-ui, sans-serif);
+        font-size: 12px;
+      }
+      #root {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+      .hidden {
+        display: none !important;
+      }
+
+      /* ── header + inbox strip ── */
+      #head {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 5px 10px;
+        border-bottom: 1px solid var(--border, #252b37);
+      }
+      #conv-title {
+        font-weight: 600;
+        font-size: 11px;
+      }
+      #conv-status {
+        font-size: 10px;
+        color: var(--faint, #5e6677);
+      }
+      #conv-status.working {
+        color: var(--warn, #d8a657);
+      }
+      #inbox {
+        flex: 1 1 auto;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        overflow-x: auto;
+        min-width: 0;
+      }
+      .inbox-chip {
+        flex: 0 0 auto;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 2px 8px;
+        border: 1px solid var(--border, #252b37);
+        border-radius: 10px;
+        font-size: 10px;
+        color: var(--dim, #8b97ae);
+        background: var(--bg-2, #0f1117);
+        white-space: nowrap;
+      }
+      .inbox-chip .glyph {
+        color: var(--ok, #4caf82);
+      }
+      #inbox-clear {
+        flex: 0 0 auto;
+      }
+      button.mini {
+        padding: 2px 8px;
+        border: 1px solid var(--border, #252b37);
+        border-radius: 4px;
+        background: none;
+        color: var(--dim, #8b97ae);
+        font-size: 10px;
+        font-family: inherit;
+        cursor: pointer;
+      }
+      button.mini:hover {
+        border-color: var(--accent, #5b9cff);
+        color: var(--text, #e7eaf0);
+      }
+      button.mini:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+
+      /* ── lanes ── */
+      #lanes {
+        flex: 1 1 0;
+        min-height: 0;
+        display: flex;
+        gap: 1px;
+        background: var(--border, #252b37);
+        overflow-x: auto;
+      }
+      .lane {
+        flex: 1 1 0;
+        min-width: 170px;
+        display: flex;
+        flex-direction: column;
+        background: var(--surface, #14171e);
+      }
+      .lane-head {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 10px;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--dim, #8b97ae);
+        border-bottom: 1px solid var(--border, #252b37);
+      }
+      .lane-count {
+        margin-left: auto;
+        font-family: var(--mono, monospace);
+        color: var(--faint, #5e6677);
+      }
+      .lane-body {
+        flex: 1 1 0;
+        min-height: 0;
+        overflow: auto;
+        padding: 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .lane-empty {
+        color: var(--faint, #5e6677);
+        font-style: italic;
+        font-size: 10px;
+        padding: 8px 4px;
+      }
+
+      /* ── cards ── */
+      .card {
+        border: 1px solid var(--border, #252b37);
+        border-radius: 6px;
+        background: var(--bg-2, #0f1117);
+        padding: 6px 8px;
+      }
+      .card.running {
+        border-left: 3px solid var(--accent, #5b9cff);
+      }
+      .card.done {
+        opacity: 0.85;
+      }
+      .card.errorish {
+        border-left: 3px solid var(--err, #e06c75);
+      }
+      .card-label {
+        font-size: 11px;
+        line-height: 1.35;
+        word-break: break-word;
+      }
+      .card-meta {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 3px;
+        font-size: 9px;
+        color: var(--faint, #5e6677);
+        font-family: var(--mono, monospace);
+      }
+      .card-meta .elapsed {
+        color: var(--accent, #5b9cff);
+      }
+      .card-activity {
+        margin-top: 3px;
+        font-size: 10px;
+        color: var(--dim, #8b97ae);
+        font-family: var(--mono, monospace);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .card-cmd {
+        font-family: var(--mono, monospace);
+        font-size: 10px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .nudges {
+        display: flex;
+        gap: 4px;
+        margin-top: 5px;
+        flex-wrap: wrap;
+      }
+      .cmd-state {
+        font-size: 9px;
+        padding: 0 5px;
+        border-radius: 3px;
+        border: 1px solid var(--border, #252b37);
+      }
+      .cmd-state.live {
+        color: var(--warn, #d8a657);
+        border-color: var(--warn, #d8a657);
+      }
+      .cmd-state.ok {
+        color: var(--ok, #4caf82);
+        border-color: var(--ok, #4caf82);
+      }
+      .cmd-state.bad {
+        color: var(--err, #e06c75);
+        border-color: var(--err, #e06c75);
+      }
+
+      /* ── work summary ── */
+      #summary-body {
+        font-size: 11px;
+        line-height: 1.5;
+        color: var(--dim, #8b97ae);
+        white-space: pre-wrap;
+        padding: 8px;
+      }
+      #summary-body strong {
+        color: var(--text, #e7eaf0);
+      }
+      .note {
+        font-size: 9px;
+        color: var(--faint, #5e6677);
+        padding: 0 10px 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div id="head">
+        <span id="conv-title">Mission Control</span>
+        <span id="conv-status"></span>
+        <div id="inbox"></div>
+        <button class="mini hidden" id="inbox-clear">clear</button>
+      </div>
+      <div id="lanes">
+        <div class="lane">
+          <div class="lane-head">In progress<span class="lane-count" id="c-progress"></span></div>
+          <div class="lane-body" id="l-progress"></div>
+        </div>
+        <div class="lane">
+          <div class="lane-head">Subagent fleet<span class="lane-count" id="c-fleet"></span></div>
+          <div class="lane-body" id="l-fleet"></div>
+        </div>
+        <div class="lane">
+          <div class="lane-head">Commands<span class="lane-count" id="c-cmds"></span></div>
+          <div class="lane-body" id="l-cmds"></div>
+        </div>
+        <div class="lane">
+          <div class="lane-head">Done<span class="lane-count" id="c-done"></span></div>
+          <div class="lane-body" id="l-done"></div>
+        </div>
+        <div class="lane">
+          <div class="lane-head">Open work summary</div>
+          <div id="summary-body">—</div>
+          <div class="note">
+            Maintained by the agent (set_mission-control__work_summary); pinned to its context each
+            turn.
+          </div>
+        </div>
+      </div>
+    </div>
+    <script src="atelier-plugin://mission-control/mission.js"></script>
+  </body>
+</html>

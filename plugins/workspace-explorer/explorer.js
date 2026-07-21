@@ -40,7 +40,9 @@ const state = {
   nodes: new Map(), // path -> { name, kind, ignored, size, childrenLoaded, entries }
   selected: null, // currently previewed cwd-relative path
   previewChannel: null, // the file: DataBus channel we're tailing, if any
-  previewCollapsed: true
+  previewCollapsed: true,
+  previewRaw: null, // latest raw text of the selected file (re-rendered on mode switch)
+  previewMode: 'code' // 'code' | 'rendered' | 'pretty' (per-extension, persisted)
 }
 
 // =====================================================================================
@@ -259,22 +261,32 @@ async function ensureListed(dirPath) {
 // =====================================================================================
 const treeEl = $('tree')
 
-function fileIconSvg() {
-  return '<svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M4 1.8h5l3 3v9.4H4z"/><path d="M9 1.8v3h3"/></svg>'
-}
-function dirIconSvg(open) {
-  return open
-    ? '<svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2 4.2h4l1.3 1.5h6.7v7.1H2z"/><path d="M2 6.7h12"/></svg>'
-    : '<svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2 4.2h4l1.3 1.5h6.7v7.1H2z"/></svg>'
+function fmtSize(n) {
+  if (typeof n !== 'number' || !isFinite(n)) return ''
+  if (n < 1024) return n + ' B'
+  if (n < 1024 * 1024) return (n / 1024).toFixed(n < 10240 ? 1 : 0) + ' KB'
+  return (n / (1024 * 1024)).toFixed(1) + ' MB'
 }
 
+const INDENT_PX = 14 // per-level indent (padding-based so hover/selection spans full width)
+
 // Render a single directory's children into `container`. Recurses into expanded dirs.
-function renderChildren(dirPath, container, now) {
+function renderChildren(dirPath, container, now, depth) {
+  depth = depth || 0
   const node = state.nodes.get(dirPath)
   container.textContent = ''
+  if (depth > 0) {
+    // Faint vertical guide aligned under the parent's twisty.
+    container.style.background =
+      'linear-gradient(var(--wx-guide, #222835), var(--wx-guide, #222835)) no-repeat'
+    container.style.backgroundSize = '1px 100%'
+    container.style.backgroundPosition = 5 + (depth - 1) * INDENT_PX + 13 + 'px 0'
+  }
+  const notePad = 32 + depth * INDENT_PX + 'px'
   if (!node || node.error) {
     const err = document.createElement('div')
     err.className = 'err-note'
+    err.style.paddingLeft = notePad
     err.textContent = node && node.error ? node.error : 'not listed'
     container.appendChild(err)
     return
@@ -284,23 +296,25 @@ function renderChildren(dirPath, container, now) {
   if (!visible.length) {
     const empty = document.createElement('div')
     empty.className = 'empty-note'
+    empty.style.paddingLeft = notePad
     empty.textContent = node.truncated ? '(truncated)' : 'empty'
     container.appendChild(empty)
     return
   }
   for (const e of visible) {
     const path = joinRel(dirPath, e.name)
-    container.appendChild(renderRow(path, e, now))
+    container.appendChild(renderRow(path, e, now, depth))
   }
   if (node.truncated) {
     const t = document.createElement('div')
     t.className = 'empty-note'
+    t.style.paddingLeft = notePad
     t.textContent = '(more entries — truncated at 5000)'
     container.appendChild(t)
   }
 }
 
-function renderRow(path, entry, now) {
+function renderRow(path, entry, now, depth) {
   const wrap = document.createElement('div')
 
   const row = document.createElement('div')
@@ -308,6 +322,7 @@ function renderRow(path, entry, now) {
     'row' + (entry.ignored ? ' ignored' : '') + (state.selected === path ? ' selected' : '')
   row.dataset.path = path
   row.dataset.kind = entry.kind
+  row.style.paddingLeft = 5 + (depth || 0) * INDENT_PX + 'px'
 
   const isDir = entry.kind === 'dir'
   const isOpen = isDir && state.expanded.has(path)
@@ -328,13 +343,20 @@ function renderRow(path, entry, now) {
   row.appendChild(twisty)
 
   const icon = document.createElement('span')
-  icon.innerHTML = isDir ? dirIconSvg(isOpen) : fileIconSvg()
+  icon.innerHTML = window.WXIcons.iconFor(entry.name, entry.kind, isOpen)
   row.appendChild(icon.firstChild)
 
   const name = document.createElement('span')
   name.className = 'name'
   name.textContent = entry.name
   row.appendChild(name)
+
+  if (!isDir && typeof entry.size === 'number') {
+    const badge = document.createElement('span')
+    badge.className = 'badge size'
+    badge.textContent = fmtSize(entry.size)
+    row.appendChild(badge)
+  }
 
   // Hover title: heat detail (spec §2 — "read 3× · wrote 1× · last 12s ago").
   if (!isDir) {
@@ -355,7 +377,7 @@ function renderRow(path, entry, now) {
     const children = document.createElement('div')
     children.className = 'children'
     children.dataset.for = path
-    renderChildren(path, children, now)
+    renderChildren(path, children, now, (depth || 0) + 1)
     wrap.appendChild(children)
   }
 
@@ -365,7 +387,7 @@ function renderRow(path, entry, now) {
 // Full re-render of the tree from the root node. Cheap: only expanded dirs have DOM.
 function renderTree() {
   const now = Date.now()
-  renderChildren('', treeEl, now)
+  renderChildren('', treeEl, now, 0)
 }
 
 // A lighter re-render for pure heat updates: re-computes heat styles + titles without rebuilding
@@ -449,6 +471,41 @@ const pvGutter = $('pv-gutter')
 const pvText = $('pv-text')
 const pvImg = $('pv-img')
 const pvOpen = $('pv-open')
+const pvRender = $('pv-render')
+const pvModes = $('pv-modes')
+
+// Preview modes per file type: markdown renders, JSON prettifies; both toggleable back
+// to plain code. The chosen mode persists per extension (storage 'pvMode:<ext>').
+function extOf(path) {
+  const m = /\.([a-z0-9]+)$/i.exec(path)
+  return m ? m[1].toLowerCase() : ''
+}
+
+function modesFor(path) {
+  const ext = extOf(path)
+  if (ext === 'md' || ext === 'markdown') return ['rendered', 'code']
+  if (ext === 'json' || ext === 'jsonc') return ['pretty', 'code']
+  return ['code']
+}
+
+function renderModeButtons(path) {
+  pvModes.textContent = ''
+  const modes = modesFor(path)
+  if (modes.length < 2) return
+  for (const m of modes) {
+    const btn = document.createElement('button')
+    btn.textContent = m
+    btn.className = state.previewMode === m ? 'on' : ''
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation()
+      state.previewMode = m
+      atelier.storage.set('pvMode:' + extOf(path), m).catch(() => {})
+      renderModeButtons(path)
+      renderPreview(path)
+    })
+    pvModes.appendChild(btn)
+  }
+}
 
 function dropPreviewChannel() {
   if (!state.previewChannel) return
@@ -470,6 +527,7 @@ function showPreviewNote(msg) {
   pvNote.classList.remove('hidden')
   pvCode.classList.add('hidden')
   pvImg.classList.add('hidden')
+  pvRender.classList.add('hidden')
 }
 
 function selectFile(path) {
@@ -484,12 +542,32 @@ function selectFile(path) {
   if (row) row.classList.add('selected')
 
   state.selected = path
+  state.previewRaw = null
   dropPreviewChannel()
   expandPreview()
   pvPath.textContent = path
   pvOpen.classList.remove('hidden')
 
+  // Restore the persisted mode for this extension (default: first applicable).
+  const modes = modesFor(path)
+  state.previewMode = modes[0]
+  renderModeButtons(path)
+  if (modes.length > 1) {
+    atelier.storage
+      .get('pvMode:' + extOf(path))
+      .then((m) => {
+        if (state.selected !== path) return
+        if (typeof m === 'string' && modes.includes(m) && m !== state.previewMode) {
+          state.previewMode = m
+          renderModeButtons(path)
+          if (state.previewRaw != null) renderPreview(path)
+        }
+      })
+      .catch(() => {})
+  }
+
   if (IMG_RE.test(path)) {
+    pvModes.textContent = ''
     showPreviewNote('loading image…')
     atelier.data
       .readAsset(path)
@@ -527,33 +605,65 @@ function selectFile(path) {
     })
 }
 
-// Render text with line-number gutter + a lightweight token highlight. Truncates large files.
+// New content arrived (subscribe or live tail): stash the raw text, render in current mode.
 function renderText(path, raw) {
-  let text = raw
+  state.previewRaw = raw
+  renderPreview(path)
+}
+
+// Render state.previewRaw per the active preview mode. Truncates large files.
+function renderPreview(path) {
+  let text = state.previewRaw == null ? '' : state.previewRaw
   let truncated = false
   // Byte-ish cap (chars ~ bytes for ASCII; fine as a bound).
   if (text.length > PREVIEW_MAX_BYTES) {
     text = text.slice(0, PREVIEW_MAX_BYTES)
     truncated = true
   }
-  const lines = text.split('\n')
-  pvGutter.textContent = lines.map((_, i) => i + 1).join('\n')
-  pvText.innerHTML = highlight(text, path)
 
-  // Truncation marker.
   const old = pvCode.parentElement.querySelector('.trunc-marker')
   if (old) old.remove()
-  if (truncated) {
-    const m = document.createElement('div')
-    m.className = 'trunc-marker'
-    m.textContent =
-      'showing first ' + Math.round(PREVIEW_MAX_BYTES / 1024) + ' KB — open externally for the rest'
-    pvCode.after(m)
+  let note = truncated
+    ? 'showing first ' + Math.round(PREVIEW_MAX_BYTES / 1024) + ' KB — open externally for the rest'
+    : null
+
+  if (state.previewMode === 'rendered') {
+    pvRender.innerHTML = window.WXMd.render(text)
+    pvNote.classList.add('hidden')
+    pvImg.classList.add('hidden')
+    pvCode.classList.add('hidden')
+    pvRender.classList.remove('hidden')
+    if (note) appendTrunc(note, pvRender)
+    return
   }
+
+  let code = text
+  let lang = path
+  if (state.previewMode === 'pretty') {
+    try {
+      code = JSON.stringify(JSON.parse(text), null, 2)
+      lang = path.replace(/\.[a-z0-9]+$/i, '.json')
+    } catch (err) {
+      note = 'not valid JSON (' + (err && err.message) + ') — showing raw'
+    }
+  }
+
+  const lines = code.split('\n')
+  pvGutter.textContent = lines.map((_, i) => i + 1).join('\n')
+  pvText.innerHTML = highlight(code, lang)
+  if (note) appendTrunc(note, pvCode)
 
   pvNote.classList.add('hidden')
   pvImg.classList.add('hidden')
+  pvRender.classList.add('hidden')
   pvCode.classList.remove('hidden')
+}
+
+function appendTrunc(text, afterEl) {
+  const m = document.createElement('div')
+  m.className = 'trunc-marker'
+  m.textContent = text
+  afterEl.after(m)
 }
 
 pvOpen.addEventListener('click', (e) => {

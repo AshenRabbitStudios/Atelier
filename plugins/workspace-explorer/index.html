@@ -187,6 +187,17 @@
         z-index: 1;
       }
 
+      /* File size only on hover — glanceable but not noisy. */
+      .row .badge.size {
+        display: none;
+        margin-left: auto;
+        padding-right: 2px;
+      }
+
+      .row:hover .badge.size {
+        display: inline;
+      }
+
       .children {
         overflow: hidden;
       }
@@ -287,6 +298,118 @@
         color: var(--text, #e7eaf0);
         font-size: 10px;
         cursor: pointer;
+      }
+
+      #pv-modes {
+        display: inline-flex;
+        gap: 0;
+      }
+
+      #pv-modes button {
+        border-radius: 0;
+      }
+
+      #pv-modes button:first-child {
+        border-radius: 4px 0 0 4px;
+      }
+
+      #pv-modes button:last-child {
+        border-radius: 0 4px 4px 0;
+        border-left: none;
+      }
+
+      #pv-modes button.on {
+        background: var(--accent-weak, #23324a);
+        border-color: var(--accent, #5b9cff);
+        color: var(--accent, #5b9cff);
+      }
+
+      /* ---- Rendered markdown preview ---- */
+      #pv-render {
+        padding: 12px 16px;
+        line-height: 1.55;
+        font-size: 12px;
+      }
+
+      #pv-render h1 {
+        font-size: 17px;
+        margin: 4px 0 8px;
+      }
+
+      #pv-render h2 {
+        font-size: 14px;
+        margin: 12px 0 6px;
+      }
+
+      #pv-render h3,
+      #pv-render h4 {
+        font-size: 12px;
+        margin: 10px 0 5px;
+      }
+
+      #pv-render p {
+        margin: 6px 0;
+      }
+
+      #pv-render ul,
+      #pv-render ol {
+        margin: 6px 0 6px 20px;
+      }
+
+      #pv-render li {
+        margin: 2px 0;
+      }
+
+      #pv-render code {
+        font-family: var(--mono, monospace);
+        background: var(--surface, #14171e);
+        padding: 1px 4px;
+        border-radius: 3px;
+        font-size: 11px;
+        color: var(--accent, #6b9fff);
+      }
+
+      #pv-render pre {
+        background: var(--surface, #14171e);
+        border: 1px solid var(--border, #252b37);
+        border-radius: 5px;
+        padding: 8px 10px;
+        margin: 6px 0;
+        overflow: auto;
+      }
+
+      #pv-render pre code {
+        background: none;
+        padding: 0;
+        color: var(--text, #e7eaf0);
+      }
+
+      #pv-render table {
+        border-collapse: collapse;
+        margin: 8px 0;
+        font-size: 11px;
+      }
+
+      #pv-render th,
+      #pv-render td {
+        border: 1px solid var(--border, #252b37);
+        padding: 3px 8px;
+        text-align: left;
+      }
+
+      #pv-render th {
+        background: var(--surface, #14171e);
+        color: var(--dim, #8b97ae);
+      }
+
+      #pv-render hr {
+        border: none;
+        border-top: 1px solid var(--border, #252b37);
+        margin: 10px 0;
+      }
+
+      #pv-render a {
+        color: var(--accent, #5b9cff);
       }
 
       #pv-body {
@@ -405,6 +528,7 @@
         <div id="pv-head">
           <span class="pv-twisty">▶</span>
           <span class="pv-path" id="pv-path">no file selected</span>
+          <span id="pv-modes"></span>
           <button id="pv-open" class="hidden">Open</button>
         </div>
         <div id="pv-body">
@@ -413,12 +537,15 @@
             id="pv-code"
             class="hidden"
           ><code id="pv-gutter"></code><code id="pv-text"></code></pre>
+          <div id="pv-render" class="hidden"></div>
           <img id="pv-img" class="hidden" alt="preview" />
         </div>
       </div>
       <div id="ctx" class="hidden"></div>
       <div id="toast"></div>
     </div>
+    <script src="atelier-plugin://workspace-explorer/icons.js"></script>
+    <script src="atelier-plugin://workspace-explorer/md.js"></script>
     <script type="module" src="atelier-plugin://workspace-explorer/explorer.js"></script>
   </body>
 </html>

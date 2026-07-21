@@ -200,11 +200,14 @@ export class PluginBackendManager {
   }
 
   /** Reload (fresh code): kill the child AND clear its crash/wedge state, then re-spawn if it's a
-   *  still-enabled service. This is the only path that clears a wedge. */
-  reset(pluginId: string): void {
+   *  still-enabled service. This is the only path that clears a wedge. `freshBackendPath` is the
+   *  re-read manifest's backend path — pass it so the respawn can't use a path remembered from
+   *  before the reload (the manifest may have renamed/moved the backend file). */
+  reset(pluginId: string, freshBackendPath?: string): void {
     this.stop(pluginId)
     this.crashCounts.delete(pluginId)
     this.wedged.delete(pluginId)
+    if (freshBackendPath) this.backendPaths.set(pluginId, freshBackendPath)
     const convs = this.serviceConvs.get(pluginId)
     const backendPath = this.backendPaths.get(pluginId)
     if (convs && convs.size > 0 && backendPath) {

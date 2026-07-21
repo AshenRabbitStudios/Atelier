@@ -237,6 +237,21 @@ describe('PluginBackendManager — service lifecycle + crash budget', () => {
     await expect(p).resolves.toBe('ok')
   })
 
+  it('reset(freshBackendPath) re-spawns from the re-read manifest path, not the remembered one', () => {
+    const paths: string[] = []
+    const inner = backendFactory()
+    const spawn: SpawnBackend = (backendPath, pluginId) => {
+      paths.push(backendPath)
+      return inner.spawn(backendPath, pluginId)
+    }
+    const mgr = new PluginBackendManager(spawn)
+    mgr.startService('p', '/old/backend.js', 'conv-1')
+    // Reload after the manifest renamed the backend file — the respawn must use the fresh path
+    // (the remembered /old one no longer exists on disk).
+    mgr.reset('p', '/new/backend.cjs')
+    expect(paths).toEqual(['/old/backend.js', '/new/backend.cjs'])
+  })
+
   it('reset re-spawns a still-enabled service and re-sends its enables', () => {
     const f = backendFactory()
     const mgr = new PluginBackendManager(f.spawn)

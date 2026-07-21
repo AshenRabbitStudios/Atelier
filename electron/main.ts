@@ -167,9 +167,23 @@ const plugins = new PluginRegistry(PLUGINS_DIR, sendPlugins)
 // already match. `--max-old-space-size` caps the child's V8 heap so a runaway backend can't exhaust
 // memory (containment — ARCH_REVIEW_2026-07-19 P1 #12).
 function utilityBackendTransport(backendPath: string, pluginId: string): BackendTransport {
+  // stdio piped + logged: a backend that dies at require-time otherwise crashes SILENTLY, and the
+  // crash-loop wedge is all anyone sees (agent-flow, 2026-07-21). Exit codes are logged for the
+  // same reason.
   const child = utilityProcess.fork(backendPath, [], {
     serviceName: `atelier-plugin-${pluginId}`,
-    execArgv: ['--max-old-space-size=512']
+    execArgv: ['--max-old-space-size=512'],
+    stdio: 'pipe'
+  })
+  // eslint-disable-next-line no-console
+  child.stdout?.on('data', (d) => console.log(`[plugin:${pluginId} backend]`, String(d).trimEnd()))
+  child.stderr?.on('data', (d) =>
+    // eslint-disable-next-line no-console
+    console.error(`[plugin:${pluginId} backend]`, String(d).trimEnd())
+  )
+  child.on('exit', (code) => {
+    // eslint-disable-next-line no-console
+    if (code !== 0) console.error(`[plugin:${pluginId} backend] exited with code ${code}`)
   })
   return {
     postMessage: (msg) => child.postMessage(msg),
@@ -764,10 +778,19 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.pluginsReload, async (_e, payload) => {
     const { pluginId } = PluginIdSchema.parse(payload)
+    // Scan BEFORE reset: reset re-spawns a still-enabled service, and it must do so from the
+    // re-read manifest's backend path, not the one remembered from the previous enable — a reload
+    // that renames/moves the backend file otherwise respawns the deleted path and re-wedges
+    // (agent-flow backend.js→.cjs, 2026-07-21).
+    plugins.scan()
+    const reloaded = plugins.get(pluginId)
+    const freshBackendPath = reloaded?.manifest?.backend
+      ? join(reloaded.dir, reloaded.manifest.backend)
+      : undefined
     // Reset ONLY the reloaded plugin's backend (fresh module + cleared crash/wedge state, re-spawned
     // if it's a still-enabled service) — reloading one plugin must not kill unrelated backends
     // mid-call (ARCH_REVIEW_2026-07-19 P1 #11).
-    backends.reset(pluginId)
+    backends.reset(pluginId, freshBackendPath)
     // Reload must guarantee fresh files BY CONSTRUCTION, not via header semantics: flush the
     // HTTP + compiled-script caches BEFORE the renderer remounts panes, so a pane can never
     // come back with a stale script against a fresh index.html (the dead-pane class of bug —
@@ -775,7 +798,7 @@ function registerIpc(): void {
     // survives any future header regression). Local-file cache; clearing it costs nothing.
     await session.defaultSession.clearCache()
     await session.defaultSession.clearCodeCaches({}).catch(() => {})
-    plugins.scan() // re-read global manifests; workspace registries self-watch their own dirs
+    // (global manifests already re-scanned above; workspace registries self-watch their own dirs)
     notifyPluginsChanged() // renderer refetches per-conversation + remounts affected panes
   })
 

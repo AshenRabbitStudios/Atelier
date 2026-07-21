@@ -657,10 +657,12 @@ build**.
 - **CI.** `.github/workflows/ci.yml` runs install → typecheck → lint → format:check → test →
   build on push to `main` and every PR (Node 22, npm cache, concurrency-cancel).
 
-Remaining hardening backlog (lower priority, not blocking): broaden coverage to
-`transcriptModel.ts` and AgentManager lifecycle (SDK faked at the boundary); audit that _every_
-IPC boundary has a Zod schema; consider `--max-warnings 0` once `no-explicit-any` warnings are
-burned down; add the dev-compatible strict CSP (below).
+Remaining hardening backlog (lower priority, not blocking): AgentManager lifecycle tests
+(SDK faked at the boundary); add the dev-compatible strict CSP (below).
+_2026-07-21 (delegated to sonnet subagents in worktrees):_ transcriptModel reducer coverage
+(+63 tests) and the IPC Zod-schema audit (+74 tests, all 17 plugin schemas incl. numeric
+bounds) landed — suite 462; `no-explicit-any` was already at zero, so `npm run lint` now
+enforces `--max-warnings 0`.
 
 ## Tech debt / deferrals noted during P0
 

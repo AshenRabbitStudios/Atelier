@@ -1,6 +1,79 @@
 # PROGRESS.md — Atelier build log
 
-## Overnight session 2026-07-20 — summary (read this first)
+## Overnight session 2026-07-21 — summary (read this first)
+
+Brandon's morning review of the 2026-07-20 batch (notifications good; explorer messy;
+whiteboard buggy/not-editable; agent-flow "nearly useless" — git should be the primary
+pillar) drove tonight. All seven items done, gate green per commit (suite now **327**),
+mod plans in `docs/plugin-proposals/mods/`:
+
+1. **notifications** — `?` setup help on every channel card (Discord/Slack webhook
+   creation, BotFather flow, ntfy topics, Pushover keys, generic-webhook POST contract),
+   add-row type summary, field hints, auto-ping/quiet-hours explainers.
+2. **whiteboard** — two real bugs found and fixed: (a) the tab × called `confirm()` and
+   rename `prompt()`, which are **silent no-ops in the sandbox** (no `allow-modals`) —
+   replaced with inline confirm/rename, pitfall documented in PLUGIN_API.md ("no native
+   dialogs"); (b) `mutateDoc` re-rendered the board when the save debounce fired, dumping
+   focus out of the note/mermaid textareas mid-typing (the "can't write in the note
+   board" report) — new `mutateDocSilent` path. Plus: teaching empty state with per-type
+   add cards, chart type switcher + full visual data editor + waterfall renderer, table
+   format mode (cell bg/text/bold/align in a `styles` map, style-key remap on row/col
+   delete — pure helpers, tested), 3×3 table starter, note edit/split/preview modes,
+   mermaid snippet bar + templates. `model.test.mjs` (14).
+3. **workspace-explorer** — per-level indentation with guide lines (rows were flush-left),
+   `icons.js` file-type registry (colored per-type doc glyphs + special shapes for
+   folders/images/git/package/lock/docker/config), preview modes: .md renders (md.js,
+   incl. pipe tables), .json prettifies, both toggle to code; mode persisted per
+   extension; hover size badges.
+4. **agent-flow REWORK** — four tabs → two. **Repo** (primary): health strip
+   (branch/dirty/last-commit/CI badge/worktrees), accordion navigator — working tree →
+   diffs, history with lane-graph gutter + ref/tag chips + search + full commit message
+   body + per-file commit diffs (`commitDiff` multi-file op), branches & worktrees with
+   per-worktree session annotation, stashes → stash diff, submodules, CI via `gh run
+list --json` (absent-tolerant, 60s poll while visible). **Agent**: flat exact-order
+   event log with a verbosity slider (L1 turns → L2 +tools → L3 everything → L4 raw JSON
+   expanders), chips/search/follow-scroll, cross-links both directions. Parsers +9 tests.
+5. **mission-control** (NEW, designs/mission-control.md v1 M1–M6) — in-progress/fleet/
+   commands/done lanes, completed-while-away inbox (rebind-clear suppressed), templated
+   nudges via agent.send with working guard, agent-maintained `work_summary` context
+   export, history backfill.
+6. **http-workbench** (NEW, designs/http-workbench.md) — builder + inert response viewer
+   (JSON tree windowed, escaped text only), shared user/agent history (capped, secret-
+   redacted, replay-with-edit), readonly ctx digest, `http_request` backend tool.
+   **DEVIATION** from design §4.4: the backend performs the tool's fetch itself
+   (mirroring `netFetch.ts` constraints exactly via `shared.cjs` — method allow-list,
+   cookie dropped, 2MB/4MB caps, 60s max) because the host-relay wiring doesn't exist;
+   ctx digest refreshes from the pane (live when open, rebuilt on mount).
+   `shared.test.mjs` (11).
+7. **Repo hygiene** — `electron/shared/pluginManifests.test.ts` validates every shipped
+   plugin manifest against the live schema (auto-includes new ones); bugs.txt F2
+   reconciled to done-pending-spot-check (Phase 7 workspace-local plugins closed it);
+   PROPOSALS.md status updated.
+
+**Needs live-app spot-check (2026-07-21 batch — headless can't cover panes):**
+
+- whiteboard: × shows inline confirm and deletes; dblclick renames inline; type in a note
+  without losing focus past the save debounce; chart type switcher + data editor round-
+  trip; waterfall renders; table format mode paints cells and survives row/col delete;
+  empty pane shows the four add cards (not "connecting" + blank).
+- explorer: tree indents with guides; icons distinguish types at a glance; PROGRESS.md
+  renders as markdown with tables; package.json prettifies; toggles persist per extension.
+- agent-flow: health strip matches `git status` on this repo; history graph + refs render;
+  commit click shows body + per-file diffs; worktrees annotate "this conversation" on the
+  matching cwd; CI badge shows this repo's real runs; stash a change → Stashes section
+  appears with a diff; Agent tab slider L1→L4 changes density, L4 rows expand to raw
+  JSON; follow-scroll unpins on scroll-up.
+- mission-control: run a subagent → fleet row with ticking clock + activity line; let it
+  finish with the pane open → exactly one inbox chip; a Bash command shows in Commands;
+  a nudge lands in the chat as the templated message; ask the agent to set the work
+  summary → panel updates.
+- http-workbench: send a GET to a real URL → status/timing/JSON tree; ask the agent to
+  use `http_request` → the entry appears live in the open pane tagged "agent" and in the
+  next turn's context digest; replay-with-edit from history; auth header shows redacted
+  in history; close/reopen restores history.
+- notifications: each channel's `?` expands readable setup steps.
+
+## Overnight session 2026-07-20 — summary
 
 All four plugins from the user review are BUILT and merged to main, gate green (276 tests):
 

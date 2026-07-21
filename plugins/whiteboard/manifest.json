@@ -2,7 +2,7 @@
   "id": "whiteboard",
   "name": "Whiteboard",
   "version": "0.1.0",
-  "description": "Tabbed visual boards the agent and user share: mermaid diagrams, editable data tables, charts (bar/line/area/scatter/pie), and note boards with comment threads. The agent writes boards with its set/edit tools; user edits and comments flow back into context.",
+  "description": "Tabbed visual boards the agent and user share: mermaid diagrams, editable data tables with cell formatting, charts (bar/line/area/scatter/pie/waterfall) with a visual data editor, and note boards with comment threads. The agent writes boards with its set/edit tools; user edits and comments flow back into context.",
   "icon": "M2 3.5h12v7H2zM2 12.5h4M5 8.5l2.5-3 2 2 3.5-4",
   "kind": "panel",
   "entry": "index.html",

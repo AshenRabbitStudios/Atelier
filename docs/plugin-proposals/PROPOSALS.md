@@ -19,17 +19,17 @@ preceded by the host-API slice in [`HOST-ADDENDUM.md`](HOST-ADDENDUM.md).
 plugin — [`agent-flow`](designs/agent-flow.md) — with sub-tabs for the three functions. The
 three original docs are superseded by the agent-flow build spec.
 
-**Approved but deferred (T2, not tonight):**
+**Approved-then-built (2026-07-21 overnight session):**
 
-- `http-workbench` — approved in principle; integrates cleanly with the plugin architecture
-  once HOST-ADDENDUM A7 (panel→backend RPC) lands. See the
-  [http-workbench addendum](designs/http-workbench.md#addendum-user-review-2026-07-20) for
-  the updated HOST-GAP status (A7 resolves the principal gap).
-- `mission-control` — the per-conversation board is buildable on `agent:read` + HOST-ADDENDUM
-  A5 (`agent.history`). A cross-conversation fleet view is a real v2, gated on
-  `agent:read-all` (HOST-ADDENDUM Tier 2, B1). See the
-  [mission-control addendum](designs/mission-control.md#addendum-user-review-2026-07-20) for
-  a concrete v1/v2 breakdown and an honest account of what requires additional host work.
+- `http-workbench` — **BUILT** (`plugins/http-workbench`). Pane (builder / viewer /
+  shared history / readonly ctx digest) per the design; the agent's `http_request` tool
+  deviates from design §4.4 by fetching in the backend with host-fetcher-identical
+  constraints (documented in the backend header + PROGRESS) instead of the
+  not-yet-existing host relay.
+- `mission-control` — **BUILT** v1 (M1–M6, `plugins/mission-control`): task/fleet/commands
+  lanes, completed-while-away inbox, templated nudges, agent-maintained work-summary
+  context export. v2 cross-conversation fleet stays gated on `agent:read-all`
+  (HOST-ADDENDUM Tier 2, B1).
 
 **Not in the build set:** `db-explorer`, `prompt-library`, `pr-watch`, `test-lens`,
 `proc-manager`, `cost-dashboard`. All remain designed and tiered; none were rejected.

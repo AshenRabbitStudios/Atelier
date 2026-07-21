@@ -543,6 +543,308 @@
         border-color: var(--accent, #5b9cff);
       }
 
+      /* ── Inline tab confirm / rename (sandbox has no confirm/prompt) ── */
+      .tab.confirming {
+        background: var(--surface-2, #191d27);
+        color: var(--text, #e7eaf0);
+      }
+      .tab-confirm {
+        font-size: 13px;
+        padding: 0 4px;
+        cursor: pointer;
+      }
+      .tab-confirm.yes {
+        color: var(--danger, #f85149);
+      }
+      .tab-confirm.no {
+        color: var(--dim, #8892a4);
+      }
+      .tab-confirm:hover {
+        text-shadow: 0 0 6px currentColor;
+      }
+      input.tab-rename {
+        width: 120px;
+        background: var(--input, #1b2029);
+        color: var(--text, #e7eaf0);
+        border: 1px solid var(--accent, #5b9cff);
+        border-radius: 3px;
+        font-family: inherit;
+        font-size: 12px;
+        padding: 2px 5px;
+        outline: none;
+      }
+
+      /* ── Teaching empty state ──────────────────────────────────────── */
+      .wb-onboard {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        padding: 24px;
+        text-align: center;
+      }
+      .wb-onboard-title {
+        font-size: 15px;
+        font-weight: 600;
+      }
+      .wb-onboard-sub {
+        color: var(--dim, #8892a4);
+        font-size: 12px;
+        max-width: 420px;
+        line-height: 1.5;
+      }
+      .wb-onboard-row {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        justify-content: center;
+        margin-top: 6px;
+      }
+      .wb-onboard-card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        width: 120px;
+        padding: 12px 8px;
+        background: var(--surface, #14171e);
+        border: 1px solid var(--border, #252b37);
+        border-radius: 8px;
+        color: var(--text, #e7eaf0);
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .wb-onboard-card:hover {
+        border-color: var(--accent, #5b9cff);
+        background: var(--surface-2, #191d27);
+      }
+      .wb-onboard-glyph {
+        font-size: 18px;
+        color: var(--accent, #5b9cff);
+      }
+      .wb-onboard-name {
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .wb-onboard-blurb {
+        font-size: 10px;
+        color: var(--faint, #5e6677);
+        line-height: 1.35;
+      }
+      .wb-onboard-foot {
+        font-size: 11px;
+        color: var(--faint, #5e6677);
+        margin-top: 8px;
+      }
+
+      /* ── Shared small controls ─────────────────────────────────────── */
+      .wb-select {
+        background: var(--input, #1b2029);
+        color: var(--text, #e7eaf0);
+        border: 1px solid var(--border, #252b37);
+        border-radius: 4px;
+        font-family: inherit;
+        font-size: 11px;
+        padding: 2px 6px;
+        outline: none;
+      }
+      .wb-select:focus {
+        border-color: var(--accent, #5b9cff);
+      }
+      .wb-mini-btn.active {
+        border-color: var(--accent, #5b9cff);
+        color: var(--accent, #5b9cff);
+      }
+
+      /* ── Table format bar ──────────────────────────────────────────── */
+      .wb-fmt-bar {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        flex-wrap: wrap;
+      }
+      .wb-fmt-hint {
+        font-size: 10px;
+        color: var(--faint, #5e6677);
+        font-style: italic;
+      }
+      .wb-swatches {
+        display: inline-flex;
+        gap: 2px;
+        padding: 2px;
+        border: 1px solid var(--border, #252b37);
+        border-radius: 4px;
+      }
+      .wb-swatch {
+        width: 16px;
+        height: 16px;
+        border: 1px solid var(--border-2, #333b4b);
+        border-radius: 3px;
+        cursor: pointer;
+        padding: 0;
+        background: transparent;
+        font-size: 10px;
+        line-height: 1;
+        font-family: inherit;
+      }
+      .wb-swatch:hover {
+        border-color: var(--accent, #5b9cff);
+      }
+      .wb-swatch.none {
+        background: linear-gradient(
+          to top right,
+          transparent 44%,
+          var(--danger, #f85149) 46%,
+          var(--danger, #f85149) 54%,
+          transparent 56%
+        );
+      }
+      .wb-td.fmt-selected {
+        outline: 2px solid var(--accent, #5b9cff);
+        outline-offset: -2px;
+      }
+      .wb-fmt-bold {
+        font-weight: 700;
+      }
+
+      /* ── Empty-table starter ───────────────────────────────────────── */
+      .wb-table-starter {
+        margin: 18px;
+        padding: 24px;
+        border: 1px dashed var(--border-2, #333b4b);
+        border-radius: 8px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        color: var(--dim, #8892a4);
+        font-size: 12px;
+      }
+      .wb-starter-sub {
+        font-size: 10px;
+        color: var(--faint, #5e6677);
+      }
+
+      /* ── Note board modes ──────────────────────────────────────────── */
+      .wb-note-body {
+        flex: 1;
+        display: flex;
+        overflow: hidden;
+      }
+      .wb-note-body .wb-note-rendered {
+        flex: 1;
+      }
+      .wb-note-body .wb-note-editor {
+        flex: 1;
+        border-top: none;
+      }
+      .wb-note-body.mode-preview .wb-note-editor {
+        display: none;
+      }
+      .wb-note-body.mode-edit .wb-note-rendered {
+        display: none;
+      }
+      .wb-note-body.mode-split .wb-note-editor {
+        border-right: 1px solid var(--border, #252b37);
+      }
+
+      /* ── Chart data editor ─────────────────────────────────────────── */
+      .wb-chart-editor {
+        flex-shrink: 0;
+        max-height: 45%;
+        overflow: auto;
+        border-top: 1px solid var(--border, #252b37);
+        background: var(--surface, #14171e);
+        padding: 8px 10px;
+      }
+      .wb-ed-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin: 4px 0;
+        flex-wrap: wrap;
+      }
+      .wb-ed-label {
+        font-size: 10px;
+        color: var(--faint, #5e6677);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .wb-ed-input {
+        background: var(--input, #1b2029);
+        color: var(--text, #e7eaf0);
+        border: 1px solid var(--border, #252b37);
+        border-radius: 4px;
+        font-family: inherit;
+        font-size: 11px;
+        padding: 3px 6px;
+        outline: none;
+        width: 110px;
+      }
+      .wb-ed-input:focus {
+        border-color: var(--accent, #5b9cff);
+      }
+      .wb-ed-grid .wb-td,
+      .wb-ed-grid .wb-th {
+        padding: 2px 4px;
+      }
+      .wb-ed-grid .wb-ed-input {
+        width: 90px;
+        border-color: transparent;
+        background: transparent;
+      }
+      .wb-ed-grid .wb-ed-input:hover,
+      .wb-ed-grid .wb-ed-input:focus {
+        border-color: var(--border-2, #333b4b);
+        background: var(--input, #1b2029);
+      }
+      .wb-ed-series-name {
+        font-weight: 600;
+      }
+      .wb-ed-del {
+        border: none;
+        padding: 1px 4px;
+        color: var(--faint, #5e6677);
+      }
+      .wb-ed-del:hover {
+        color: var(--danger, #f85149);
+        border: none;
+      }
+      .wb-ed-note {
+        font-size: 10px;
+        color: var(--warn, #e3b341);
+        margin: 2px 0 6px;
+      }
+      .wb-ed-scroll {
+        overflow: auto;
+        max-width: 100%;
+      }
+      .wb-ed-scatter-series {
+        border: 1px solid var(--border, #252b37);
+        border-radius: 6px;
+        padding: 6px 8px;
+        margin: 6px 0;
+      }
+      .wb-ed-point .wb-ed-input {
+        width: 70px;
+      }
+      .wb-ed-rowdel {
+        border: none !important;
+        background: none;
+      }
+
+      /* ── Mermaid snippet bar ───────────────────────────────────────── */
+      .wb-snippet-bar {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 3px 10px;
+        flex-wrap: wrap;
+        border-top: 1px solid var(--border, #252b37);
+      }
+
       /* ── Status bar ────────────────────────────────────────────────── */
       #status {
         flex-shrink: 0;

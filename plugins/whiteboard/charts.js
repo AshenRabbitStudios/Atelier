@@ -85,6 +85,7 @@
     try {
       if (kind === 'pie') renderPie(svg, board, W, H, tip)
       else if (kind === 'scatter') renderScatter(svg, board, W, H, tip)
+      else if (kind === 'waterfall') renderWaterfall(svg, board, W, H, tip)
       else renderXY(svg, board, W, H, kind, tip)
     } catch (e) {
       var note = el('text', { x: 12, y: 20, fill: 'var(--danger,#f85149)', 'font-size': 12 }, svg)
@@ -302,6 +303,151 @@
       W,
       H
     )
+  }
+
+  // Waterfall: the FIRST series' values are deltas; each bar floats from the running total
+  // before it to the running total after it. Positive deltas green-ish, negative red-ish,
+  // and a final computed "total" bar in the neutral accent. Categories from x.categories.
+  function renderWaterfall(svg, board, W, H, tip) {
+    var margin = { t: 16, r: 16, b: 56, l: 48 }
+    var plotW = W - margin.l - margin.r
+    var plotH = H - margin.t - margin.b
+    var series = Array.isArray(board.series) ? board.series : []
+    var deltas = ((series[0] && series[0].values) || []).map(num)
+    var cats = ((board.x && board.x.categories) || []).slice(0, deltas.length)
+    while (cats.length < deltas.length) cats.push('step ' + (cats.length + 1))
+    // running totals: level[i] = sum of deltas[0..i-1]
+    var levels = [0]
+    for (var i = 0; i < deltas.length; i++) levels.push(levels[i] + deltas[i])
+    var total = levels[levels.length - 1]
+    var vmin = Math.min.apply(null, levels.concat([0]))
+    var vmax = Math.max.apply(null, levels.concat([0]))
+    var ticks = niceTicks(vmin, vmax, 5)
+    var yLo = ticks[0]
+    var yHi = ticks[ticks.length - 1]
+    function yPix(v) {
+      return margin.t + plotH - ((num(v) - yLo) / (yHi - yLo || 1)) * plotH
+    }
+    var n = deltas.length + 1 // + the total bar
+    var bandW = plotW / Math.max(n, 1)
+
+    ticks.forEach(function (t) {
+      var y = yPix(t)
+      el(
+        'line',
+        { x1: margin.l, y1: y, x2: margin.l + plotW, y2: y, stroke: 'var(--border,#252b37)' },
+        svg
+      )
+      var lab = el(
+        'text',
+        {
+          x: margin.l - 6,
+          y: y + 3,
+          fill: 'var(--faint,#5e6677)',
+          'font-size': 10,
+          'text-anchor': 'end'
+        },
+        svg
+      )
+      lab.textContent = fmt(t)
+    })
+    el(
+      'line',
+      {
+        x1: margin.l,
+        y1: margin.t,
+        x2: margin.l,
+        y2: margin.t + plotH,
+        stroke: 'var(--border-2,#333b4b)'
+      },
+      svg
+    )
+    el(
+      'line',
+      {
+        x1: margin.l,
+        y1: margin.t + plotH,
+        x2: margin.l + plotW,
+        y2: margin.t + plotH,
+        stroke: 'var(--border-2,#333b4b)'
+      },
+      svg
+    )
+
+    var POS = '#3fb950'
+    var NEG = '#f85149'
+    var TOT = 'var(--accent,#5b9cff)'
+    var pad = bandW * 0.18
+
+    function bar(idx, from, to, color, label) {
+      var x = margin.l + bandW * idx + pad
+      var y0 = yPix(from)
+      var y1 = yPix(to)
+      var top = Math.min(y0, y1)
+      var h = Math.max(Math.abs(y1 - y0), 1)
+      var rect = el(
+        'rect',
+        { x: x, y: top, width: Math.max(bandW - pad * 2, 2), height: h, fill: color, rx: 1 },
+        svg
+      )
+      bindTip(rect, tip, label)
+      // connector to the next band
+      if (idx < n - 1) {
+        el(
+          'line',
+          {
+            x1: x + Math.max(bandW - pad * 2, 2),
+            y1: yPix(to),
+            x2: margin.l + bandW * (idx + 1) + pad,
+            y2: yPix(to),
+            stroke: 'var(--faint,#5e6677)',
+            'stroke-dasharray': '3 2'
+          },
+          svg
+        )
+      }
+    }
+
+    deltas.forEach(function (d, di) {
+      bar(
+        di,
+        levels[di],
+        levels[di + 1],
+        d >= 0 ? POS : NEG,
+        cats[di] + ': ' + (d >= 0 ? '+' : '') + fmt(d) + ' → ' + fmt(levels[di + 1])
+      )
+    })
+    bar(n - 1, 0, total, TOT, 'total: ' + fmt(total))
+
+    cats.concat(['total']).forEach(function (c, ci) {
+      var lab = el(
+        'text',
+        {
+          x: margin.l + bandW * (ci + 0.5),
+          y: margin.t + plotH + 16,
+          fill: 'var(--dim,#8892a4)',
+          'font-size': 10,
+          'text-anchor': 'middle'
+        },
+        svg
+      )
+      lab.textContent = String(c)
+    })
+    if (board.y && board.y.label) {
+      var yl = el(
+        'text',
+        {
+          x: 12,
+          y: margin.t + plotH / 2,
+          fill: 'var(--faint,#5e6677)',
+          'font-size': 11,
+          'text-anchor': 'middle',
+          transform: 'rotate(-90 12 ' + (margin.t + plotH / 2) + ')'
+        },
+        svg
+      )
+      yl.textContent = board.y.label
+    }
   }
 
   function renderScatter(svg, board, W, H, tip) {

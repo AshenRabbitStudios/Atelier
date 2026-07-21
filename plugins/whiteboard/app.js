@@ -28,6 +28,10 @@
   var lastUserTabClick = 0 // ts of last manual tab selection
   var lastPushedValue = null // last serialized value WE wrote (suppress echo)
   var saveTimer = null
+  var confirmDeleteId = null // tab showing the inline delete confirm (sandbox has no confirm())
+  var renamingId = null // tab showing the inline rename input
+  var noteModes = {} // board id -> 'preview' | 'edit' | 'split' (in-memory)
+  var chartEditorOpen = {} // board id -> bool (in-memory)
 
   function init() {
     tabStrip = document.getElementById('tab-strip')
@@ -154,6 +158,15 @@
     scheduleSave(reason)
   }
 
+  // Same, but WITHOUT re-rendering — for live-typing editors (note markdown, mermaid
+  // source) that already reflect the change. Re-rendering mid-typing rebuilds the
+  // textarea and dumps focus the moment the debounce fires; this was the "can't write
+  // in the note board" bug.
+  function mutateDocSilent(fn, reason) {
+    doc = fn(doc)
+    scheduleSave(reason)
+  }
+
   /* ── Render everything ────────────────────────────────────────────── */
   function renderAll() {
     renderBanner()
@@ -213,14 +226,86 @@
     doc.boards.forEach(function (b) {
       var tab = document.createElement('div')
       tab.className = 'tab' + (b.id === activeId ? ' active' : '')
+
+      // Inline delete confirm — the sandbox has no confirm()/prompt(), so native
+      // dialogs silently no-op. The × swaps the tab into a "delete?" state instead.
+      if (confirmDeleteId === b.id) {
+        tab.classList.add('confirming')
+        var q = document.createElement('span')
+        q.className = 'tab-label'
+        q.textContent = 'delete “' + (b.title || b.id) + '”?'
+        var yes = document.createElement('span')
+        yes.className = 'tab-confirm yes'
+        yes.textContent = '✓'
+        yes.title = 'Delete this board'
+        yes.addEventListener('click', function (e) {
+          e.stopPropagation()
+          confirmDeleteId = null
+          deleteBoard(b.id)
+        })
+        var no = document.createElement('span')
+        no.className = 'tab-confirm no'
+        no.textContent = '✗'
+        no.title = 'Keep it'
+        no.addEventListener('click', function (e) {
+          e.stopPropagation()
+          confirmDeleteId = null
+          renderTabs()
+        })
+        tab.appendChild(q)
+        tab.appendChild(yes)
+        tab.appendChild(no)
+        tabStrip.appendChild(tab)
+        return
+      }
+
       var glyph = document.createElement('span')
       glyph.className = 'tab-glyph'
       glyph.textContent = typeGlyph(b.type)
       glyph.title = b.type
+      tab.appendChild(glyph)
+
+      // Inline rename (dblclick) — again, no prompt() in the sandbox.
+      if (renamingId === b.id) {
+        var input = document.createElement('input')
+        input.className = 'tab-rename'
+        input.value = b.title || b.id
+        var commit = function (save) {
+          renamingId = null
+          var name = input.value.trim()
+          if (save && name && name !== (b.title || b.id)) {
+            mutateDoc(function (d) {
+              return WB.updateBoard(d, b.id, function (bb) {
+                bb.title = name
+              })
+            }, 'rename')
+          } else {
+            renderTabs()
+          }
+        }
+        input.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter') commit(true)
+          else if (e.key === 'Escape') commit(false)
+          e.stopPropagation()
+        })
+        input.addEventListener('blur', function () {
+          commit(true)
+        })
+        input.addEventListener('click', function (e) {
+          e.stopPropagation()
+        })
+        tab.appendChild(input)
+        tabStrip.appendChild(tab)
+        requestAnimationFrame(function () {
+          input.focus()
+          input.select()
+        })
+        return
+      }
+
       var label = document.createElement('span')
       label.className = 'tab-label'
       label.textContent = b.title || b.id
-      tab.appendChild(glyph)
       tab.appendChild(label)
       tab.addEventListener('click', function () {
         lastUserTabClick = Date.now()
@@ -229,16 +314,20 @@
         renderAll()
       })
       tab.addEventListener('dblclick', function () {
-        renameBoard(b.id)
+        renamingId = b.id
+        confirmDeleteId = null
+        renderTabs()
       })
-      // delete button
+      // delete button → inline confirm state
       var del = document.createElement('span')
       del.className = 'tab-del'
       del.textContent = '×'
       del.title = 'Delete board'
       del.addEventListener('click', function (e) {
         e.stopPropagation()
-        deleteBoard(b.id)
+        confirmDeleteId = b.id
+        renamingId = null
+        renderTabs()
       })
       tab.appendChild(del)
       tabStrip.appendChild(tab)
@@ -254,10 +343,7 @@
     boardArea.innerHTML = ''
     var b = WB.findBoard(doc, activeId)
     if (!b) {
-      var empty = document.createElement('div')
-      empty.className = 'wb-empty'
-      empty.textContent = 'No board selected. Use “+” to add one, or the agent can push boards.'
-      boardArea.appendChild(empty)
+      boardArea.appendChild(buildEmptyState(doc.boards.length === 0))
       return
     }
     var view = document.createElement('div')
@@ -291,132 +377,474 @@
     }
   }
 
+  // Teaching empty state — a fresh pane must explain itself, not show a blank page.
+  function buildEmptyState(noBoardsAtAll) {
+    var box = document.createElement('div')
+    box.className = 'wb-onboard'
+    var h = document.createElement('div')
+    h.className = 'wb-onboard-title'
+    h.textContent = noBoardsAtAll ? 'No boards yet' : 'No board selected'
+    box.appendChild(h)
+    var p = document.createElement('div')
+    p.className = 'wb-onboard-sub'
+    p.textContent = noBoardsAtAll
+      ? 'A board is a shared visual document — you edit it here, the agent edits it from chat, and both see the same thing. Create one:'
+      : 'Pick a tab above, or add a new board:'
+    box.appendChild(p)
+    var row = document.createElement('div')
+    row.className = 'wb-onboard-row'
+    var blurbs = {
+      mermaid: 'diagrams (flowchart, sequence, …)',
+      table: 'an editable grid',
+      chart: 'bar / line / area / scatter / pie / waterfall',
+      note: 'a markdown note'
+    }
+    WB.BOARD_TYPES.forEach(function (type) {
+      var card = document.createElement('button')
+      card.className = 'wb-onboard-card'
+      card.innerHTML =
+        '<span class="wb-onboard-glyph">' +
+        typeGlyph(type) +
+        '</span><span class="wb-onboard-name">' +
+        type +
+        '</span><span class="wb-onboard-blurb">' +
+        blurbs[type] +
+        '</span>'
+      card.addEventListener('click', function () {
+        addBoard(type)
+      })
+      row.appendChild(card)
+    })
+    box.appendChild(row)
+    var foot = document.createElement('div')
+    foot.className = 'wb-onboard-foot'
+    foot.textContent = 'Tip: you can also just ask the agent — “put that on a whiteboard chart”.'
+    box.appendChild(foot)
+    return box
+  }
+
   function renderChartBoard(view, b) {
     var bar = document.createElement('div')
     bar.className = 'wb-table-toolbar'
-    var asTable = false
     var chartHost = document.createElement('div')
     chartHost.className = 'wb-chart-host'
-    var toggle = mkMiniBtn('view as table', function () {
-      asTable = !asTable
-      draw()
-      toggle.textContent = asTable ? 'view as chart' : 'view as table'
+
+    // Chart-type switcher — visual, not JSON.
+    var typeSel = document.createElement('select')
+    typeSel.className = 'wb-select'
+    WB.CHART_TYPES.forEach(function (t) {
+      var opt = document.createElement('option')
+      opt.value = t
+      opt.textContent = t
+      if ((b.chart || 'bar') === t) opt.selected = true
+      typeSel.appendChild(opt)
     })
-    bar.appendChild(toggle)
+    typeSel.addEventListener('change', function () {
+      mutateDoc(function (d) {
+        return WB.updateBoard(d, b.id, function (bb) {
+          bb.chart = typeSel.value
+        })
+      }, 'chart-type')
+    })
+    bar.appendChild(typeSel)
+
+    var editBtn = mkMiniBtn(chartEditorOpen[b.id] ? 'hide data editor' : 'edit data', function () {
+      chartEditorOpen[b.id] = !chartEditorOpen[b.id]
+      renderActiveBoard()
+    })
+    if (chartEditorOpen[b.id]) editBtn.classList.add('active')
+    bar.appendChild(editBtn)
     view.appendChild(bar)
     view.appendChild(chartHost)
 
-    function draw() {
-      chartHost.innerHTML = ''
-      if (asTable) {
-        renderChartAsTable(chartHost, b)
-      } else {
-        root.WBCharts.renderChart(chartHost, b)
-      }
+    if (chartEditorOpen[b.id]) {
+      view.appendChild(buildChartEditor(b))
     }
+
     // Defer so clientWidth is known.
-    requestAnimationFrame(draw)
+    requestAnimationFrame(function () {
+      chartHost.innerHTML = ''
+      root.WBCharts.renderChart(chartHost, b)
+    })
   }
 
-  function renderChartAsTable(host, b) {
+  /* ── chart data editor ────────────────────────────────────────────────
+     Edits commit on change (blur/Enter); every commit re-renders the chart.
+     Non-scatter: one grid — rows are categories, columns are series.
+     Scatter: per-series x/y pair lists. */
+  function buildChartEditor(b) {
+    var ed = document.createElement('div')
+    ed.className = 'wb-chart-editor'
+
+    function commit(mutator, reason) {
+      mutateDoc(function (d) {
+        return WB.updateBoard(d, b.id, mutator)
+      }, reason || 'chart-data')
+    }
+
+    // Axis labels.
+    var axes = document.createElement('div')
+    axes.className = 'wb-ed-row'
+    axes.appendChild(edLabel('x label'))
+    axes.appendChild(
+      edInput((b.x && b.x.label) || '', function (v) {
+        commit(function (bb) {
+          bb.x = shallow(bb.x || {})
+          bb.x.label = v
+        })
+      })
+    )
+    axes.appendChild(edLabel('y label'))
+    axes.appendChild(
+      edInput((b.y && b.y.label) || '', function (v) {
+        commit(function (bb) {
+          bb.y = shallow(bb.y || {})
+          bb.y.label = v
+        })
+      })
+    )
+    ed.appendChild(axes)
+
+    var isScatter = (b.chart || 'bar') === 'scatter'
+    if (isScatter) {
+      buildScatterEditor(ed, b, commit)
+    } else {
+      buildGridEditor(ed, b, commit)
+    }
+    return ed
+  }
+
+  function buildGridEditor(ed, b, commit) {
     var cats = (b.x && b.x.categories) || []
     var series = Array.isArray(b.series) ? b.series : []
+    if ((b.chart || 'bar') === 'pie' || (b.chart || 'bar') === 'waterfall') {
+      var note = document.createElement('div')
+      note.className = 'wb-ed-note'
+      note.textContent =
+        b.chart === 'pie'
+          ? 'Pie uses the first series only (values vs categories).'
+          : 'Waterfall uses the first series as signed deltas; the total bar is computed.'
+      ed.appendChild(note)
+    }
+
+    var scroll = document.createElement('div')
+    scroll.className = 'wb-ed-scroll'
     var table = document.createElement('table')
-    table.className = 'wb-grid'
+    table.className = 'wb-grid wb-ed-grid'
     var thead = document.createElement('thead')
     var htr = document.createElement('tr')
-    var isScatter = b.chart === 'scatter'
-    if (isScatter) {
-      ;['series', 'x', 'y'].forEach(function (h) {
-        var th = document.createElement('th')
-        th.className = 'wb-th'
-        th.textContent = h
-        htr.appendChild(th)
+    htr.appendChild(edTh((b.x && b.x.label) || 'category'))
+    series.forEach(function (s, si) {
+      var th = document.createElement('th')
+      th.className = 'wb-th'
+      var nameInp = edInput(s.name || 'series ' + (si + 1), function (v) {
+        commit(function (bb) {
+          bb.series = bb.series.map(function (ss, i) {
+            if (i !== si) return ss
+            var c = shallow(ss)
+            c.name = v
+            return c
+          })
+        })
       })
-    } else {
-      var c0 = document.createElement('th')
-      c0.className = 'wb-th'
-      c0.textContent = (b.x && b.x.label) || 'category'
-      htr.appendChild(c0)
-      series.forEach(function (s) {
-        var th = document.createElement('th')
-        th.className = 'wb-th'
-        th.textContent = s.name
-        htr.appendChild(th)
+      nameInp.classList.add('wb-ed-series-name')
+      th.appendChild(nameInp)
+      var del = document.createElement('button')
+      del.className = 'wb-mini-btn wb-ed-del'
+      del.textContent = '×'
+      del.title = 'Remove this series'
+      del.addEventListener('click', function () {
+        commit(function (bb) {
+          bb.series = bb.series.filter(function (_, i) {
+            return i !== si
+          })
+        })
       })
-    }
+      th.appendChild(del)
+      htr.appendChild(th)
+    })
+    var addTh = document.createElement('th')
+    addTh.className = 'wb-th'
+    var addSeries = mkMiniBtn('+ series', function () {
+      commit(function (bb) {
+        var vals = ((bb.x && bb.x.categories) || []).map(function () {
+          return 0
+        })
+        bb.series = (bb.series || []).concat([
+          { name: 'series ' + ((bb.series || []).length + 1), values: vals }
+        ])
+      })
+    })
+    addTh.appendChild(addSeries)
+    htr.appendChild(addTh)
     thead.appendChild(htr)
     table.appendChild(thead)
+
     var tbody = document.createElement('tbody')
-    if (isScatter) {
-      series.forEach(function (s) {
-        ;(s.points || []).forEach(function (p) {
-          var tr = document.createElement('tr')
-          ;[s.name, p[0], p[1]].forEach(function (v) {
-            var td = document.createElement('td')
-            td.className = 'wb-td'
-            td.textContent = String(v)
-            tr.appendChild(td)
+    cats.forEach(function (cat, ri) {
+      var tr = document.createElement('tr')
+      var catTd = document.createElement('td')
+      catTd.className = 'wb-td'
+      catTd.appendChild(
+        edInput(String(cat), function (v) {
+          commit(function (bb) {
+            bb.x = shallow(bb.x || {})
+            bb.x.categories = (bb.x.categories || []).map(function (cc, i) {
+              return i === ri ? v : cc
+            })
           })
-          tbody.appendChild(tr)
+        })
+      )
+      tr.appendChild(catTd)
+      series.forEach(function (s, si) {
+        var td = document.createElement('td')
+        td.className = 'wb-td'
+        var val = (s.values || [])[ri]
+        td.appendChild(
+          edInput(val == null ? '' : String(val), function (v) {
+            commit(function (bb) {
+              bb.series = bb.series.map(function (ss, i) {
+                if (i !== si) return ss
+                var c = shallow(ss)
+                var vals = (c.values || []).slice()
+                while (vals.length <= ri) vals.push(0)
+                vals[ri] = v.trim() === '' || isNaN(Number(v)) ? v : Number(v)
+                c.values = vals
+                return c
+              })
+            })
+          })
+        )
+        tr.appendChild(td)
+      })
+      var delTd = document.createElement('td')
+      delTd.className = 'wb-td wb-ed-rowdel'
+      var delRow = document.createElement('button')
+      delRow.className = 'wb-mini-btn wb-ed-del'
+      delRow.textContent = '×'
+      delRow.title = 'Remove this category (and its values)'
+      delRow.addEventListener('click', function () {
+        commit(function (bb) {
+          bb.x = shallow(bb.x || {})
+          bb.x.categories = (bb.x.categories || []).filter(function (_, i) {
+            return i !== ri
+          })
+          bb.series = (bb.series || []).map(function (ss) {
+            var c = shallow(ss)
+            c.values = (c.values || []).filter(function (_, i) {
+              return i !== ri
+            })
+            return c
+          })
         })
       })
-    } else {
-      cats.forEach(function (cat, i) {
-        var tr = document.createElement('tr')
-        var td0 = document.createElement('td')
-        td0.className = 'wb-td'
-        td0.textContent = String(cat)
-        tr.appendChild(td0)
-        series.forEach(function (s) {
-          var td = document.createElement('td')
-          td.className = 'wb-td'
-          td.style.textAlign = 'right'
-          td.textContent = String((s.values || [])[i] != null ? (s.values || [])[i] : '')
-          tr.appendChild(td)
-        })
-        tbody.appendChild(tr)
-      })
-    }
+      delTd.appendChild(delRow)
+      tr.appendChild(delTd)
+      tbody.appendChild(tr)
+    })
     table.appendChild(tbody)
-    var scroll = document.createElement('div')
-    scroll.className = 'wb-table-scroll'
     scroll.appendChild(table)
-    host.appendChild(scroll)
+    ed.appendChild(scroll)
+
+    var addCat = mkMiniBtn('+ category', function () {
+      commit(function (bb) {
+        bb.x = shallow(bb.x || {})
+        bb.x.categories = (bb.x.categories || []).concat([
+          'cat ' + (((bb.x || {}).categories || []).length + 1)
+        ])
+        bb.series = (bb.series || []).map(function (ss) {
+          var c = shallow(ss)
+          c.values = (c.values || []).concat([0])
+          return c
+        })
+      })
+    })
+    var foot = document.createElement('div')
+    foot.className = 'wb-ed-row'
+    foot.appendChild(addCat)
+    ed.appendChild(foot)
   }
 
+  function buildScatterEditor(ed, b, commit) {
+    var series = Array.isArray(b.series) ? b.series : []
+    series.forEach(function (s, si) {
+      var block = document.createElement('div')
+      block.className = 'wb-ed-scatter-series'
+      var head = document.createElement('div')
+      head.className = 'wb-ed-row'
+      head.appendChild(
+        edInput(s.name || 'series ' + (si + 1), function (v) {
+          commit(function (bb) {
+            bb.series = bb.series.map(function (ss, i) {
+              if (i !== si) return ss
+              var c = shallow(ss)
+              c.name = v
+              return c
+            })
+          })
+        })
+      )
+      var delS = mkMiniBtn('× series', function () {
+        commit(function (bb) {
+          bb.series = bb.series.filter(function (_, i) {
+            return i !== si
+          })
+        })
+      })
+      head.appendChild(delS)
+      block.appendChild(head)
+
+      var pts = Array.isArray(s.points) ? s.points : []
+      pts.forEach(function (p, pi) {
+        var row = document.createElement('div')
+        row.className = 'wb-ed-row wb-ed-point'
+        ;[0, 1].forEach(function (axis) {
+          row.appendChild(edLabel(axis === 0 ? 'x' : 'y'))
+          row.appendChild(
+            edInput(String((p || [])[axis] != null ? p[axis] : ''), function (v) {
+              commit(function (bb) {
+                bb.series = bb.series.map(function (ss, i) {
+                  if (i !== si) return ss
+                  var c = shallow(ss)
+                  c.points = (c.points || []).map(function (pp, j) {
+                    if (j !== pi) return pp
+                    var np = (pp || []).slice()
+                    np[axis] = isNaN(Number(v)) ? v : Number(v)
+                    return np
+                  })
+                  return c
+                })
+              })
+            })
+          )
+        })
+        var delP = mkMiniBtn('×', function () {
+          commit(function (bb) {
+            bb.series = bb.series.map(function (ss, i) {
+              if (i !== si) return ss
+              var c = shallow(ss)
+              c.points = (c.points || []).filter(function (_, j) {
+                return j !== pi
+              })
+              return c
+            })
+          })
+        })
+        row.appendChild(delP)
+        block.appendChild(row)
+      })
+      var addP = mkMiniBtn('+ point', function () {
+        commit(function (bb) {
+          bb.series = bb.series.map(function (ss, i) {
+            if (i !== si) return ss
+            var c = shallow(ss)
+            c.points = (c.points || []).concat([[0, 0]])
+            return c
+          })
+        })
+      })
+      block.appendChild(addP)
+      ed.appendChild(block)
+    })
+    var addS = mkMiniBtn('+ series', function () {
+      commit(function (bb) {
+        bb.series = (bb.series || []).concat([
+          { name: 'series ' + ((bb.series || []).length + 1), points: [[0, 0]] }
+        ])
+      })
+    })
+    ed.appendChild(addS)
+  }
+
+  function edLabel(text) {
+    var l = document.createElement('span')
+    l.className = 'wb-ed-label'
+    l.textContent = text
+    return l
+  }
+
+  // A small input that commits on change (blur/Enter). Commit re-renders the board,
+  // which is safe because focus has already left the field.
+  function edInput(value, onCommit) {
+    var inp = document.createElement('input')
+    inp.className = 'wb-ed-input'
+    inp.value = value
+    inp.addEventListener('change', function () {
+      onCommit(inp.value)
+    })
+    inp.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') inp.blur()
+      e.stopPropagation()
+    })
+    return inp
+  }
+
+  function edTh(text) {
+    var th = document.createElement('th')
+    th.className = 'wb-th'
+    th.textContent = text
+    return th
+  }
+
+  /* ── note board: Edit / Split / Preview modes, click-preview-to-edit ── */
   function renderNoteBoard(view, b) {
+    var mode = noteModes[b.id] || 'preview'
     var bar = document.createElement('div')
     bar.className = 'wb-table-toolbar'
-    var editing = false
+
+    var body = document.createElement('div')
+    body.className = 'wb-note-body mode-' + mode
+
     var rendered = document.createElement('div')
     rendered.className = 'wb-note-rendered'
     var ta = document.createElement('textarea')
     ta.className = 'wb-note-editor'
     ta.spellcheck = false
-    ta.style.display = 'none'
     ta.value = b.markdown || ''
+    ta.placeholder = 'Write markdown here…'
 
-    var toggle = mkMiniBtn('edit markdown', function () {
-      editing = !editing
-      rendered.style.display = editing ? 'none' : 'block'
-      ta.style.display = editing ? 'block' : 'none'
-      toggle.textContent = editing ? 'preview' : 'edit markdown'
-      if (editing) ta.focus()
+    function setMode(m, focus) {
+      noteModes[b.id] = m
+      mode = m
+      body.className = 'wb-note-body mode-' + m
+      ;['edit', 'split', 'preview'].forEach(function (mm) {
+        var btn = bar.querySelector('[data-mode="' + mm + '"]')
+        if (btn) btn.classList.toggle('active', mm === m)
+      })
+      if (focus && m !== 'preview') ta.focus()
+    }
+    ;['edit', 'split', 'preview'].forEach(function (m) {
+      var btn = mkMiniBtn(m, function () {
+        setMode(m, true)
+      })
+      btn.dataset.mode = m
+      if (m === mode) btn.classList.add('active')
+      bar.appendChild(btn)
     })
-    bar.appendChild(toggle)
+
     view.appendChild(bar)
-    view.appendChild(rendered)
-    view.appendChild(ta)
+    body.appendChild(ta)
+    body.appendChild(rendered)
+    view.appendChild(body)
 
     rendered.innerHTML = root.WBNote.render(b.markdown || '')
+    // Click the preview to start editing — the "how do I write in this?" path.
+    rendered.addEventListener('click', function (e) {
+      if (mode !== 'preview') return
+      if (e.target.closest('a')) return
+      setMode('split', true)
+    })
+    if (mode === 'preview' && !(b.markdown || '').trim()) {
+      rendered.innerHTML =
+        '<div class="wb-empty">Empty note — click here (or “edit”) to start writing.</div>'
+    }
 
     var deb = null
     ta.addEventListener('input', function () {
       rendered.innerHTML = root.WBNote.render(ta.value)
       clearTimeout(deb)
       deb = setTimeout(function () {
-        mutateDoc(function (d) {
+        mutateDocSilent(function (d) {
           return WB.updateBoard(d, b.id, function (bb) {
             bb.markdown = ta.value
           })
@@ -425,7 +853,26 @@
     })
   }
 
-  // A source-editing textarea under a board (mermaid). Debounced persist.
+  // Mermaid insert-snippets — so authoring doesn't require remembering the syntax.
+  var MM_SNIPPETS = [
+    { label: '+ node', text: '\n  N[Label]' },
+    { label: '+ edge', text: '\n  A --> B' },
+    { label: '+ labeled edge', text: '\n  A -- label --> B' },
+    { label: '+ subgraph', text: '\n  subgraph Group\n    X[Item]\n  end' }
+  ]
+  var MM_TEMPLATES = {
+    flowchart:
+      'flowchart TD\n  A[Start] --> B{Decision}\n  B -- yes --> C[Do it]\n  B -- no --> D[Skip]',
+    sequence:
+      'sequenceDiagram\n  participant U as User\n  participant S as System\n  U->>S: request\n  S-->>U: response',
+    state: 'stateDiagram-v2\n  [*] --> Idle\n  Idle --> Working: start\n  Working --> Idle: done',
+    er: 'erDiagram\n  USER ||--o{ ORDER : places\n  ORDER ||--|{ ITEM : contains',
+    gantt:
+      'gantt\n  dateFormat YYYY-MM-DD\n  title Plan\n  section Phase 1\n  Task A :a1, 2026-01-01, 7d\n  Task B :after a1, 5d'
+  }
+
+  // A source-editing textarea under a board (mermaid). Debounced persist (silent —
+  // re-rendering the board mid-typing would rebuild the textarea and dump focus).
   function appendSourceEditor(view, b, field, label) {
     var sec = document.createElement('div')
     sec.className = 'source-sec'
@@ -436,12 +883,8 @@
     ta.className = 'source-ta'
     ta.spellcheck = false
     ta.value = b[field] || ''
-    sec.appendChild(lbl)
-    sec.appendChild(ta)
-    view.appendChild(sec)
-    var deb = null
-    ta.addEventListener('input', function () {
-      // live re-render for mermaid
+
+    function refreshAndSave() {
       var tmp = {}
       Object.keys(b).forEach(function (k) {
         tmp[k] = b[k]
@@ -451,13 +894,71 @@
       if (host) root.WBMermaid.renderMermaid(host, tmp)
       clearTimeout(deb)
       deb = setTimeout(function () {
-        mutateDoc(function (d) {
+        mutateDocSilent(function (d) {
           return WB.updateBoard(d, b.id, function (bb) {
             bb[field] = ta.value
           })
         }, 'source')
       }, 400)
+    }
+
+    // Snippet bar: insert at cursor + template picker.
+    var snips = document.createElement('div')
+    snips.className = 'wb-snippet-bar'
+    MM_SNIPPETS.forEach(function (s) {
+      snips.appendChild(
+        mkMiniBtn(s.label, function () {
+          insertAtCursor(ta, s.text)
+          refreshAndSave()
+        })
+      )
     })
+    var dirBtn = mkMiniBtn('TD⇄LR', function () {
+      ta.value = ta.value.replace(/\b(flowchart|graph)\s+(TD|TB|LR|RL|BT)\b/, function (_, kw, d) {
+        return kw + ' ' + (d === 'LR' ? 'TD' : 'LR')
+      })
+      refreshAndSave()
+    })
+    dirBtn.title = 'Toggle flowchart direction (top-down / left-right)'
+    snips.appendChild(dirBtn)
+    var tmplSel = document.createElement('select')
+    tmplSel.className = 'wb-select'
+    var opt0 = document.createElement('option')
+    opt0.value = ''
+    opt0.textContent = 'template…'
+    tmplSel.appendChild(opt0)
+    Object.keys(MM_TEMPLATES).forEach(function (k) {
+      var o = document.createElement('option')
+      o.value = k
+      o.textContent = k
+      tmplSel.appendChild(o)
+    })
+    tmplSel.title = 'Insert a starting template (appends when the board already has source)'
+    tmplSel.addEventListener('change', function () {
+      var k = tmplSel.value
+      tmplSel.value = ''
+      if (!k) return
+      var t = MM_TEMPLATES[k]
+      ta.value = ta.value.trim() ? ta.value + '\n\n' + t : t
+      refreshAndSave()
+    })
+    snips.appendChild(tmplSel)
+
+    sec.appendChild(lbl)
+    sec.appendChild(snips)
+    sec.appendChild(ta)
+    view.appendChild(sec)
+    var deb = null
+    ta.addEventListener('input', refreshAndSave)
+  }
+
+  function insertAtCursor(ta, text) {
+    var start = ta.selectionStart != null ? ta.selectionStart : ta.value.length
+    var end = ta.selectionEnd != null ? ta.selectionEnd : start
+    ta.value = ta.value.slice(0, start) + text + ta.value.slice(end)
+    var pos = start + text.length
+    ta.selectionStart = ta.selectionEnd = pos
+    ta.focus()
   }
 
   /* ── Comments thread (under the active board) ─────────────────────── */
@@ -536,6 +1037,10 @@
     })
     document.addEventListener('click', function () {
       addMenu.classList.remove('open')
+      if (confirmDeleteId) {
+        confirmDeleteId = null
+        renderTabs()
+      }
     })
     WB.BOARD_TYPES.forEach(function (type) {
       var item = document.createElement('div')
@@ -562,22 +1067,11 @@
     renderAll()
   }
 
-  function renameBoard(id) {
-    var b = WB.findBoard(doc, id)
-    if (!b) return
-    var name = prompt('Rename board', b.title || b.id)
-    if (name == null) return
-    mutateDoc(function (d) {
-      return WB.updateBoard(d, id, function (bb) {
-        bb.title = name
-      })
-    }, 'rename')
-  }
-
+  // Deletion is confirmed inline in the tab (renderTabs) — never via confirm(),
+  // which is a silent no-op in the sandboxed iframe.
   function deleteBoard(id) {
     var b = WB.findBoard(doc, id)
     if (!b) return
-    if (!confirm('Delete board "' + (b.title || id) + '"? This cannot be undone.')) return
     var idx = WB.boardIndex(doc, id)
     mutateDoc(function (d) {
       var next = shallow(d)

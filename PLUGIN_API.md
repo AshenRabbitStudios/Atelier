@@ -41,6 +41,12 @@ and IndexedDB all work and are self-scoped (no reach into the app or other plugi
 still goes only through the host `storage`/`context` API (§8) — IndexedDB/localStorage are a
 per-origin cache, not restorable conversation state.
 
+**Pitfall — no native dialogs.** The iframe sandbox does not include `allow-modals`, so
+`alert()`, `confirm()`, and `prompt()` are **silent no-ops** (`confirm` returns `false`,
+`prompt` returns `null`, no dialog appears). Build inline confirm/rename UI instead of
+native dialogs — a "delete?" button swap or an inline input. This has bitten shipped
+plugins; treat any native dialog call in pane code as a bug.
+
 ### manifest.json
 
 ```jsonc

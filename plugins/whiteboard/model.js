@@ -22,7 +22,7 @@
   'use strict'
 
   var BOARD_TYPES = ['mermaid', 'table', 'chart', 'note']
-  var CHART_TYPES = ['bar', 'line', 'area', 'scatter', 'pie']
+  var CHART_TYPES = ['bar', 'line', 'area', 'scatter', 'pie', 'waterfall']
 
   /* Parse the context value. Accepts a JSON string or an already-parsed object
      (the host may hand back either). Returns:
@@ -201,6 +201,58 @@
     return JSON.stringify(a[field]) !== JSON.stringify(b[field])
   }
 
+  /* ── Table row/col deletion with cell-style remapping ─────────────────
+     Table boards may carry an optional `styles` map: { "r,c": {bg,color,bold,align} }.
+     Deleting a row/col must shift the keys of everything after it or formatting
+     silently lands on the wrong cells. Pure helpers, used by the table board UI. */
+  function remapStyles(styles, fn) {
+    if (!styles || typeof styles !== 'object') return styles
+    var out = {}
+    Object.keys(styles).forEach(function (k) {
+      var m = /^(\d+),(\d+)$/.exec(k)
+      if (!m) {
+        out[k] = styles[k] // unknown key shape — preserve verbatim
+        return
+      }
+      var mapped = fn(Number(m[1]), Number(m[2]))
+      if (mapped) out[mapped[0] + ',' + mapped[1]] = styles[k]
+    })
+    return out
+  }
+
+  /* Mutators for a table-board clone (call inside updateBoard's mutator). */
+  function deleteTableRow(b, rowIdx) {
+    b.rows = (Array.isArray(b.rows) ? b.rows : []).filter(function (_, i) {
+      return i !== rowIdx
+    })
+    b.styles = remapStyles(b.styles, function (r, c) {
+      if (r === rowIdx) return null
+      return [r > rowIdx ? r - 1 : r, c]
+    })
+    if (b.styles && !Object.keys(b.styles).length) delete b.styles
+  }
+
+  function deleteTableCol(b, colIdx) {
+    b.columns = (Array.isArray(b.columns) ? b.columns : []).filter(function (_, i) {
+      return i !== colIdx
+    })
+    b.rows = (Array.isArray(b.rows) ? b.rows : []).map(function (r) {
+      return (r || []).filter(function (_, i) {
+        return i !== colIdx
+      })
+    })
+    if (Array.isArray(b.align)) {
+      b.align = b.align.filter(function (_, i) {
+        return i !== colIdx
+      })
+    }
+    b.styles = remapStyles(b.styles, function (r, c) {
+      if (c === colIdx) return null
+      return [r, c > colIdx ? c - 1 : c]
+    })
+    if (b.styles && !Object.keys(b.styles).length) delete b.styles
+  }
+
   /* Serialized-size guard: char budget is maxTokens * 4 (spec §5). */
   function sizeInfo(doc, maxTokens) {
     var chars = serialize(doc).length
@@ -219,6 +271,9 @@
     addComment: addComment,
     newBoard: newBoard,
     boardFieldChanged: boardFieldChanged,
-    sizeInfo: sizeInfo
+    sizeInfo: sizeInfo,
+    remapStyles: remapStyles,
+    deleteTableRow: deleteTableRow,
+    deleteTableCol: deleteTableCol
   }
 })

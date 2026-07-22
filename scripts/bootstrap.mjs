@@ -235,6 +235,42 @@ async function checkElectron() {
   ok('Electron binary', 'repaired')
 }
 
+// ---- step 3b: Terminal PTY native module (optional plugin) -------------------
+// The bundled Terminal plugin needs a native PTY addon (@homebridge/node-pty-prebuilt-multiarch).
+// Its Windows and Linux prebuilt binaries ship inside the package tarball and load under Electron's
+// ABI with no rebuild and no compiler (verified: Electron 42 / NODE_MODULE_VERSION 146 on win-x64);
+// macOS may fall back to a source build. This is a SOFT check on purpose: a missing binary only
+// disables the Terminal plugin — which reports the problem inside its own pane — so it must never
+// block the app or add an install step. We note it and move on.
+function checkNativeModules() {
+  const modDir = join(root, 'node_modules', '@homebridge', 'node-pty-prebuilt-multiarch')
+  if (!existsSync(modDir)) return // a missing node_modules is the deps step's problem, not ours
+  const built = join(modDir, 'build', 'Release', 'pty.node')
+  let prebuilt = false
+  const prebuildsDir = join(modDir, 'prebuilds')
+  if (existsSync(prebuildsDir)) {
+    try {
+      prebuilt = readdirSync(prebuildsDir).some((d) => {
+        const sub = join(prebuildsDir, d)
+        try {
+          return statSync(sub).isDirectory() && readdirSync(sub).some((f) => f.endsWith('.node'))
+        } catch {
+          return false
+        }
+      })
+    } catch {
+      /* fall through to the note */
+    }
+  }
+  if (existsSync(built) || prebuilt) return ok('Terminal PTY module', 'prebuilt binary present')
+  console.log('  [NOTE] Terminal PTY module — no prebuilt binary for this platform')
+  say(
+    'The optional Terminal plugin needs a native PTY addon and no prebuilt binary',
+    'was found for this platform (can happen on macOS). The rest of Atelier is',
+    'unaffected; the Terminal pane shows a build hint if you open it.'
+  )
+}
+
 // ---- step 4: Claude Code CLI ------------------------------------------------
 // Atelier authenticates via the ambient Claude Code session (main.ts strips
 // ANTHROPIC_API_KEY on purpose), so the CLI is how a user logs in at all.
@@ -404,6 +440,7 @@ if (doctor) {
 checkNode()
 await checkDeps()
 if (!doctor || depsState() !== 'missing') await checkElectron()
+checkNativeModules()
 await checkClaudeCli()
 await checkAuth()
 warnApiKey()

@@ -1,0 +1,13 @@
+{
+  "id": "terminal",
+  "name": "Terminal",
+  "version": "0.1.0",
+  "description": "A real, interactive shell in a pane — a live PTY (bash/PowerShell/cmd) you can type into, run TUI apps like vim or htop, resize, and restart. Distinct from Bash Stream (which passively mirrors the agent's commands): this is YOUR own terminal, spawned in the conversation's working directory. One shell per conversation, persistent while the plugin is enabled.",
+  "icon": "M2.5 3h11a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM4 6l2 2-2 2M8 10.5h3",
+  "kind": "panel",
+  "entry": "index.html",
+  "backend": "backend.cjs",
+  "service": true,
+  "permissions": ["data:subscribe", "data:publish"],
+  "defaultDock": "bottom"
+}

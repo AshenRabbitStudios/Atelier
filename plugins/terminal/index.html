@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Terminal</title>
+    <link rel="stylesheet" href="atelier-plugin://terminal/vendor/xterm.css" />
+    <script src="atelier-plugin://terminal/vendor/xterm.js"></script>
+    <script src="atelier-plugin://terminal/vendor/addon-fit.js"></script>
+    <script src="atelier-plugin://__runtime__/atelier.js"></script>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: var(--bg-2, #0f1117);
+        color: var(--text, #e7eaf0);
+        font-family: var(--font, system-ui, sans-serif);
+      }
+
+      #root {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+
+      #bar {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 5px 10px;
+        border-bottom: 1px solid var(--border, #252b37);
+        background: var(--surface, #14171e);
+        font-size: 11px;
+        user-select: none;
+      }
+
+      #bar .shell {
+        font-family: var(--mono, monospace);
+        color: var(--text, #e7eaf0);
+      }
+
+      #bar .cwd {
+        color: var(--faint, #5e6677);
+        font-family: var(--mono, monospace);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+
+      #bar .spacer {
+        flex: 1 1 auto;
+      }
+
+      #bar button {
+        appearance: none;
+        border: 1px solid var(--border, #252b37);
+        background: var(--bg-2, #0f1117);
+        color: var(--muted, #aab2c0);
+        font: inherit;
+        font-size: 11px;
+        padding: 3px 9px;
+        border-radius: 5px;
+        cursor: pointer;
+      }
+      #bar button:hover {
+        color: var(--text, #e7eaf0);
+        border-color: var(--accent, #5b9cff);
+      }
+
+      #dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--ok, #4ea36a);
+        box-shadow: 0 0 6px var(--ok, #4ea36a);
+        flex: 0 0 auto;
+      }
+      #dot.exited {
+        background: var(--faint, #5e6677);
+        box-shadow: none;
+      }
+
+      #term-wrap {
+        flex: 1 1 0;
+        min-height: 0;
+        padding: 6px 8px;
+      }
+
+      .xterm {
+        height: 100%;
+      }
+
+      #empty {
+        padding: 14px 16px;
+        color: var(--faint, #5e6677);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+      #empty code {
+        font-family: var(--mono, monospace);
+        color: var(--muted, #aab2c0);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div id="bar">
+        <span id="dot"></span>
+        <span class="shell" id="shell">terminal</span>
+        <span class="cwd" id="cwd"></span>
+        <span class="spacer"></span>
+        <button id="restart" title="Kill this shell and start a fresh one">Restart</button>
+      </div>
+      <div id="term-wrap"></div>
+    </div>
+
+    <script>
+      const A = window.atelier
+      const wrap = document.getElementById('term-wrap')
+      const shellEl = document.getElementById('shell')
+      const cwdEl = document.getElementById('cwd')
+      const dotEl = document.getElementById('dot')
+      const restartBtn = document.getElementById('restart')
+      const OUT_CHANNEL = 'terminal:out'
+
+      function token(name, fallback) {
+        const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+        return v || fallback
+      }
+
+      let term = null
+      let fit = null
+      let ready = false // gate live output until the scrollback snapshot has been written
+
+      function showFatal(message) {
+        wrap.innerHTML = '<div id="empty">Terminal could not start.<br>' + message + '</div>'
+      }
+
+      function doFit() {
+        try {
+          fit && fit.fit()
+        } catch (_) {
+          /* ignore */
+        }
+      }
+
+      // Push the current dimensions to the backing PTY so wrapped lines / TUIs match the pane.
+      function pushResize() {
+        if (!term) return
+        A.backend.call('resize', { cols: term.cols, rows: term.rows }).catch(() => {})
+      }
+
+      async function attachAndSubscribe() {
+        // Snapshot first, then subscribe: writing the replay buffer before the live stream avoids
+        // duplicating bytes. The tiny gap between snapshot and subscribe can drop a few ms of output
+        // on reattach — invisible in practice, and the next keystroke redraws.
+        let info = null
+        try {
+          info = await A.backend.call('attach', {})
+        } catch (e) {
+          showFatal((e && e.message) || String(e))
+          return
+        }
+        if (info) {
+          shellEl.textContent = shellName(info.shell)
+          cwdEl.textContent = info.cwd || ''
+          dotEl.classList.toggle('exited', !!info.exited)
+          if (info.buffer) term.write(info.buffer)
+        }
+        ready = true
+        await A.data.subscribe(OUT_CHANNEL, (chunk) => {
+          if (ready && typeof chunk === 'string') term.write(chunk)
+        })
+        pushResize()
+      }
+
+      function shellName(p) {
+        if (!p) return 'terminal'
+        const parts = String(p).split(/[\\/]/)
+        return parts[parts.length - 1] || p
+      }
+
+      restartBtn.addEventListener('click', async () => {
+        if (!term) return
+        try {
+          const r = await A.backend.call('restart', {})
+          term.reset()
+          dotEl.classList.remove('exited')
+          if (r && r.shell) shellEl.textContent = shellName(r.shell)
+          pushResize()
+          term.focus()
+        } catch (_) {
+          /* backend will report via its own channel */
+        }
+      })
+
+      A.on('load', async () => {
+        if (typeof Terminal === 'undefined') {
+          showFatal('xterm failed to load (check vendor assets).')
+          return
+        }
+        term = new Terminal({
+          fontFamily: token('--mono', 'monospace'),
+          fontSize: 12,
+          scrollback: 10000,
+          cursorBlink: true,
+          theme: {
+            background: token('--bg-2', '#0f1117'),
+            foreground: token('--text', '#e7eaf0'),
+            cursor: token('--accent', '#5b9cff')
+          }
+        })
+        try {
+          fit = new FitAddon.FitAddon()
+          term.loadAddon(fit)
+        } catch (_) {
+          /* fit addon optional */
+        }
+        term.open(wrap)
+        doFit()
+
+        // Keystrokes / pasted text → the PTY. Not awaited: keep typing latency off the RPC round-trip.
+        term.onData((data) => {
+          A.backend.call('write', { data }).catch(() => {})
+        })
+        // xterm recomputed its grid (font load, fit) — tell the PTY.
+        term.onResize(() => pushResize())
+
+        new ResizeObserver(() => doFit()).observe(wrap)
+        window.addEventListener('resize', doFit)
+        if (A.layout && A.layout.onResize) A.layout.onResize(() => doFit())
+
+        await attachAndSubscribe()
+        term.focus()
+      })
+    </script>
+  </body>
+</html>

@@ -1153,3 +1153,34 @@ Needs human spot-check in the live app (cannot verify headlessly):
 
 Note: real channel delivery requires the user to paste their own webhook URLs / bot tokens; none
 can be exercised in automated tests, hence the payload-builder + rate-limiter unit tests instead.
+
+## 2026-07-22 — terminal plugin (interactive PTY shell)
+
+New bundled plugin `plugins/terminal/`: a real, interactive shell pane (xterm.js front,
+`@homebridge/node-pty-prebuilt-multiarch` PTY backend running in the utilityProcess). One shell
+per conversation, spawned on `enable` in the conversation cwd, killed on `disable`; pane drives it
+over `backend.call` RPC (`attach`/`write`/`resize`/`restart`) and reads output from the
+`terminal:out` DataBus channel. Defaults to git-bash on Windows (falls back to cmd;
+`ATELIER_TERMINAL_SHELL` overrides). See DECISIONS.md 2026-07-22 for the dependency + protocol
+rationale.
+
+De-risked before building UI (the native-module question was the whole risk):
+
+- **Native module loads under Electron's ABI with no rebuild/compiler** — probed the real
+  `utilityProcess` (Electron 42, `NODE_MODULE_VERSION` 146, win-x64): shipped `build/Release/pty.node`
+  loaded and drove a live `cmd.exe` (ConPTY, real `%TIME%` expansion). PASS.
+- **Backend contract verified end-to-end** — drove the real `backend.cjs` with
+  PluginBackendManager's exact `hello`/`enable`/`rpc` message shapes: spawned git-bash, `attach`
+  returned the scrollback buffer + shell/cwd/pid, `write` of `echo $((6*7))` streamed back a publish
+  containing `INTEGRATION_42` (live execution, correct conversation-scoped publish). PASS.
+
+Gate green: format:check, lint, typecheck, `npm test` (466), `npm run build`.
+
+Needs human spot-check (not automatable headlessly):
+
+- Enable the Terminal plugin in a conversation → a bash prompt appears in the pane; type
+  `ls`/`vim`/`htop` → interactive TUIs render and respond; resize the pane → shell reflows.
+- Close and reopen the pane on a running shell → scrollback tail restored via `attach`.
+- Restart button kills and respawns the shell.
+- macOS: the fork ships no darwin prebuilt in the tarball — confirm install behavior there (may
+  source-build; bootstrap `checkNativeModules()` notes a missing binary but never blocks launch).

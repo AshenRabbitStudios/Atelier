@@ -93,7 +93,11 @@
       #term-wrap {
         flex: 1 1 0;
         min-height: 0;
+        min-width: 0;
         padding: 6px 8px;
+        /* Clip a sub-pixel terminal overflow so the wrapper never grows its OWN scrollbar — that
+           transient scrollbar is what drives the fit/observe oscillation (the flickering scrollbar). */
+        overflow: hidden;
       }
 
       .xterm {
@@ -146,12 +150,34 @@
         wrap.innerHTML = '<div id="empty">Terminal could not start.<br>' + message + '</div>'
       }
 
-      function doFit() {
-        try {
-          fit && fit.fit()
-        } catch (_) {
-          /* ignore */
+      // Coalesce every resize trigger into a single rAF-guarded fit. Deferring to the next frame
+      // breaks the ResizeObserver observe→resize→observe re-entrancy, and skipping the fit when the
+      // pane's pixel box is unchanged stops the ±1-row scrollbar oscillation (the flickering-scrollbar
+      // bug). Pass force=true to re-fit even at the same size (e.g. after a font reflow / restart).
+      let fitPending = false
+      let lastW = -1
+      let lastH = -1
+      function scheduleFit(force) {
+        if (force) {
+          lastW = -1
+          lastH = -1
         }
+        if (fitPending) return
+        fitPending = true
+        requestAnimationFrame(() => {
+          fitPending = false
+          if (!term || !fit) return
+          const w = wrap.clientWidth
+          const h = wrap.clientHeight
+          if (w === lastW && h === lastH) return
+          lastW = w
+          lastH = h
+          try {
+            fit.fit()
+          } catch (_) {
+            /* ignore */
+          }
+        })
       }
 
       // Push the current dimensions to the backing PTY so wrapped lines / TUIs match the pane.
@@ -227,7 +253,7 @@
           /* fit addon optional */
         }
         term.open(wrap)
-        doFit()
+        scheduleFit(true)
 
         // Keystrokes / pasted text → the PTY. Not awaited: keep typing latency off the RPC round-trip.
         term.onData((data) => {
@@ -236,9 +262,9 @@
         // xterm recomputed its grid (font load, fit) — tell the PTY.
         term.onResize(() => pushResize())
 
-        new ResizeObserver(() => doFit()).observe(wrap)
-        window.addEventListener('resize', doFit)
-        if (A.layout && A.layout.onResize) A.layout.onResize(() => doFit())
+        new ResizeObserver(() => scheduleFit()).observe(wrap)
+        window.addEventListener('resize', () => scheduleFit())
+        if (A.layout && A.layout.onResize) A.layout.onResize(() => scheduleFit())
 
         await attachAndSubscribe()
         term.focus()

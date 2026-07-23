@@ -636,6 +636,9 @@ body {
 
 .conv-dropdown {
   position: relative;
+  /* Sits inside .conversation-bar's drag region (-webkit-app-region: drag); without this the
+     OS eats the ☰ Conversations click as a window-drag and the menu never opens. */
+  -webkit-app-region: no-drag;
 }
 .conv-prev {
   background: var(--bg-input);

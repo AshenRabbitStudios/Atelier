@@ -1,6 +1,7 @@
 import { Fragment, memo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import {
   KNOWN_MODELS,
+  type ContextBreakdown,
   type EffortLevel,
   type ForkPoint,
   type ModelOption,
@@ -35,6 +36,7 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
   const state = useSyncExternalStore(store.subscribeTranscript, store.getTranscript)
   const view = useSyncExternalStore(store.subscribeView, store.getView)
   const [models, setModels] = useState<ModelOption[]>(KNOWN_MODELS)
+  const [contextSize, setContextSize] = useState<ContextBreakdown | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const transcriptRef = useRef<HTMLDivElement>(null)
   // 1s re-render tick while working — the elapsed clock's ANCHOR lives in state.turnStartedAt.
@@ -148,6 +150,22 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
   // (TaskCreate) are agent to-do items and get a separate, spinner-less bar.
   const subagents = state.background.filter((t) => t.kind === 'subagent')
   const tasks = state.background.filter((t) => t.kind === 'task')
+
+  // Estimated context size for the readout below the composer. Refetch when the message count
+  // changes (a turn grew the history) or a turn settles (busy toggles, and plugin context may have
+  // changed) — cheap main-process estimate, no need to poll during streaming.
+  useEffect(() => {
+    let alive = true
+    void window.atelier.agent
+      .contextSize(instanceId)
+      .then((b) => {
+        if (alive) setContextSize(b)
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [instanceId, state.messages.length, busy])
 
   // Run a 1s clock while working so the elapsed readout updates. The start time is store
   // state (anchored by main), so the clock survives tab switches instead of restarting.
@@ -488,6 +506,47 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
         onSend={send}
         onInterrupt={interrupt}
       />
+      <ContextSize breakdown={contextSize} />
+    </div>
+  )
+}
+
+/**
+ * Estimated context-size readout under the composer: a total token count that expands on hover into
+ * a per-contributor breakdown (each plugin + the chat history), so you can see what is filling the
+ * window. Values are estimates (chars≈tokens×4); the SDK reports true input_tokens only mid-turn.
+ */
+function ContextSize({ breakdown }: { breakdown: ContextBreakdown | null }) {
+  if (!breakdown) return null
+  const rows = breakdown.contributions.filter((c) => c.tokens > 0)
+  const max = Math.max(1, ...rows.map((c) => c.tokens))
+  return (
+    <div className="context-size" tabIndex={0}>
+      <span className="context-size-total">
+        ~{fmtTokens(breakdown.totalTokens)} tokens in context
+      </span>
+      <div className="context-size-pop" role="tooltip">
+        <div className="context-size-pop-head">Estimated context size</div>
+        {rows.length === 0 ? (
+          <div className="context-size-empty">Nothing in context yet.</div>
+        ) : (
+          <ul className="context-size-list">
+            {rows.map((c) => (
+              <li key={c.id} className="context-size-row">
+                <span className="context-size-name">{c.label}</span>
+                <span className="context-size-track">
+                  <span
+                    className="context-size-fill"
+                    style={{ width: `${(c.tokens / max) * 100}%` }}
+                  />
+                </span>
+                <span className="context-size-tok">{fmtTokens(c.tokens)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="context-size-foot">Approximate — characters ÷ 4.</div>
+      </div>
     </div>
   )
 }

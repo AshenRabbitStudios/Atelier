@@ -423,6 +423,12 @@ body {
   gap: 2px;
   overflow-y: auto;
 }
+/* Group dividers inside the centered icon column: the parent's align-items:center would
+   collapse a width-less .rail-sep to zero, so stretch it back to the rail width. */
+.rail-icons .rail-sep {
+  align-self: stretch;
+  margin: 3px 8px;
+}
 .rail-icon {
   flex: 0 0 auto;
   width: 32px;
@@ -2268,6 +2274,99 @@ body {
 .stop-btn {
   background: var(--err);
   color: var(--on-accent);
+}
+
+/* ---- Context-size readout (under the composer) ---- */
+.context-size {
+  flex: 0 0 auto;
+  position: relative;
+  background: var(--surface-2);
+  padding: 0 14px 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--faint);
+  text-align: right;
+}
+.context-size-total {
+  border-bottom: 1px dotted var(--border);
+  cursor: default;
+}
+.context-size-pop {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: calc(100% - 2px);
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(4px);
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
+  z-index: 30;
+  max-height: 320px;
+  overflow: auto;
+  text-align: left;
+}
+.context-size:hover .context-size-pop,
+.context-size:focus-within .context-size-pop {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+.context-size-pop-head {
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+.context-size-empty {
+  color: var(--faint);
+}
+.context-size-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.context-size-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px 44px;
+  align-items: center;
+  gap: 8px;
+}
+.context-size-name {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.context-size-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-1, var(--surface-2));
+  overflow: hidden;
+}
+.context-size-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+}
+.context-size-tok {
+  text-align: right;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+.context-size-foot {
+  margin-top: 8px;
+  color: var(--faint);
+  font-size: 10px;
 }
 
 /* ---- Tool-kind tints (§5) ---- */

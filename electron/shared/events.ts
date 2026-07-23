@@ -95,6 +95,20 @@ export interface UsageInfo {
   windows: UsageWindow[]
 }
 
+/** One contributor to a conversation's estimated context size — a plugin (by display name) or the
+ *  chat history (id `chat-history`). Tokens are an estimate (chars≈tokens×4). */
+export interface ContextContribution {
+  id: string
+  label: string
+  tokens: number
+}
+/** Estimated context size for the composer readout, broken down by contributor (largest first, with
+ *  chat history last). `totalTokens` is the sum of all contributions. */
+export interface ContextBreakdown {
+  totalTokens: number
+  contributions: ContextContribution[]
+}
+
 /** A pending tool-approval request surfaced to the UI. */
 export interface PermissionRequest {
   requestId: string
@@ -578,6 +592,7 @@ export const IPC = {
   agentSetEffort: 'agent:set-effort',
   agentSetAutoResume: 'agent:set-auto-resume',
   agentUsage: 'agent:usage',
+  agentContextSize: 'agent:context-size',
   agentUiState: 'agent:ui-state',
   agentTranscript: 'agent:transcript',
   agentEditSave: 'agent:edit-save',
@@ -701,7 +716,8 @@ export interface AtelierAPI {
     setModel(instanceId: string, model: string): Promise<void>
     setEffort(instanceId: string, effort: EffortLevel): Promise<void>
     setAutoResume(instanceId: string, enabled: boolean): Promise<void>
-    usage(instanceId: string): Promise<UsageInfo>
+    usage(): Promise<UsageInfo>
+    contextSize(instanceId: string): Promise<ContextBreakdown>
     uiState(instanceId: string): Promise<UiStateSnapshot>
     transcript(instanceId: string): Promise<TranscriptMessage[]>
     editSave(instanceId: string, uuid: string, newText: string): Promise<TranscriptMessage[]>

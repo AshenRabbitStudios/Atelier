@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { tool, createSdkMcpServer, type Options } from '@anthropic-ai/claude-agent-sdk'
+import type { ContextContribution, TranscriptMessage } from '../shared/events.js'
 import type { ConversationPluginState, RegistryView } from '../shared/plugins.js'
 import { pluginStorageGet, pluginStorageSet } from './pluginStorage.js'
 
@@ -190,6 +191,89 @@ export function buildSystemInstruction(
     parts.push(value.length > cap ? value.slice(0, cap) + '\n…[truncated]' : value)
   }
   return parts.join('\n\n')
+}
+
+/** Rough token count from a character length, using the same chars≈tokens×4 heuristic the caps use.
+ *  Deliberately an ESTIMATE — the context-size readout labels it as such; the SDK reports true
+ *  input_tokens only during a live turn and never broken down by contributor. */
+function estTokens(chars: number): number {
+  return Math.round(chars / APPROX_CHARS_PER_TOKEN)
+}
+
+/**
+ * Per-plugin estimated token contribution to the agent's context — the injected `<atelier-context>`
+ * sections (value + author guide, capped) plus any `systemInstruction` — grouped by plugin and using
+ * the plugin's display name. Mirrors buildContextBlock / buildSystemInstruction exactly so the
+ * readout reflects what is actually sent. Excludes push-only (non-injected) exports; read-only
+ * exports only count when the user has set a value (same rule as injection).
+ */
+export function pluginContextContributions(
+  registry: RegistryView,
+  conversationId: string,
+  pluginState: Record<string, ConversationPluginState>
+): ContextContribution[] {
+  const charsByPlugin = new Map<string, number>()
+  const add = (pluginId: string, chars: number): void => {
+    if (chars > 0) charsByPlugin.set(pluginId, (charsByPlugin.get(pluginId) ?? 0) + chars)
+  }
+
+  // Injected context-document sections (same source & rules as buildContextBlock).
+  for (const ex of pinnedExports(registry, pluginState)) {
+    if (!ex.inject) continue
+    const cap = ex.maxTokens * APPROX_CHARS_PER_TOKEN
+    const value = capValue(
+      pluginValueOrDefault(registry, conversationId, ex.pluginId, contextStorageKey(ex.key)),
+      cap
+    )
+    const guide = capValue(
+      pluginValueOrDefault(registry, conversationId, ex.pluginId, guideStorageKey(ex.key)),
+      cap
+    )
+    if (ex.readonly) {
+      if (!value) continue
+      add(ex.pluginId, value.length + guide.length)
+      continue
+    }
+    if (!value && !guide) continue
+    add(ex.pluginId, value.length + guide.length)
+  }
+
+  // Standing system instructions (same source & rules as buildSystemInstruction).
+  for (const [pluginId, st] of Object.entries(pluginState)) {
+    if (!st.enabled) continue
+    const si = registry.get(pluginId)?.manifest?.systemInstruction
+    if (!si) continue
+    const raw = pluginValueOrDefault(registry, conversationId, pluginId, contextStorageKey(si.key))
+    const value = typeof raw === 'string' ? raw.trim() : ''
+    if (!value) continue
+    const cap = si.maxTokens * APPROX_CHARS_PER_TOKEN
+    add(pluginId, Math.min(value.length, cap))
+  }
+
+  return [...charsByPlugin.entries()]
+    .map(([pluginId, chars]) => ({
+      id: pluginId,
+      label: registry.get(pluginId)?.manifest?.name ?? pluginId,
+      tokens: estTokens(chars)
+    }))
+    .sort((a, b) => b.tokens - a.tokens)
+}
+
+/** Estimated token cost of the chat history — every rendered block's text (and tool inputs/outputs,
+ *  which are part of what the model re-reads each turn). Same chars≈tokens×4 estimate. */
+export function estimateTranscriptTokens(messages: TranscriptMessage[]): number {
+  let chars = 0
+  for (const m of messages) {
+    for (const b of m.blocks) {
+      if (b.kind === 'text' || b.kind === 'thinking') chars += b.text.length
+      else if (b.kind === 'tool_use') {
+        chars += b.name.length
+        chars += JSON.stringify(b.input ?? '').length
+        if (b.result) chars += JSON.stringify(b.result.output ?? '').length
+      }
+    }
+  }
+  return estTokens(chars)
 }
 
 /** Count non-overlapping literal occurrences of `needle` in `hay` (no regex; needle may hold metachars). */

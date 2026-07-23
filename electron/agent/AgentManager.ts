@@ -20,6 +20,8 @@ import {
   type AgentStatus,
   type BashStreamMessage,
   type BranchInfo,
+  type ContextBreakdown,
+  type ContextContribution,
   type CreateOpts,
   type EffortLevel,
   type ForkPoints,
@@ -40,6 +42,7 @@ import { readTranscript, editMessageText, parentUuidOf, childUuidOf } from './se
 import { BackgroundRegistry } from './backgroundTasks.js'
 import { bashResponseText, type BashPublish } from './bashTap.js'
 import { zeroExpiredWindows } from './usage.js'
+import { estimateTranscriptTokens } from '../plugin/contextTools.js'
 import {
   listConversations,
   saveConversation,
@@ -179,6 +182,11 @@ type InstructionProvider = (
   conversationId: string,
   pluginState: Record<string, ConversationPluginState>
 ) => string
+/** Supplies the per-plugin context-token contributions for a conversation (context-size readout). */
+type BreakdownProvider = (
+  conversationId: string,
+  pluginState: Record<string, ConversationPluginState>
+) => ContextContribution[]
 
 /** One isolated agent instance: its own cwd, SDK session, and transcript stream. */
 class Session {
@@ -1428,7 +1436,8 @@ export class AgentManager {
     private contextProvider?: ContextProvider,
     private mcpProvider?: McpProvider,
     private instructionProvider?: InstructionProvider,
-    private bashPublish?: BashPublish
+    private bashPublish?: BashPublish,
+    private breakdownProvider?: BreakdownProvider
   ) {}
 
   /** The plugin hooks passed into every new/restored Session constructor. */
@@ -1686,17 +1695,51 @@ export class AgentManager {
     return this.sessions.get(instanceId)?.cwd ?? null
   }
 
-  async usage(instanceId: string): Promise<UsageInfo> {
-    const u = await this.require(instanceId).usage()
-    // Idle/just-restored sessions report no windows until their first turn — keep serving the
-    // last-known account-wide snapshot so the bars stay visible.
-    if (u.windows.length > 0) {
-      this.lastUsage = u
-      setLastUsage(u)
+  /**
+   * Account-wide subscription usage — NOT tied to any one conversation. The SDK's usage query is
+   * account-scoped, so any live session answers identically; poll globally (the top-bar meter is
+   * always-visible) rather than off the "active" conversation, which desynced the meter on every
+   * tab switch and stalled it whenever no conversation was focused. Try each live session until one
+   * reports windows, cache that snapshot, and serve it (clock-corrected) even when every session is
+   * idle or there are none.
+   */
+  async usage(): Promise<UsageInfo> {
+    for (const s of this.sessions.values()) {
+      let u: UsageInfo
+      try {
+        u = await s.usage()
+      } catch {
+        continue // dead/rebinding session — try the next one
+      }
+      // Idle/just-restored sessions report no windows until their first turn — keep serving the
+      // last-known account-wide snapshot so the bars stay visible.
+      if (u.windows.length > 0) {
+        this.lastUsage = u
+        setLastUsage(u)
+        break
+      }
     }
     // Recompute against the clock so a window that has since reset reads 0% instead of a stuck
     // pre-reset percentage (the snapshot can be minutes-to-hours old, even persisted across restart).
-    return zeroExpiredWindows(this.lastUsage ?? u)
+    return zeroExpiredWindows(this.lastUsage ?? { available: false, windows: [] })
+  }
+
+  /**
+   * Estimated context size for a conversation, broken down by contributor: each plugin's injected
+   * context documents + system instruction (via the breakdown provider, which resolves the registry),
+   * plus the chat history. An ESTIMATE (chars≈tokens×4) — the SDK reports true input_tokens only
+   * during a live turn and never per-contributor. Powers the composer's context-size readout.
+   */
+  contextBreakdown(instanceId: string): ContextBreakdown {
+    const s = this.require(instanceId)
+    const plugins = this.breakdownProvider?.(instanceId, s.pluginStateFor()) ?? []
+    const history = estimateTranscriptTokens(s.getTranscript())
+    const contributions: ContextContribution[] = [
+      ...plugins,
+      { id: 'chat-history', label: 'Chat history', tokens: history }
+    ]
+    const totalTokens = contributions.reduce((sum, c) => sum + c.tokens, 0)
+    return { totalTokens, contributions }
   }
 
   transcript(instanceId: string): TranscriptMessage[] {

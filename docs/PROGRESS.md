@@ -1,5 +1,30 @@
 # PROGRESS.md — Atelier build log
 
+## Session 2026-07-23 — bugs.txt batch #2: global usage + context-size readout (read this first)
+
+On branch `feat/terminal-plugin`. Two bugs.txt items, gate green (typecheck, lint, format:check,
+`npm test` now **469**, `npm run build`):
+
+1. **Session/usage status was conversation-scoped and stalled.** The top-bar usage meter polled
+   `agent.usage(activeId)` every 10s keyed to the active conversation — the interval restarted on
+   every tab switch and never ticked when nothing was focused. Made `AgentManager.usage()` global
+   (no `instanceId`): it reads the account-scoped SDK usage from ANY live session, caches the last
+   non-empty snapshot, and serves it clock-corrected. IPC/preload/`AtelierApi` dropped the arg;
+   `App.tsx` now polls every **30s** unconditionally (not keyed to `activeId`).
+2. **Context-size readout under the composer.** New `agent.contextSize(instanceId)` →
+   `ContextBreakdown` (total estimated tokens + per-contributor list). `pluginContextContributions`
+   (contextTools.ts) mirrors `buildContextBlock`/`buildSystemInstruction` exactly to estimate each
+   plugin's injected context + system instruction (chars≈tokens×4), grouped by plugin display name;
+   `estimateTranscriptTokens` covers the chat history. `AgentManager.contextBreakdown` combines them
+   via a new `breakdownProvider` (wired to the registry in main.ts). `ChatPanel` shows
+   "~N tokens in context" below the input, expanding on hover into a bar-chart breakdown.
+
+Needs human spot-check (GUI/live-session behavior):
+
+- Usage meter keeps updating across conversation switches and with no conversation focused.
+- Context-size readout shows a sane total and, on hover, lists each enabled context-plugin + chat
+  history; total grows as the conversation and pinned docs grow.
+
 ## Session 2026-07-23 — terminal agent tools + bugs.txt batch (read this first)
 
 On branch `feat/terminal-plugin`. Two pieces of work:

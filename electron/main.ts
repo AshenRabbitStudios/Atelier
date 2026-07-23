@@ -90,6 +90,7 @@ import {
   buildContextMcpServers,
   buildSystemInstruction,
   contextStorageKey,
+  pluginContextContributions,
   pluginValueOrDefault
 } from './plugin/contextTools.js'
 
@@ -271,7 +272,11 @@ const agents = new AgentManager(
   },
   // Ambient Bash tap → DataBus. Forward-referenced (dataBus is built just below, since it needs
   // agents.cwdFor); the closure only runs later when a Bash hook fires, by which point it's set.
-  (conversationId, channel, data) => dataBus.publish(conversationId, channel, data)
+  (conversationId, channel, data) => dataBus.publish(conversationId, channel, data),
+  // Per-plugin context-token contributions for the composer's context-size readout — resolved
+  // against the conversation's merged registry, same as the injection above.
+  (conversationId, pluginState) =>
+    pluginContextContributions(registryFor(conversationId), conversationId, pluginState)
 )
 
 // DataBus (P4): pub/sub between plugins and ambient sources. The file source maps a `file:<rel>`
@@ -655,9 +660,14 @@ function registerIpc(): void {
     agents.setAutoResume(instanceId, enabled)
   })
 
-  ipcMain.handle(IPC.agentUsage, (_e, payload) => {
+  ipcMain.handle(IPC.agentUsage, () => {
+    // Account-wide, conversation-independent (see AgentManager.usage) — no instanceId payload.
+    return agents.usage()
+  })
+
+  ipcMain.handle(IPC.agentContextSize, (_e, payload) => {
     const { instanceId } = InstanceRefSchema.parse(payload)
-    return agents.usage(instanceId)
+    return agents.contextBreakdown(instanceId)
   })
 
   ipcMain.handle(IPC.agentUiState, (_e, payload) => {

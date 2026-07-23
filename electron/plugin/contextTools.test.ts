@@ -12,9 +12,12 @@ import {
   buildContextMcpServers,
   buildSystemInstruction,
   contextStorageKey,
+  estimateTranscriptTokens,
   guideStorageKey,
+  pluginContextContributions,
   pluginValueOrDefault
 } from './contextTools.js'
+import type { TranscriptMessage } from '../shared/events.js'
 import { pluginStorageSet } from './pluginStorage.js'
 import type { PluginRegistry } from './PluginRegistry.js'
 import type { ConversationPluginState } from '../shared/plugins.js'
@@ -284,6 +287,113 @@ describe('buildSystemInstruction', () => {
     } as unknown as PluginRegistry
     pluginStorageSet('c1', 'instr', contextStorageKey('instruction'), 'x'.repeat(200))
     expect(buildSystemInstruction(big, 'c1', { instr: on() })).toContain('…[truncated]')
+  })
+})
+
+describe('pluginContextContributions', () => {
+  it('is empty when nothing is pinned or enabled', () => {
+    expect(pluginContextContributions(REG, 'c1', {})).toEqual([])
+  })
+
+  it('estimates a pinned export at ~chars/4, labelled by the plugin name', () => {
+    // Registry with a display name so the label is the human name, not the id.
+    const named = {
+      get: (id: string) =>
+        id === 'mm'
+          ? {
+              manifest: {
+                name: 'Mental model',
+                contextExports: [
+                  { key: 'model', label: 'Mental model', format: 'markdown', maxTokens: 1000 }
+                ]
+              }
+            }
+          : undefined
+    } as unknown as PluginRegistry
+    pluginStorageSet('c1', 'mm', contextStorageKey('model'), 'x'.repeat(40))
+    const out = pluginContextContributions(named, 'c1', { mm: pinned(['model']) })
+    expect(out).toEqual([{ id: 'mm', label: 'Mental model', tokens: 10 }])
+  })
+
+  it('sums value + guide and sorts contributors largest first', () => {
+    const reg = fakeRegistry({
+      a: [{ key: 'k', label: 'A', format: 'text', maxTokens: 1000 }],
+      b: [{ key: 'k', label: 'B', format: 'text', maxTokens: 1000 }]
+    })
+    pluginStorageSet('c1', 'a', contextStorageKey('k'), 'x'.repeat(20)) // 20 chars → 5 tokens
+    pluginStorageSet('c1', 'b', contextStorageKey('k'), 'x'.repeat(40)) // value 40 …
+    pluginStorageSet('c1', 'b', guideStorageKey('k'), 'x'.repeat(40)) // … + guide 40 → 20 tokens
+    const out = pluginContextContributions(reg, 'c1', { a: pinned(['k']), b: pinned(['k']) })
+    expect(out.map((c) => c.id)).toEqual(['b', 'a'])
+    expect(out.map((c) => c.tokens)).toEqual([20, 5])
+  })
+
+  it('excludes push-only exports and empty read-only exports', () => {
+    const push = fakeRegistry({
+      viz: [{ key: 'arch', label: 'Arch', format: 'json', maxTokens: 1000, inject: false }]
+    })
+    pluginStorageSet('c1', 'viz', contextStorageKey('arch'), 'x'.repeat(40))
+    expect(pluginContextContributions(push, 'c1', { viz: pinned(['arch']) })).toEqual([])
+
+    const ns = fakeRegistry({
+      ns: [{ key: 'star', label: 'North Star', format: 'markdown', maxTokens: 500, readonly: true }]
+    })
+    expect(pluginContextContributions(ns, 'c1', { ns: pinned(['star']) })).toEqual([])
+  })
+
+  it('counts a plugin systemInstruction toward its contribution', () => {
+    const si = {
+      get: (id: string) =>
+        id === 'instr'
+          ? {
+              manifest: {
+                name: 'Instructions',
+                systemInstruction: { key: 'instruction', maxTokens: 1000 }
+              }
+            }
+          : undefined
+    } as unknown as PluginRegistry
+    pluginStorageSet('c1', 'instr', contextStorageKey('instruction'), 'x'.repeat(40))
+    expect(
+      pluginContextContributions(si, 'c1', { instr: { enabled: true, pinnedExports: [] } })
+    ).toEqual([{ id: 'instr', label: 'Instructions', tokens: 10 }])
+  })
+})
+
+describe('estimateTranscriptTokens', () => {
+  const msg = (blocks: TranscriptMessage['blocks']): TranscriptMessage => ({
+    uuid: 'u',
+    role: 'user',
+    blocks
+  })
+
+  it('is zero for an empty transcript', () => {
+    expect(estimateTranscriptTokens([])).toBe(0)
+  })
+
+  it('counts text and thinking block characters at ~chars/4', () => {
+    const t = estimateTranscriptTokens([
+      msg([
+        { kind: 'text', text: 'x'.repeat(40) },
+        { kind: 'thinking', text: 'x'.repeat(40) }
+      ])
+    ])
+    expect(t).toBe(20)
+  })
+
+  it('counts a tool_use name, input, and result output', () => {
+    const t = estimateTranscriptTokens([
+      msg([
+        {
+          kind: 'tool_use',
+          toolUseId: 't1',
+          name: 'Bash', // 4 chars
+          input: 'ls', // JSON.stringify → "ls" = 4 chars
+          result: { ok: true, output: 'ok' } // "ok" = 4 chars
+        }
+      ])
+    ])
+    expect(t).toBe(3) // round(12 / 4)
   })
 })
 

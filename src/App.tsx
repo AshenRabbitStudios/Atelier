@@ -102,26 +102,26 @@ export function App() {
     []
   )
 
-  // Account-wide usage, polled every 10s off the active conversation (the manager
-  // caches the last non-empty snapshot, so idle/just-restored sessions still report).
+  // Account-wide usage, polled every 30s GLOBALLY — not off the active conversation. The manager
+  // reads it from any live session (the SDK's usage is account-scoped) and caches the last
+  // non-empty snapshot, so this keeps ticking across tab switches and while nothing is focused.
   useEffect(() => {
     let alive = true
     const tick = async () => {
-      if (!activeId) return
       try {
-        const u = await window.atelier.agent.usage(activeId)
+        const u = await window.atelier.agent.usage()
         if (alive && u.windows.length > 0) setUsage(u)
       } catch {
         /* usage unavailable */
       }
     }
     void tick()
-    const t = setInterval(() => void tick(), 10000)
+    const t = setInterval(() => void tick(), 30000)
     return () => {
       alive = false
       clearInterval(t)
     }
-  }, [activeId])
+  }, [])
 
   const refresh = async () => {
     const list = await window.atelier.agent.list()

@@ -1,5 +1,5 @@
 import { join, dirname, resolve, sep } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { existsSync } from 'node:fs'
 import {
   app,
@@ -456,6 +456,7 @@ function createWindow(): void {
 
   installSpellcheckMenu(mainWindow)
   installWebviewGuard(mainWindow)
+  installMainNavigationGuard(mainWindow)
 
   const devUrl = process.env.ELECTRON_RENDERER_URL
   if (devUrl) {
@@ -472,6 +473,37 @@ function createWindow(): void {
 
   mainWindow.on('closed', () => {
     mainWindow = null
+  })
+}
+
+// The renderer is a single-page app; the top-level frame must never navigate away from its own
+// origin. A link click or window.open in chat/markdown would otherwise replace the ENTIRE app with
+// that page, with no way back (bugs.txt #2). Pin the app frame to its own URL and hand every real
+// link to the user's default browser instead. (This is the main window; the <webview> browser
+// surface is handled separately by installWebviewGuard.)
+function installMainNavigationGuard(win: BrowserWindow): void {
+  const devUrl = process.env.ELECTRON_RENDERER_URL
+  const appFileUrl = pathToFileURL(join(__dirname, '../renderer/index.html')).toString()
+  const bare = (url: string): string => url.split('#')[0]
+  const isAppUrl = (url: string): boolean => {
+    const u = bare(url)
+    if (devUrl && u.startsWith(bare(devUrl))) return true // dev server (HMR full reloads)
+    return u === appFileUrl || u.startsWith(appFileUrl) // packaged renderer/index.html
+  }
+  const openExternal = (url: string): void => {
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url)
+  }
+  // window.open / target=_blank / links that request a new window: never spawn an OS window; send
+  // http(s) to the default browser and deny everything else.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    openExternal(url)
+    return { action: 'deny' }
+  })
+  // In-place navigation of the app frame: allow only the app's own URL; externalize the rest.
+  win.webContents.on('will-navigate', (event, url) => {
+    if (isAppUrl(url)) return
+    event.preventDefault()
+    openExternal(url)
   })
 }
 

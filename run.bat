@@ -15,19 +15,23 @@ echo ============================================================
 echo  Atelier needs Node.js, which is not installed on this PC.
 echo ============================================================
 echo.
-echo  Node.js is the runtime Atelier is built on. To install it:
+echo  Node.js is the runtime Atelier is built on (version 20.19+ or 22.12+).
 echo.
-echo  1. Open PowerShell: press the Windows key, type "powershell",
-echo     press Enter.
-echo  2. Paste this line into it and press Enter:
+echo  Easiest, works on every PC:
+echo    Download the Windows Installer (LTS) from https://nodejs.org and
+echo    run it like any other program.
 echo.
-echo         winget install OpenJS.NodeJS.LTS
-echo.
-echo     (Or download the installer from https://nodejs.org and
-echo     run it like any other program.)
-echo  3. When it finishes, CLOSE this window and that PowerShell
-echo     window (open windows keep the old settings), then
-echo     double-click run.bat again.
+rem Offer winget only if it's actually on this PC (absent on older Windows builds).
+where winget >nul 2>nul
+if %errorlevel%==0 (
+  echo  Or, since winget is installed here, paste this into this window
+  echo  or PowerShell and press Enter:
+  echo.
+  echo        winget install OpenJS.NodeJS.LTS
+  echo.
+)
+echo  When it finishes, CLOSE this window ^(open windows keep the old PATH^),
+echo  reopen it, and double-click run.bat again.
 echo.
 pause
 exit /b 10

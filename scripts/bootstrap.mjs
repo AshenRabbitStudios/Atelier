@@ -16,6 +16,7 @@ import { existsSync, readFileSync, writeFileSync, statSync, readdirSync } from '
 import { createInterface } from 'node:readline'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { homedir } from 'node:os'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const win = process.platform === 'win32'
@@ -37,51 +38,42 @@ function detectShell() {
 }
 const shell = detectShell()
 
-// Per-shell instruction profile. `node`/`claude` are the exact commands to paste in THIS shell;
-// `claudeVia` names a DIFFERENT shell the Claude installer must be run from (cmd can run neither
-// one-liner) — null means the `claude` command works in this shell as-is.
+// Per-shell instruction profile. `claude` is the EXACT official Claude Code install command for
+// this shell (verified against code.claude.com/docs/en/setup, 2026-07): PowerShell and CMD each
+// have their own, bash covers macOS/Linux/WSL/Git-Bash. Node install is NOT a static string here —
+// it's detected at runtime (see nodeInstallHint) because the right command depends on which package
+// managers are actually present, and distro `apt`/`dnf` node is often below Atelier's version floor.
 const SHELL_PROFILES = {
   powershell: {
     name: 'PowerShell',
     run: 'run.bat',
-    node: 'winget install OpenJS.NodeJS.LTS',
-    claude: 'irm https://claude.ai/install.ps1 | iex',
-    claudeVia: null
+    claude: 'irm https://claude.ai/install.ps1 | iex'
   },
   cmd: {
     name: 'Command Prompt (cmd)',
     run: 'run.bat',
-    node: 'winget install OpenJS.NodeJS.LTS',
-    claude: 'irm https://claude.ai/install.ps1 | iex',
-    claudeVia: 'PowerShell'
+    claude:
+      'curl -fsSL https://claude.ai/install.cmd -o install.cmd && install.cmd && del install.cmd'
   },
   'git-bash': {
     name: 'Git Bash',
     run: './run.sh',
-    node: 'winget install OpenJS.NodeJS.LTS',
-    claude: 'curl -fsSL https://claude.ai/install.sh | bash',
-    claudeVia: null
+    claude: 'curl -fsSL https://claude.ai/install.sh | bash'
   },
   wsl: {
     name: 'your WSL terminal',
     run: './run.sh',
-    node: 'sudo apt install nodejs npm',
-    claude: 'curl -fsSL https://claude.ai/install.sh | bash',
-    claudeVia: null
+    claude: 'curl -fsSL https://claude.ai/install.sh | bash'
   },
   macos: {
     name: 'Terminal',
     run: './run.sh',
-    node: 'brew install node',
-    claude: 'curl -fsSL https://claude.ai/install.sh | bash',
-    claudeVia: null
+    claude: 'curl -fsSL https://claude.ai/install.sh | bash'
   },
   shell: {
     name: 'a terminal',
     run: './run.sh',
-    node: 'your package manager (or https://nodejs.org)',
-    claude: 'curl -fsSL https://claude.ai/install.sh | bash',
-    claudeVia: null
+    claude: 'curl -fsSL https://claude.ai/install.sh | bash'
   }
 }
 const env = SHELL_PROFILES[shell] || SHELL_PROFILES.shell
@@ -170,6 +162,42 @@ function newestMtime(paths) {
   return newest
 }
 
+// Is `cmd` an executable on PATH? `where` on Windows, POSIX `command -v` elsewhere. Used to only
+// ever suggest a package manager we've CONFIRMED is installed, rather than guessing by OS.
+function has(cmd) {
+  const probe = win ? run('where', [cmd]) : run('command', ['-v', cmd])
+  return probe.status === 0
+}
+function nvmInstalled() {
+  return existsSync(join(homedir(), '.nvm', 'nvm.sh'))
+}
+
+// Build Node install guidance that is guaranteed to work on THIS machine: always the universal
+// nodejs.org download, plus only those package/version managers actually detected here. Distro
+// apt/dnf is deliberately NOT suggested — its `nodejs` is frequently older than Atelier's 20.19
+// floor, which would send the user in a re-run loop.
+function nodeInstallHint() {
+  const lines = [
+    'The reliable way that works on every system: download the LTS installer',
+    'from https://nodejs.org and run it.'
+  ]
+  const opts = []
+  if (has('brew')) opts.push('brew install node')
+  if (win && has('winget')) opts.push('winget install OpenJS.NodeJS.LTS')
+  if (nvmInstalled()) opts.push('nvm install --lts')
+  if (opts.length) {
+    lines.push('', 'Or, with a manager already set up here (also gives a current version):')
+    for (const o of opts) lines.push(`    ${o}`)
+  } else if (!win) {
+    lines.push(
+      '',
+      'Or install nvm (https://github.com/nvm-sh/nvm), then run: nvm install --lts',
+      'Avoid a distro apt/dnf `nodejs` package — it is often older than 20.19.'
+    )
+  }
+  return lines
+}
+
 // ---- step 1: Node version ---------------------------------------------------
 // Vite 7 floor: ^20.19 || >=22.12. We can't upgrade the runtime we're running on.
 function checkNode() {
@@ -179,26 +207,12 @@ function checkNode() {
   console.error(
     `  [FAIL] Node.js v${process.versions.node} is too old — Atelier needs 20.19+ or 22.12+`
   )
-  if (win) {
-    say(
-      `To upgrade Node, paste this into ${terminalName} and press Enter:`,
-      '',
-      `    ${env.node}`,
-      '',
-      'Or download the installer from https://nodejs.org and run it.',
-      'Afterwards CLOSE this window and any open terminals (they keep the old',
-      `PATH), open a fresh one, and run ${runCmdName} again.`
-    )
-  } else {
-    // Show a concrete package-manager command (brew/apt) inline; the generic profile has none.
-    const concrete = env.node.includes('(') ? null : env.node
-    say(
-      'Upgrade via your version manager (e.g. `nvm install --lts`)' +
-        (concrete ? ', or:' : ', your package manager, or https://nodejs.org.'),
-      ...(concrete ? ['', `    ${concrete}`, '', 'Or download it from https://nodejs.org.'] : []),
-      `Then open a fresh terminal and run ${runCmdName} again.`
-    )
-  }
+  say(
+    ...nodeInstallHint(),
+    '',
+    'Afterwards CLOSE any open terminals (they keep the old PATH), open a fresh',
+    `one, and run ${runCmdName} again.`
+  )
   process.exit(10)
 }
 
@@ -349,52 +363,58 @@ function claudeVersion() {
 async function checkClaudeCli() {
   const v = claudeVersion()
   if (v) return ok('Claude Code CLI', v)
-  const installCmd = env.claude
-  const usesPwsh = installCmd.startsWith('irm')
-  // The shell to run the installer manually in. cmd can run neither one-liner, so `claudeVia`
-  // redirects the user to PowerShell; otherwise the current shell is fine.
-  const installShell = env.claudeVia || terminalName
-  if (doctor) return fix('Claude Code CLI', `not found — official installer needed (${installCmd})`)
+  // `manual` = the official installer for THIS exact shell (docs-verified per SHELL_PROFILES).
+  // `npmFallback` works on any platform and is guaranteed available here — Node + npm were ensured
+  // by the earlier steps — so it's the safety net when the native installer can't run.
+  const manual = env.claude
+  const npmFallback = 'npm install -g @anthropic-ai/claude-code'
+  if (doctor) return fix('Claude Code CLI', `not found — install with: ${manual}`)
   console.log('  [FIX ] Claude Code CLI — not found')
   say(
     "Claude Code is Anthropic's command-line app; Atelier signs in to Claude",
     'THROUGH it (your Claude subscription — no API key needed), so it must be',
     'installed once on this machine.',
-    "Fix: run Anthropic's official installer. This is the one step that",
-    'installs something OUTSIDE this project folder (into your user profile,',
-    `and it adds a \`claude\` command to your PATH).`
+    'Fix: run the official installer (verified from code.claude.com/docs). It',
+    'installs into your user profile and adds a `claude` command to your PATH.'
   )
-  if (!(await consent('Run the official Claude Code installer now?', { defaultYes: false }))) {
-    const openLine = env.claudeVia
-      ? `To install it yourself: open ${env.claudeVia} (press the Windows key, type ` +
-        `"${env.claudeVia.toLowerCase()}", press Enter), then paste this line and press Enter:`
-      : `To install it yourself: open ${terminalName}, paste this line, press Enter:`
+  if (!(await consent('Run the official Claude Code installer now?', { defaultYes: false })))
     fail(
       13,
       'Claude Code is required for Atelier to sign in to Claude',
-      openLine,
+      `To install it yourself, paste this into ${terminalName} and press Enter:`,
       '',
-      `    ${installCmd}`,
+      `    ${manual}`,
       '',
-      '(It is the official installer from claude.ai.) Then close that terminal.'
+      'If that command fails, this one works anywhere (Node is already installed):',
+      '',
+      `    ${npmFallback}`
     )
-  }
   console.log('')
-  // Run the installer through the shell that its one-liner is written for, regardless of the shell
-  // this script was launched from (both exist on their platforms): PowerShell for `irm`, bash for curl.
-  const r = usesPwsh
-    ? runLoud('powershell', ['-ExecutionPolicy', 'Bypass', '-c', installCmd])
-    : runLoud('bash', ['-c', installCmd])
+  // Auto-run through an interpreter guaranteed to exist on this OS (PowerShell on Windows, bash
+  // elsewhere — both are always present on their platform), then fall back to npm.
+  const autoCmd = win
+    ? 'irm https://claude.ai/install.ps1 | iex'
+    : 'curl -fsSL https://claude.ai/install.sh | bash'
+  let r = win
+    ? runLoud('powershell', ['-ExecutionPolicy', 'Bypass', '-c', autoCmd])
+    : runLoud('bash', ['-c', autoCmd])
+  if (r.status !== 0 || !claudeVersion()) {
+    console.log('')
+    say('The native installer did not complete — trying npm (Node is already present)...')
+    console.log('')
+    r = runLoud('npm', ['install', '-g', '@anthropic-ai/claude-code'])
+  }
   if (r.status !== 0 || !claudeVersion())
     fail(
       13,
-      'The Claude Code install did not complete (or `claude` is not on PATH yet)',
-      `A just-installed \`claude\` may only be visible to NEW terminals: close`,
-      `this window, open a fresh ${installShell}, and try again. If it still`,
-      `fails, install manually by pasting this into ${installShell}:`,
+      'Could not install Claude Code automatically',
+      'A just-installed `claude` may only be visible to NEW terminals: close this',
+      `window, open a fresh ${terminalName}, and run ${runCmdName} again. To install`,
+      `manually, paste into ${terminalName}:`,
       '',
-      `    ${installCmd}`,
-      ''
+      `    ${manual}`,
+      '',
+      `…or the universal npm method:  ${npmFallback}`
     )
   ok('Claude Code CLI', 'installed')
 }

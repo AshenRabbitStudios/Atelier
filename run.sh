@@ -31,25 +31,35 @@ if ! command -v node >/dev/null 2>&1; then
   echo " Atelier needs Node.js, which was not found on this machine."
   echo "============================================================"
   echo
-  echo " Node.js is the runtime Atelier is built on. To install it,"
-  echo " paste ONE of these into this same terminal and press Enter:"
+  echo " Node.js is the runtime Atelier is built on. Atelier needs version"
+  echo " 20.19+ or 22.12+."
   echo
-  case "$(uname -s)" in
-    Darwin)
-      echo "     brew install node          # if you use Homebrew"
-      echo "     (or download the installer from https://nodejs.org)"
-      ;;
-    MINGW* | MSYS*)
-      echo "     winget install OpenJS.NodeJS.LTS   # Windows (Git Bash)"
-      echo "     (or download the installer from https://nodejs.org)"
-      ;;
-    *)
-      echo "     sudo apt install nodejs npm   # Debian/Ubuntu"
-      echo "     (or your distro's package manager / https://nodejs.org)"
-      ;;
-  esac
+  echo " The reliable way that works on every system:"
+  echo "     Download the LTS installer from https://nodejs.org and run it."
   echo
-  echo " When it finishes, run ./run.sh again from this folder."
+  # Only suggest a package manager we can SEE is installed here, and only ones that ship a
+  # current Node (brew / winget / nvm). We deliberately do not print a distro apt/dnf command:
+  # it may be absent (wrong distro) or too old, which would loop the user back here.
+  shown=0
+  if command -v brew >/dev/null 2>&1; then
+    echo " Or, since Homebrew is installed here:   brew install node"
+    shown=1
+  fi
+  if command -v winget >/dev/null 2>&1; then
+    echo " Or, since winget is installed here:     winget install OpenJS.NodeJS.LTS"
+    shown=1
+  fi
+  if [ -s "$HOME/.nvm/nvm.sh" ]; then
+    echo " Or, since nvm is installed here:        nvm install --lts"
+    shown=1
+  fi
+  if [ "$shown" -eq 0 ]; then
+    echo " (Prefer a version manager? Install nvm from https://github.com/nvm-sh/nvm,"
+    echo "  then run: nvm install --lts)"
+  fi
+  echo
+  echo " When it finishes, open a fresh terminal and run ./run.sh again from"
+  echo " this folder."
   exit 10
 fi
 

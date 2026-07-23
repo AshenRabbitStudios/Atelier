@@ -2,12 +2,35 @@
   "id": "terminal",
   "name": "Terminal",
   "version": "0.1.0",
-  "description": "A real, interactive shell in a pane — a live PTY (bash/PowerShell/cmd) you can type into, run TUI apps like vim or htop, resize, and restart. Distinct from Bash Stream (which passively mirrors the agent's commands): this is YOUR own terminal, spawned in the conversation's working directory. One shell per conversation, persistent while the plugin is enabled.",
+  "description": "A real, interactive shell in a pane — a live PTY (bash/PowerShell/cmd) you can type into, run TUI apps like vim or htop, resize, and restart. Distinct from Bash Stream (which passively mirrors the agent's commands): this is YOUR own terminal, spawned in the conversation's working directory. One shell per conversation, persistent while the plugin is enabled. The agent shares this exact shell: terminal_send types a command (or raw keystrokes), terminal_read returns the current ANSI-stripped scrollback, and terminal_interrupt sends Ctrl-C — so the agent can start and tail a long-running monitor (e.g. `vmstat -w 1`) in the same pane the user is watching.",
   "icon": "M2.5 3h11a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM4 6l2 2-2 2M8 10.5h3",
-  "kind": "panel",
+  "kind": "both",
   "entry": "index.html",
   "backend": "backend.cjs",
   "service": true,
-  "permissions": ["data:subscribe", "data:publish"],
-  "defaultDock": "bottom"
+  "permissions": ["data:subscribe", "data:publish", "tools"],
+  "defaultDock": "bottom",
+  "tools": [
+    {
+      "name": "terminal_send",
+      "description": "Type into the shared Terminal pane's live shell, exactly as if the user typed it. By default a carriage return is appended so the line runs as a command; pass enter:false to send raw keystrokes without submitting (e.g. to answer an interactive prompt or send an escape sequence). Output appears in the user's pane; read it back with terminal_read. Does NOT return command output — the shell is asynchronous, so send, then read after the command has had time to produce output.",
+      "inputSchema": {
+        "text": "string",
+        "enter": "boolean?"
+      }
+    },
+    {
+      "name": "terminal_read",
+      "description": "Return the current scrollback of the shared Terminal pane's shell (ANSI escape sequences stripped, carriage returns normalized to newlines). Use tailLines to get only the last N lines — ideal for polling a running monitor like `vmstat -w 1`. Pass raw:true to get the untouched byte stream including escape codes.",
+      "inputSchema": {
+        "tailLines": "number?",
+        "raw": "boolean?"
+      }
+    },
+    {
+      "name": "terminal_interrupt",
+      "description": "Send Ctrl-C (SIGINT, 0x03) to the shared Terminal pane's shell — stops a running foreground process such as a monitoring loop started with terminal_send.",
+      "inputSchema": {}
+    }
+  ]
 }

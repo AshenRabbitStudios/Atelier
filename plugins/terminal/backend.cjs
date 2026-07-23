@@ -161,6 +161,61 @@ function ensureSession(conversationId) {
   return session
 }
 
+// Route an agent tool call to the right conversation. The host normally supplies conversationId;
+// if it's missing but exactly one shell is alive, fall back to that one.
+function resolveConvId(conversationId) {
+  if (conversationId) return conversationId
+  if (sessions.size === 1) return sessions.keys().next().value
+  return conversationId
+}
+
+// Strip terminal control noise so the agent reads clean text: OSC (title) sequences, CSI (color /
+// cursor) sequences, and lone Fe escapes. Line-oriented output like vmstat survives intact.
+function stripAnsi(s) {
+  return s
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\x1b[@-Z\\-_]/g, '')
+}
+
+// Agent-facing tools (kind: "both"). These reach into the SAME PTY the pane drives, so a command the
+// agent sends and its output are visible to the user, and vice-versa.
+function handleTool(id, tool, input, conversationId) {
+  const p = input || {}
+  const cid = resolveConvId(conversationId)
+  switch (tool) {
+    case 'terminal_send': {
+      const session = ensureSession(cid)
+      const text = typeof p.text === 'string' ? p.text : ''
+      const submit = p.enter !== false
+      session.term.write(submit ? text + '\r' : text)
+      return post({ id, result: { ok: true, pid: session.term.pid, shell: session.shell } })
+    }
+    case 'terminal_interrupt': {
+      const session = sessions.get(cid)
+      if (session && !session.exited) session.term.write('\x03')
+      return post({ id, result: { ok: true } })
+    }
+    case 'terminal_read': {
+      const session = sessions.get(cid)
+      if (!session)
+        return post({ id, error: 'no terminal session yet — open the Terminal pane first' })
+      let text = p.raw === true ? session.buffer : stripAnsi(session.buffer)
+      text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+      const n = Number(p.tailLines)
+      if (Number.isFinite(n) && n > 0) {
+        text = text.split('\n').slice(-Math.floor(n)).join('\n')
+      }
+      return post({
+        id,
+        result: { text, exited: session.exited, shell: session.shell, pid: session.term.pid }
+      })
+    }
+    default:
+      return post({ id, error: `unknown terminal tool: ${tool}` })
+  }
+}
+
 function handleRpc(id, conversationId, op, params) {
   const p = params || {}
   switch (op) {
@@ -232,8 +287,12 @@ process.parentPort.on('message', (e) => {
       handleRpc(msg.id, conversationId, op, params)
       return
     }
+    if (msg.tool !== undefined && msg.id !== undefined) {
+      handleTool(msg.id, msg.tool, msg.input, msg.conversationId)
+      return
+    }
   } catch (err) {
-    if (typeof msg.id === 'number') {
+    if (msg.id !== undefined) {
       post({ id: msg.id, error: err && err.message ? err.message : String(err) })
     }
   }

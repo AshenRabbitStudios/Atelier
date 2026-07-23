@@ -7,6 +7,7 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $env:Path = "C:\Program Files\nodejs;$env:Path"
+$env:ATELIER_SHELL = 'powershell'
 Set-Location $root
 
 & node scripts\bootstrap.mjs run

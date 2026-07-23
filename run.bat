@@ -33,6 +33,7 @@ pause
 exit /b 10
 
 :run
+set "ATELIER_SHELL=cmd"
 node scripts\bootstrap.mjs %*
 set EXITCODE=%errorlevel%
 if not %EXITCODE%==0 pause

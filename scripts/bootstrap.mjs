@@ -19,8 +19,74 @@ import { fileURLToPath } from 'node:url'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const win = process.platform === 'win32'
-const terminalName = win ? 'PowerShell' : 'a terminal'
-const runCmdName = win ? 'run.bat' : './run.sh'
+
+// ---- environment detection --------------------------------------------------
+// Instructions have to match the shell the user is ACTUALLY in, not just the OS: on Windows the same
+// bootstrap can be launched from PowerShell, cmd.exe, or Git Bash, and each needs different run and
+// install commands (a PowerShell `irm ... | iex` fails in cmd and in bash). Each launcher
+// (run.bat / launch.ps1 / run.sh) exports ATELIER_SHELL; when the script is run directly
+// (`node scripts/bootstrap.mjs`) we infer from environment fingerprints.
+function detectShell() {
+  const hint = (process.env.ATELIER_SHELL || '').toLowerCase()
+  if (hint) return hint
+  if (process.env.WSL_DISTRO_NAME || process.env.WSLENV) return 'wsl'
+  if (process.env.MSYSTEM) return 'git-bash' // MINGW*/MSYS2 — Git Bash on Windows
+  if (win) return process.env.PSModulePath ? 'powershell' : 'cmd'
+  if (process.platform === 'darwin') return 'macos'
+  return 'shell'
+}
+const shell = detectShell()
+
+// Per-shell instruction profile. `node`/`claude` are the exact commands to paste in THIS shell;
+// `claudeVia` names a DIFFERENT shell the Claude installer must be run from (cmd can run neither
+// one-liner) — null means the `claude` command works in this shell as-is.
+const SHELL_PROFILES = {
+  powershell: {
+    name: 'PowerShell',
+    run: 'run.bat',
+    node: 'winget install OpenJS.NodeJS.LTS',
+    claude: 'irm https://claude.ai/install.ps1 | iex',
+    claudeVia: null
+  },
+  cmd: {
+    name: 'Command Prompt (cmd)',
+    run: 'run.bat',
+    node: 'winget install OpenJS.NodeJS.LTS',
+    claude: 'irm https://claude.ai/install.ps1 | iex',
+    claudeVia: 'PowerShell'
+  },
+  'git-bash': {
+    name: 'Git Bash',
+    run: './run.sh',
+    node: 'winget install OpenJS.NodeJS.LTS',
+    claude: 'curl -fsSL https://claude.ai/install.sh | bash',
+    claudeVia: null
+  },
+  wsl: {
+    name: 'your WSL terminal',
+    run: './run.sh',
+    node: 'sudo apt install nodejs npm',
+    claude: 'curl -fsSL https://claude.ai/install.sh | bash',
+    claudeVia: null
+  },
+  macos: {
+    name: 'Terminal',
+    run: './run.sh',
+    node: 'brew install node',
+    claude: 'curl -fsSL https://claude.ai/install.sh | bash',
+    claudeVia: null
+  },
+  shell: {
+    name: 'a terminal',
+    run: './run.sh',
+    node: 'your package manager (or https://nodejs.org)',
+    claude: 'curl -fsSL https://claude.ai/install.sh | bash',
+    claudeVia: null
+  }
+}
+const env = SHELL_PROFILES[shell] || SHELL_PROFILES.shell
+const terminalName = env.name
+const runCmdName = env.run
 
 // ---- CLI parsing ------------------------------------------------------------
 const args = process.argv.slice(2)
@@ -115,20 +181,22 @@ function checkNode() {
   )
   if (win) {
     say(
-      'To upgrade: open PowerShell (press the Windows key, type "powershell",',
-      'press Enter), then paste this line and press Enter:',
+      `To upgrade Node, paste this into ${terminalName} and press Enter:`,
       '',
-      '    winget install OpenJS.NodeJS.LTS',
+      `    ${env.node}`,
       '',
       'Or download the installer from https://nodejs.org and run it.',
       'Afterwards CLOSE this window and any open terminals (they keep the old',
       `PATH), open a fresh one, and run ${runCmdName} again.`
     )
   } else {
+    // Show a concrete package-manager command (brew/apt) inline; the generic profile has none.
+    const concrete = env.node.includes('(') ? null : env.node
     say(
-      'Upgrade via your version manager (e.g. `nvm install --lts`) or download',
-      'it from https://nodejs.org. Then open a fresh terminal and run',
-      `${runCmdName} again.`
+      'Upgrade via your version manager (e.g. `nvm install --lts`)' +
+        (concrete ? ', or:' : ', your package manager, or https://nodejs.org.'),
+      ...(concrete ? ['', `    ${concrete}`, '', 'Or download it from https://nodejs.org.'] : []),
+      `Then open a fresh terminal and run ${runCmdName} again.`
     )
   }
   process.exit(10)
@@ -281,9 +349,11 @@ function claudeVersion() {
 async function checkClaudeCli() {
   const v = claudeVersion()
   if (v) return ok('Claude Code CLI', v)
-  const installCmd = win
-    ? 'irm https://claude.ai/install.ps1 | iex'
-    : 'curl -fsSL https://claude.ai/install.sh | bash'
+  const installCmd = env.claude
+  const usesPwsh = installCmd.startsWith('irm')
+  // The shell to run the installer manually in. cmd can run neither one-liner, so `claudeVia`
+  // redirects the user to PowerShell; otherwise the current shell is fine.
+  const installShell = env.claudeVia || terminalName
   if (doctor) return fix('Claude Code CLI', `not found — official installer needed (${installCmd})`)
   console.log('  [FIX ] Claude Code CLI — not found')
   say(
@@ -294,18 +364,25 @@ async function checkClaudeCli() {
     'installs something OUTSIDE this project folder (into your user profile,',
     `and it adds a \`claude\` command to your PATH).`
   )
-  if (!(await consent('Run the official Claude Code installer now?', { defaultYes: false })))
+  if (!(await consent('Run the official Claude Code installer now?', { defaultYes: false }))) {
+    const openLine = env.claudeVia
+      ? `To install it yourself: open ${env.claudeVia} (press the Windows key, type ` +
+        `"${env.claudeVia.toLowerCase()}", press Enter), then paste this line and press Enter:`
+      : `To install it yourself: open ${terminalName}, paste this line, press Enter:`
     fail(
       13,
       'Claude Code is required for Atelier to sign in to Claude',
-      `To install it yourself: open ${terminalName}, paste this line, press Enter:`,
+      openLine,
       '',
       `    ${installCmd}`,
       '',
       '(It is the official installer from claude.ai.) Then close that terminal.'
     )
+  }
   console.log('')
-  const r = win
+  // Run the installer through the shell that its one-liner is written for, regardless of the shell
+  // this script was launched from (both exist on their platforms): PowerShell for `irm`, bash for curl.
+  const r = usesPwsh
     ? runLoud('powershell', ['-ExecutionPolicy', 'Bypass', '-c', installCmd])
     : runLoud('bash', ['-c', installCmd])
   if (r.status !== 0 || !claudeVersion())
@@ -313,8 +390,8 @@ async function checkClaudeCli() {
       13,
       'The Claude Code install did not complete (or `claude` is not on PATH yet)',
       `A just-installed \`claude\` may only be visible to NEW terminals: close`,
-      `this window, open a fresh ${terminalName}, and try again. If it still`,
-      `fails, install manually by pasting this into ${terminalName}:`,
+      `this window, open a fresh ${installShell}, and try again. If it still`,
+      `fails, install manually by pasting this into ${installShell}:`,
       '',
       `    ${installCmd}`,
       ''
@@ -429,6 +506,7 @@ function launch() {
 
 // ---- pipeline ---------------------------------------------------------------
 console.log(`Atelier ${doctor ? 'health check (doctor)' : 'startup'} — ${root}`)
+console.log(`Environment: ${terminalName} on ${process.platform} — Node ${process.versions.node}`)
 if (doctor) {
   console.log('Checking every prerequisite; nothing will be changed.\n')
 } else {

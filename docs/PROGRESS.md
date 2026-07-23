@@ -1,5 +1,41 @@
 # PROGRESS.md — Atelier build log
 
+## Session 2026-07-23 — terminal agent tools + bugs.txt batch (read this first)
+
+On branch `feat/terminal-plugin`. Two pieces of work:
+
+**Terminal plugin — agent can now drive the shared PTY.** Added `terminal_send` /
+`terminal_read` / `terminal_interrupt` tools (manifest `kind: "both"` + `tools`; a `msg.tool`
+branch in backend.cjs that reaches the same per-conversation PTY the pane drives). Reads are
+ANSI-stripped with optional `tailLines` for polling a monitor loop. Commit `99d80a5`.
+
+**bugs.txt (3 bugs), each its own commit, plan in `docs/BUGFIX_PLAN_2026-07-23.md`:**
+
+1. **Conversations dropdown was dead** (`3dcde8a`) — `.conv-dropdown` sat in the frameless
+   title bar's `-webkit-app-region: drag` region without opting out; the OS ate the click as a
+   window-drag. Added `no-drag`. Root cause was CSS, not the (correct) React state.
+2. **Links hijacked the whole app** (`8cb2e67`) — the main window's `webContents` had no
+   `will-navigate`/`setWindowOpenHandler` (only the `<webview>` guest was guarded). Added
+   `installMainNavigationGuard`: pins the frame to its own URL, routes http(s) to
+   `shell.openExternal`.
+3. **Startup script gave unfollowable instructions on other PCs** (`d61a8c9`) — bootstrap.mjs
+   detected only OS and assumed PowerShell. Now detects the real shell (ATELIER_SHELL hint from
+   each launcher + MSYSTEM/WSL/PSModulePath inference), drives all instructions from a per-shell
+   profile, prints the detected environment, and picks bash-vs-powershell for the auto-install.
+
+Gate green after each commit: typecheck, lint, format:check, `npm test` (461), `npm run build`.
+The pre-existing uncommitted work on this branch (PluginRail.tsx refactor + its `.rail-sep` CSS
+hunk, and the staged `plugins/examples/*` → `plugins/*` reorg) was deliberately left untouched —
+my commits include only my own files.
+
+Needs human spot-check (GUI behavior, not automatable headlessly):
+
+- Bug 1: click ☰ Conversations → the dropdown of past conversations opens; re-open / delete work.
+- Bug 2: click an http link in a chat message → it opens in the default browser and Atelier stays
+  put. Also test a plugin pane that calls `window.open`.
+- Bug 3: on a second machine / from cmd + Git Bash + WSL, run the startup script with a missing
+  prerequisite → the printed commands match the shell you're in.
+
 ## Overnight session 2026-07-21 — summary (read this first)
 
 Brandon's morning review of the 2026-07-20 batch (notifications good; explorer messy;

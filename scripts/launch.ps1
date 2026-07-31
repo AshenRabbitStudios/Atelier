@@ -3,6 +3,11 @@
 # (see docs/INSTALL.md). The bootstrap rebuilds only when sources changed, then starts
 # the app detached, so this window can close while Atelier keeps running.
 #
+# `--yes` runs it NON-INTERACTIVELY: the shortcut launches minimized, so a hidden
+# consent prompt would silently block the launch. With --yes the bootstrap auto-accepts
+# each fix (sync deps, rebuild a stale build, …) and just starts the app. A real failure
+# still stops and is surfaced below. The manual terminal path (run.bat) stays interactive.
+#
 #   Run:  powershell -ExecutionPolicy Bypass -File scripts\launch.ps1
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -10,7 +15,7 @@ $env:Path = "C:\Program Files\nodejs;$env:Path"
 $env:ATELIER_SHELL = 'powershell'
 Set-Location $root
 
-& node scripts\bootstrap.mjs run
+& node scripts\bootstrap.mjs run --yes
 if ($LASTEXITCODE -ne 0) {
   Read-Host 'Startup FAILED (see above). Press Enter to close (the app was not started)'
   exit $LASTEXITCODE

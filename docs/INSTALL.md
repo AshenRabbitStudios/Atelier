@@ -40,7 +40,9 @@ launch.ps1 (shortcut) ─┘
 - **`scripts/bootstrap.mjs` is the entire install/startup brain.** It must import
   only Node builtins — it runs before `npm install` has ever happened.
 - **`scripts/launch.ps1`** (Desktop-shortcut launcher) delegates to the same
-  bootstrap so build-staleness logic exists in exactly one place.
+  bootstrap so build-staleness logic exists in exactly one place. It passes `--yes`
+  so the shortcut runs unattended — the window launches minimized, where a consent
+  prompt would silently block the launch; a real failure still stops and is shown.
 
 ## The check pipeline (in order; each is check → explain → fix → re-check)
 

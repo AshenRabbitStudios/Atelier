@@ -1,6 +1,7 @@
 import { Fragment, memo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import {
   KNOWN_MODELS,
+  mergeModelOptions,
   type ContextBreakdown,
   type EffortLevel,
   type ForkPoint,
@@ -67,11 +68,9 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
       .models(instanceId)
       .then((list) => {
         if (!alive) return
-        // Start from the curated full list; append any extra full model IDs the
-        // SDK reports (skip the bare family aliases like sonnet/opus/haiku).
-        const have = new Set(KNOWN_MODELS.map((m) => m.value))
-        const extra = list.filter((m) => m.value.startsWith('claude-') && !have.has(m.value))
-        setModels([...KNOWN_MODELS, ...extra])
+        // Main already merged SDK-reported models over the curated fallback; merge again so a
+        // stale/failed IPC result still degrades to a usable list rather than an empty dropdown.
+        setModels(mergeModelOptions(list))
       })
       .catch(() => {})
     return () => {
@@ -511,21 +510,55 @@ export function ChatPanel({ instanceId }: { instanceId: string }) {
   )
 }
 
+/** How long the pointer must rest on the token count before the breakdown opens. */
+const CONTEXT_POP_DELAY_MS = 1000
+
 /**
- * Estimated context-size readout under the composer: a total token count that expands on hover into
- * a per-contributor breakdown (each plugin + the chat history), so you can see what is filling the
- * window. Values are estimates (chars≈tokens×4); the SDK reports true input_tokens only mid-turn.
+ * Estimated context-size readout under the composer: a total token count that expands into a
+ * per-contributor breakdown (each plugin + the chat history), so you can see what is filling the
+ * window. The breakdown covers the chat, so it only opens on a deliberate hover — the pointer must
+ * rest on the token text itself for a second, not just cross the bar.
+ * Values are estimates (chars≈tokens×4); the SDK reports true input_tokens only mid-turn.
  */
 function ContextSize({ breakdown }: { breakdown: ContextBreakdown | null }) {
+  const [open, setOpen] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const cancelPending = () => {
+    if (timer.current !== null) {
+      clearTimeout(timer.current)
+      timer.current = null
+    }
+  }
+  // Never leave a timer pointing at an unmounted component (panel closed mid-hover).
+  useEffect(() => cancelPending, [])
+
   if (!breakdown) return null
   const rows = breakdown.contributions.filter((c) => c.tokens > 0)
   const max = Math.max(1, ...rows.map((c) => c.tokens))
+  const close = () => {
+    cancelPending()
+    setOpen(false)
+  }
   return (
-    <div className="context-size" tabIndex={0}>
-      <span className="context-size-total">
+    <div className="context-size" onMouseLeave={close}>
+      <span
+        className="context-size-total"
+        tabIndex={0}
+        onMouseEnter={() => {
+          cancelPending()
+          timer.current = setTimeout(() => {
+            timer.current = null
+            setOpen(true)
+          }, CONTEXT_POP_DELAY_MS)
+        }}
+        onMouseLeave={cancelPending}
+        onFocus={() => setOpen(true)}
+        onBlur={close}
+      >
         ~{fmtTokens(breakdown.totalTokens)} tokens in context
       </span>
-      <div className="context-size-pop" role="tooltip">
+      <div className={`context-size-pop${open ? ' is-open' : ''}`} role="tooltip">
         <div className="context-size-pop-head">Estimated context size</div>
         {rows.length === 0 ? (
           <div className="context-size-empty">Nothing in context yet.</div>

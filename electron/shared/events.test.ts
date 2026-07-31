@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
+  KNOWN_MODELS,
+  mergeModelOptions,
+  supportsAdaptiveThinking,
   AnswerQuestionSchema,
   ConversationRefSchema,
   CreateOptsSchema,
@@ -785,5 +788,60 @@ describe('plugin host schemas', () => {
         }).success
       ).toBe(false)
     })
+  })
+})
+
+describe('mergeModelOptions', () => {
+  const sdk = (value: string, extra: Record<string, unknown> = {}) => ({
+    value,
+    displayName: value,
+    ...extra
+  })
+
+  it('falls back to the curated list when the SDK reports nothing', () => {
+    expect(mergeModelOptions([])).toEqual(KNOWN_MODELS)
+  })
+
+  it('lets the SDK win outright on a conflict (no curated drift)', () => {
+    // Curated says Sonnet 4.6 has no xhigh; the live SDK says it does. SDK must win.
+    const merged = mergeModelOptions([
+      sdk('claude-sonnet-4-6', { supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'] })
+    ])
+    const hit = merged.filter((m) => m.value === 'claude-sonnet-4-6')
+    expect(hit).toHaveLength(1) // not duplicated
+    expect(hit[0].supportedEffortLevels).toContain('xhigh')
+  })
+
+  it('keeps curated models the SDK does not report, so a new ID stays selectable', () => {
+    const merged = mergeModelOptions([sdk('claude-opus-4-8')])
+    expect(merged.map((m) => m.value)).toContain('claude-opus-5')
+  })
+
+  it('preserves SDK order first, then curated extras', () => {
+    const merged = mergeModelOptions([sdk('haiku'), sdk('sonnet')])
+    expect(merged.slice(0, 2).map((m) => m.value)).toEqual(['haiku', 'sonnet'])
+  })
+})
+
+describe('supportsAdaptiveThinking', () => {
+  const list = [
+    { value: 'adaptive-one', displayName: 'A', supportsAdaptiveThinking: true },
+    { value: 'legacy-one', displayName: 'L', supportsAdaptiveThinking: false },
+    { value: 'silent-one', displayName: 'S' }
+  ]
+
+  it('reads the flag straight off the merged list', () => {
+    expect(supportsAdaptiveThinking('adaptive-one', list)).toBe(true)
+    expect(supportsAdaptiveThinking('legacy-one', list)).toBe(false)
+  })
+
+  it('resolves undefined/empty to the "default" entry', () => {
+    const withDefault = [{ value: 'default', displayName: 'D', supportsAdaptiveThinking: true }]
+    expect(supportsAdaptiveThinking(undefined, withDefault)).toBe(true)
+  })
+
+  it('is false for an unknown or flagless model (never send adaptive on a guess)', () => {
+    expect(supportsAdaptiveThinking('silent-one', list)).toBe(false)
+    expect(supportsAdaptiveThinking('never-heard-of-it', list)).toBe(false)
   })
 })

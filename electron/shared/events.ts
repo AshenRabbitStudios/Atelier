@@ -19,31 +19,105 @@ export interface ModelOption {
   disabled?: boolean
   /** Effort levels this model accepts; omitted/empty = model has no effort control. */
   supportedEffortLevels?: EffortLevel[]
+  /**
+   * Model takes `thinking: { type: 'adaptive' }`. Older models only accept budget_tokens thinking
+   * and REJECT adaptive, so this decides whether the agent may ask for summarized reasoning.
+   * Reported per-model by the SDK; the curated entries below carry a best-effort value for models
+   * the SDK does not (yet) list.
+   */
+  supportsAdaptiveThinking?: boolean
 }
 
 /**
- * Curated full list of selectable models (specific IDs, not just family aliases).
- * `supportedModels()` only returns aliases, so we pre-populate these and merge in
- * any additional full IDs the SDK reports at runtime. Source: claude-api reference.
+ * Curated fallback list of selectable models. The SDK's `supportedModels()` is the SOURCE OF TRUTH
+ * at runtime (see mergeModelOptions) — it reports live effort levels and adaptive-thinking support,
+ * so this list must never override it. Its only jobs are (a) to seed the dropdown before/if the SDK
+ * call fails and (b) to carry forward-looking IDs the SDK has not started reporting yet (a model
+ * released today, or one gated to a plan). Values here go stale by design; do not hand-tune them to
+ * match the SDK. Source: claude-api reference.
  */
 const FULL_EFFORT: EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max']
 const NO_XHIGH: EffortLevel[] = ['low', 'medium', 'high', 'max']
+const ADAPTIVE = { supportsAdaptiveThinking: true } as const
 export const KNOWN_MODELS: ModelOption[] = [
-  { value: 'default', displayName: 'Default (recommended)', supportedEffortLevels: FULL_EFFORT },
-  { value: 'claude-fable-5', displayName: 'Fable 5', supportedEffortLevels: FULL_EFFORT },
-  { value: 'claude-opus-4-8', displayName: 'Opus 4.8', supportedEffortLevels: FULL_EFFORT },
-  { value: 'claude-opus-4-7', displayName: 'Opus 4.7', supportedEffortLevels: FULL_EFFORT },
-  { value: 'claude-opus-4-6', displayName: 'Opus 4.6', supportedEffortLevels: NO_XHIGH },
+  {
+    value: 'default',
+    displayName: 'Default (recommended)',
+    supportedEffortLevels: FULL_EFFORT,
+    ...ADAPTIVE
+  },
+  {
+    value: 'claude-fable-5',
+    displayName: 'Fable 5',
+    supportedEffortLevels: FULL_EFFORT,
+    ...ADAPTIVE
+  },
+  {
+    value: 'claude-opus-5',
+    displayName: 'Opus 5',
+    supportedEffortLevels: FULL_EFFORT,
+    ...ADAPTIVE
+  },
+  {
+    value: 'claude-opus-4-8',
+    displayName: 'Opus 4.8',
+    supportedEffortLevels: FULL_EFFORT,
+    ...ADAPTIVE
+  },
+  {
+    value: 'claude-opus-4-7',
+    displayName: 'Opus 4.7',
+    supportedEffortLevels: FULL_EFFORT,
+    ...ADAPTIVE
+  },
+  {
+    value: 'claude-opus-4-6',
+    displayName: 'Opus 4.6',
+    supportedEffortLevels: NO_XHIGH,
+    ...ADAPTIVE
+  },
   {
     value: 'claude-opus-4-5',
     displayName: 'Opus 4.5',
     supportedEffortLevels: ['low', 'medium', 'high']
   },
   { value: 'claude-opus-4-1', displayName: 'Opus 4.1' },
-  { value: 'claude-sonnet-4-6', displayName: 'Sonnet 4.6', supportedEffortLevels: NO_XHIGH },
+  {
+    value: 'claude-sonnet-5',
+    displayName: 'Sonnet 5',
+    supportedEffortLevels: FULL_EFFORT,
+    ...ADAPTIVE
+  },
+  {
+    value: 'claude-sonnet-4-6',
+    displayName: 'Sonnet 4.6',
+    supportedEffortLevels: NO_XHIGH,
+    ...ADAPTIVE
+  },
   { value: 'claude-sonnet-4-5', displayName: 'Sonnet 4.5' },
   { value: 'claude-haiku-4-5', displayName: 'Haiku 4.5' }
 ]
+
+/**
+ * The dropdown list: everything the SDK reports (authoritative, in its order), then any curated
+ * model the SDK did not report, so a just-released or plan-gated ID stays selectable. SDK entries
+ * win outright on conflict — that is what stops the hand-maintained metadata above from drifting
+ * (e.g. Sonnet gaining `xhigh`). An empty/failed SDK list degrades to the curated list.
+ */
+export function mergeModelOptions(sdkReported: ModelOption[]): ModelOption[] {
+  if (sdkReported.length === 0) return [...KNOWN_MODELS]
+  const reported = new Set(sdkReported.map((m) => m.value))
+  return [...sdkReported, ...KNOWN_MODELS.filter((m) => !reported.has(m.value))]
+}
+
+/**
+ * Whether `model` accepts adaptive thinking, judged against a merged list. Unknown models (a brand
+ * new ID we have never seen) default to FALSE: sending `type: 'adaptive'` to a model that rejects it
+ * fails the turn, whereas omitting it merely falls back to the preset's default.
+ */
+export function supportsAdaptiveThinking(model: string | undefined, list: ModelOption[]): boolean {
+  return list.find((m) => m.value === (model || 'default'))?.supportsAdaptiveThinking === true
+}
 
 // ---- Canonical transcript (parsed from the on-disk session JSONL) ----
 

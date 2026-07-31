@@ -21,6 +21,9 @@ import {
   type BashStreamMessage,
   type BranchInfo,
   type ContextBreakdown,
+  KNOWN_MODELS,
+  mergeModelOptions,
+  supportsAdaptiveThinking,
   type ContextContribution,
   type CreateOpts,
   type EffortLevel,
@@ -123,19 +126,15 @@ class InputQueue implements AsyncIterable<SDKUserMessage> {
 
 // Narrow views over the Anthropic streaming/content shapes we actually read.
 // Kept local + defensive so a minor SDK version drift can't crash the pump.
-// Models that accept adaptive thinking (claude-api reference). For these we force summarized
-// display so the chain of reasoning is visible — Opus 4.8/4.7/Fable default `display` to 'omitted'
-// (empty thinking blocks). Older models (Opus 4.1, Sonnet 4.5, Haiku 4.5) only take budget_tokens
-// thinking and would reject `type: 'adaptive'`, so for those we leave `thinking` unset and let the
-// claude_code preset's default stand. 'default'/unset resolves to the recommended (adaptive) model.
-const ADAPTIVE_THINKING_MODELS = new Set([
-  'default',
-  'claude-fable-5',
-  'claude-opus-4-8',
-  'claude-opus-4-7',
-  'claude-opus-4-6',
-  'claude-sonnet-4-6'
-])
+// Which models accept adaptive thinking is READ FROM THE SDK (`supportsAdaptiveThinking`), not
+// hardcoded — a hand-kept list silently goes wrong as models ship. For adaptive-capable models we
+// force summarized display so the chain of reasoning is visible (Opus/Fable default `display` to
+// 'omitted', i.e. empty thinking blocks); older models only take budget_tokens thinking and would
+// REJECT `type: 'adaptive'`, so we leave `thinking` unset and let the claude_code preset default.
+//
+// Process-wide cache: `supportedModels()` needs a live query, but bind() must decide synchronously.
+// Seeded with the curated fallback and replaced by the merged SDK list on the first models() call.
+let modelCatalog: ModelOption[] = KNOWN_MODELS
 
 // Sent automatically (no user action) when a usage-limit interrupt clears and auto-resume is on.
 const AUTO_RESUME_PROMPT = 'Tokens are back — resume where you left off.'
@@ -245,6 +244,11 @@ class Session {
   // release (maybeRelease), where no turn can be in flight. Cleared by any rebind — a fresh bind
   // always reads the current pluginState.
   private pendingRebind = false
+  // Claude called its `clear_own_context` tool during a turn. Clearing mid-stream would tear down
+  // the running query, so we defer: the flag is honored in the `result` handler once the pipeline
+  // is idle (no turn in flight or queued). Cleared on abort — an interrupted turn is not a clean
+  // point to wipe history.
+  private pendingClear = false
   private q!: Query
   private currentMessageId = ''
   // Live token usage for the in-flight turn (reset each send). Output is summed across the turn's
@@ -403,7 +407,7 @@ class Session {
       // blocks arrive empty, so a long reasoning phase shows only a bare "Thinking…" spinner. With
       // 'summarized' the chain of reasoning streams live into the (auto-expanding) thinking block.
       // Only for adaptive-capable models; older models reject `type: 'adaptive'`.
-      ...(ADAPTIVE_THINKING_MODELS.has(this.model || 'default')
+      ...(supportsAdaptiveThinking(this.model, modelCatalog)
         ? { thinking: { type: 'adaptive' as const, display: 'summarized' as const } }
         : {}),
       // Load this project's CLAUDE.md (requires the claude_code preset too); append the standing
@@ -641,6 +645,23 @@ class Session {
     })
   }
 
+  /**
+   * Claude's `clear_own_context` tool asks for a clear. It fires while a turn is in flight (the tool
+   * runs mid-stream), so we never clear synchronously here — we flag it and let the `result` handler
+   * fire it once the pipeline drains. If somehow called with nothing in flight, clear right away.
+   */
+  requestClearAfterTurn(): void {
+    this.pendingClear = true
+    if (!this.ledger.busy) this.firePendingClear()
+  }
+
+  /** Honor a deferred clear request (see requestClearAfterTurn). No-op if none is pending. */
+  private firePendingClear(): void {
+    if (!this.pendingClear) return
+    this.pendingClear = false
+    this.clearChat()
+  }
+
   /** Save: edit a message's text on disk (no regen), then rebind so the SDK reloads it. */
   saveEdit(uuid: string, newText: string): TranscriptMessage[] {
     if (!this.sessionId) return []
@@ -847,13 +868,24 @@ class Session {
     }, delay)
   }
 
+  /**
+   * The dropdown list, SDK-first. Also refreshes the process-wide catalog bind() reads for its
+   * adaptive-thinking decision, so that stays in step with the live SDK instead of a hardcoded set.
+   */
   async models(): Promise<ModelOption[]> {
     const list = await this.q.supportedModels()
-    return list.map((m) => ({
-      value: m.value,
-      displayName: m.displayName,
-      ...(m.supportedEffortLevels ? { supportedEffortLevels: m.supportedEffortLevels } : {})
-    }))
+    const merged = mergeModelOptions(
+      list.map((m) => ({
+        value: m.value,
+        displayName: m.displayName,
+        ...(m.supportedEffortLevels ? { supportedEffortLevels: m.supportedEffortLevels } : {}),
+        ...(typeof m.supportsAdaptiveThinking === 'boolean'
+          ? { supportsAdaptiveThinking: m.supportsAdaptiveThinking }
+          : {})
+      }))
+    )
+    modelCatalog = merged
+    return merged
   }
 
   async setModel(model: string): Promise<void> {
@@ -1305,6 +1337,11 @@ class Session {
         this.maybeRelease() // next queued turn (if any) goes out now
         this.sync()
         this.onChange?.() // bump updatedAt; persist any new branch from this turn
+        // A deferred clear_own_context fires only after a clean turn AND once the pipeline is idle
+        // (no queued turn left to run against the about-to-be-abandoned session). An abort is not a
+        // clean point to wipe history, so drop the request instead.
+        if (aborted) this.pendingClear = false
+        else if (this.pendingClear && !this.ledger.busy) this.firePendingClear()
         break
       }
       case 'rate_limit_event': {
@@ -1569,6 +1606,11 @@ export class AgentManager {
 
   clearChat(instanceId: string): void {
     this.require(instanceId).clearChat()
+  }
+
+  /** Claude's `clear_own_context` tool: defer a clear until the in-flight turn settles. */
+  requestClearAfterTurn(instanceId: string): void {
+    this.require(instanceId).requestClearAfterTurn()
   }
 
   /** Permanently delete a conversation: its SDK transcripts + manifest + plugin data. */

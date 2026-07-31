@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Cognition</title>
+    <title>Persistence</title>
     <!-- Host runtime injects window.atelier; the plugin reaches the app only through it. -->
     <script src="atelier-plugin://__runtime__/atelier.js"></script>
     <style>
@@ -94,9 +94,44 @@
           color 0.12s,
           border-color 0.12s;
       }
-      .tab-clear:hover {
+      .tab-clear:hover,
+      .tab-clear.armed {
         color: #e0533a;
         border-color: #e0533a;
+      }
+
+      /* ── Auto-clear footer ───────────────────────────────────────────── */
+      /* A conversation-level setting: authorizes the agent to clear the chat on its own once this
+         working state suffices. Not a tab — it governs the whole pane, so it sits in a footer. */
+      .autoclear {
+        flex: 0 0 auto;
+        border-top: 1px solid var(--border, #252b37);
+        background: var(--bg, #0f1117);
+        padding: 8px 12px;
+      }
+      .autoclear-toggle {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        cursor: pointer;
+        color: var(--dim, #8b97ae);
+      }
+      .autoclear-toggle input {
+        margin: 1px 0 0;
+        accent-color: var(--accent, #5b9cff);
+        cursor: pointer;
+      }
+      .autoclear-label {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        font-size: 11px;
+        font-weight: 600;
+      }
+      .autoclear-sub {
+        font-weight: 400;
+        font-size: 10px;
+        color: var(--faint, #5e6677);
       }
 
       /* ── Panels ──────────────────────────────────────────────────────── */
@@ -520,6 +555,20 @@
         ></textarea>
       </details>
     </section>
+
+    <!-- Authorizes the agent's built-in clear_own_context tool to self-initiate a clear. Off by
+         default: with it off, the agent may only clear on an explicit user command. -->
+    <footer class="autoclear">
+      <label class="autoclear-toggle">
+        <input type="checkbox" id="autoclear" />
+        <span class="autoclear-label">
+          Let Claude clear the chat itself
+          <span class="autoclear-sub"
+            >when this working state is enough to continue without the message history</span
+          >
+        </span>
+      </label>
+    </footer>
 
     <script>
       // One pane, four context documents. Each sub-pane reads/writes its own export key through
@@ -974,15 +1023,33 @@
       }
 
       // ── Clear all agent-authored state ─────────────────────────────────
+      // The plugin sandbox has no window.confirm()/prompt() (allow-modals is not granted), so the
+      // confirmation is an inline two-step: the first click ARMS the button ("Confirm?"), a second
+      // click within a short window runs the clear. Any click elsewhere, or a timeout, disarms it.
       function setupClear() {
         const btn = document.getElementById('clear-agent')
         if (!btn) return
+        const label = btn.textContent.trim()
+        let armed = false
+        let disarmTimer = null
+
+        function disarm() {
+          armed = false
+          clearTimeout(disarmTimer)
+          btn.textContent = label
+          btn.classList.remove('armed')
+        }
+
         btn.addEventListener('click', async () => {
-          const ok = window.confirm(
-            'Delete everything the agent wrote — mental model, working memory, plan, and problems?\n\n' +
-              'Your North Star and the usage guides are kept. This cannot be undone.'
-          )
-          if (!ok) return
+          if (!armed) {
+            armed = true
+            btn.textContent = 'Confirm?'
+            btn.classList.add('armed')
+            clearTimeout(disarmTimer)
+            disarmTimer = setTimeout(disarm, 3500)
+            return
+          }
+          disarm()
           for (const clear of clearers) {
             try {
               await clear()
@@ -991,12 +1058,39 @@
             }
           }
         })
+
+        // A click anywhere but the button cancels a pending confirm (the button's own handler runs
+        // first and, since e.target is the button, this leaves an in-progress arm/confirm intact).
+        document.addEventListener('click', (e) => {
+          if (armed && e.target !== btn) disarm()
+        })
+      }
+
+      // ── Auto-clear authorization ───────────────────────────────────────
+      // The checkbox writes the `auto-clear-context` flag the host reads to decide whether the
+      // agent's clear_own_context tool may self-initiate. Persisted per conversation like every
+      // other value here; unchecked means only an explicit user command can clear the chat.
+      async function wireAutoClear() {
+        const box = document.getElementById('autoclear')
+        box.addEventListener('change', async () => {
+          try {
+            await window.atelier.storage.set('auto-clear-context', box.checked)
+          } catch (_) {
+            // transient save failure; the next toggle retries
+          }
+        })
+        try {
+          box.checked = (await window.atelier.storage.get('auto-clear-context')) === true
+        } catch (_) {
+          // host may not be ready yet
+        }
       }
 
       // ── Boot ───────────────────────────────────────────────────────────
       window.atelier.on('load', async () => {
         setupTabs()
         setupClear()
+        wireAutoClear()
         await Promise.all([
           wireTextareaDoc(panel('north-star'), 'north-star', { clearable: false }),
           wireTextareaDoc(panel('model'), 'model', {}),

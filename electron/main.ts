@@ -89,6 +89,7 @@ import {
   buildContextBlock,
   buildContextMcpServers,
   buildSystemInstruction,
+  clearContextAuthorized,
   contextStorageKey,
   pluginContextContributions,
   pluginValueOrDefault
@@ -259,7 +260,15 @@ const agents = new AgentManager(
     )
     // The built-in `atelier` introspection server is always present (independent of enablement) so
     // the agent can always inspect its environment; merged with the per-conversation servers.
-    const atelier = buildAtelierToolServer(reg, pluginState)
+    // The built-in clear_own_context tool: defer the clear to turn-end (never mid-stream), and gate
+    // a self-initiated clear on a plugin having set the auto-clear flag (resolved at call time so a
+    // just-toggled checkbox is seen without a rebind).
+    const atelier = buildAtelierToolServer(
+      reg,
+      pluginState,
+      () => agents.requestClearAfterTurn(conversationId),
+      () => clearContextAuthorized(conversationId, pluginState)
+    )
     return { ...atelier, ...(ctx ?? {}), ...(toolServers ?? {}) }
   },
   // System-prompt append: the always-on environment briefing first (so a fresh conversation knows

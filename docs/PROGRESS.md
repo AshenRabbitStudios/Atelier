@@ -1,5 +1,23 @@
 # PROGRESS.md — Atelier build log
 
+## Session 2026-07-24 — agent-initiated Clear chat (`clear_own_context`)
+
+On branch `feat/terminal-plugin`. Gate green (typecheck, lint, format:check, `npm test` **474**).
+
+Gave Claude a built-in tool to clear its own chat and continue from plugin state. **The tool is
+Claude's, not a plugin's** — registered in the always-on `atelier` server (`introspection.ts`), so
+it works even with no plugin enabled. A plugin only _authorizes_ self-initiated use by setting a
+truthy `auto-clear-context` storage flag (cognition's new footer checkbox);
+`clearContextAuthorized` (contextTools.ts) scans enabled plugins for it, resolved at call time (no
+rebind needed after a toggle). Policy in the tool description: never clear except (1) explicit user
+command → `userRequested:true`, always allowed; or (2) plugin-authorized + agent judges state
+sufficient (may still decline mid-thought) → refused if unauthorized. The clear is **deferred to
+turn-end** (`AgentManager.pendingClear`, fired in the `result` handler once `!ledger.busy`, dropped
+on abort) because the tool runs mid-stream and a synchronous `clearChat()` would tear down the live
+query. Pinned context docs survive the clear (they live in `ctx:*` storage) and re-inject into the
+fresh session. Needs human spot-check: the end-to-end clear-after-turn behavior in a live app run
+(the deferred-fire path isn't exercised by unit tests — only the auth predicate is).
+
 ## Session 2026-07-23 — bugs.txt batch #2: global usage + context-size readout (read this first)
 
 On branch `feat/terminal-plugin`. Two bugs.txt items, gate green (typecheck, lint, format:check,

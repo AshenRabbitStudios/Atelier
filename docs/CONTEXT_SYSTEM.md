@@ -112,6 +112,20 @@ the doc value, framed as fixed author instructions — but the agent **cannot ed
 In the panes this is a collapsible "Usage instructions" footer (`<details>`), so it stays out of
 the way of the main editor. Generic: any context-export plugin gets this for free.
 
+## Agent-initiated Clear chat (`clear_own_context`)
+
+Because a context document survives Clear chat (it lives in `ctx:*` storage, not the transcript),
+the agent can be given the reverse capability: clear its own chat and continue from plugin state
+alone. `clear_own_context` is a built-in tool in the always-on `atelier` server — Claude always
+has it. Its description forbids use except in two cases: (1) the user gives an **explicit** command
+to clear (not implied, not "the history is messy" — an actual instruction), passed as
+`userRequested: true`; or (2) a plugin has authorized auto-clear **and** the agent judges its
+plugin state sufficient to continue (it may still decline if mid-thought). A plugin authorizes by
+setting a truthy `auto-clear-context` flag in its storage (cognition's footer checkbox);
+`clearContextAuthorized` scans enabled plugins for it and the tool refuses a self-initiated clear
+without it. The clear is deferred to turn-end (`AgentManager.pendingClear`) since the tool runs
+mid-turn; on the next fresh session the pinned context docs are re-injected automatically.
+
 ## Build status
 
 The shared infrastructure (context store, host `context` API, per-export tool generation,

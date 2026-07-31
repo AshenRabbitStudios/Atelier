@@ -156,7 +156,9 @@ export function describePlugin(
  */
 export function buildAtelierToolServer(
   registry: RegistryView,
-  pluginState: Record<string, ConversationPluginState>
+  pluginState: Record<string, ConversationPluginState>,
+  requestClear: () => void,
+  isClearAuthorized: () => boolean
 ): NonNullable<Options['mcpServers']> {
   const listPlugins = tool(
     'list_plugins',
@@ -187,11 +189,65 @@ export function buildAtelierToolServer(
       content: [{ type: 'text' as const, text: pluginAuthoringGuide() }]
     })
   )
+  const clearContext = tool(
+    'clear_own_context',
+    "Clear THIS conversation's chat history — wipe every prior message and start a fresh session. " +
+      "Your persistent plugin state (context documents like the cognition plugin's mental model, " +
+      'working memory, plan, and problems) SURVIVES and is re-injected into the fresh session; only ' +
+      'the chat transcript is discarded. This is irreversible: the cleared messages are gone. The ' +
+      'clear takes effect after the current turn finishes.\n\n' +
+      'You should only call this tool in one situation:\n' +
+      '1. A plugin is enabled that allows you to capture your state/persistence (like the cognition ' +
+      "plugin), and it's emitting a flag to self-clear, AND you've committed your state there " +
+      'sufficiently to continue fully after the clear. If this condition is true, prioritize ' +
+      'clearing state every time a current train of thought is completed in the chat context. If ' +
+      "chat context is temporarily more advantageous for a line of reasoning, it's fine to wait, " +
+      'but you want to minimize token use, so commit to that state plugin and clear when you can.',
+    {
+      reason: z.string().min(1).describe('Brief note on why clearing now is right.'),
+      userRequested: z
+        .boolean()
+        .describe(
+          'true only if the user gave an explicit, direct command to clear the history this turn. ' +
+            'false for a self-initiated clear under a plugin authorization.'
+        )
+    },
+    async (args: { reason: string; userRequested: boolean }) => {
+      // Machine-enforceable half of the policy: a self-initiated clear is allowed ONLY when a
+      // plugin has actually set the authorization flag. The explicit-user-command path (condition 1)
+      // is a judgment the tool trusts to `userRequested`, since it cannot inspect the conversation.
+      if (!args.userRequested && !isClearAuthorized()) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text:
+                'Refused: no plugin has authorized auto-clear, so a self-initiated clear is not ' +
+                'allowed. Only clear when the user explicitly commands it (pass userRequested: ' +
+                'true), or after a plugin turns its auto-clear flag on. Ask the user if unsure.'
+            }
+          ],
+          isError: true as const
+        }
+      }
+      requestClear()
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text:
+              'Chat history will be cleared once this turn finishes. Your plugin context documents ' +
+              'carry over into the fresh session.'
+          }
+        ]
+      }
+    }
+  )
   return {
     atelier: createSdkMcpServer({
       name: 'atelier',
       version: '1.0.0',
-      tools: [listPlugins, describeTool, authoringGuide]
+      tools: [listPlugins, describeTool, authoringGuide, clearContext]
     })
   }
 }

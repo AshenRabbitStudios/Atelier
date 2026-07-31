@@ -17,6 +17,24 @@ import { pluginStorageGet, pluginStorageSet } from './pluginStorage.js'
 
 const APPROX_CHARS_PER_TOKEN = 4
 
+// Storage key an enabled plugin sets (via the sandbox `storage` API) to authorize the agent's
+// built-in `clear_own_context` tool to self-initiate a clear — i.e. "I am holding enough persistent
+// state to continue without the chat history." Truthy when authorized. Not a manifest field, so any
+// plugin that maintains cross-clear working state (cognition today) opts in with a single flag.
+export const CLEAR_CONTEXT_AUTHORIZED_KEY = 'auto-clear-context'
+
+/** True if any plugin enabled for this conversation has set the auto-clear authorization flag. */
+export function clearContextAuthorized(
+  conversationId: string,
+  pluginState: Record<string, ConversationPluginState>
+): boolean {
+  for (const [pluginId, st] of Object.entries(pluginState)) {
+    if (!st.enabled) continue
+    if (pluginStorageGet(conversationId, pluginId, CLEAR_CONTEXT_AUTHORIZED_KEY)) return true
+  }
+  return false
+}
+
 /** Storage key for an export's value (shared by the host API handlers and these helpers). */
 export function contextStorageKey(exportKey: string): string {
   return `ctx:${exportKey}`
@@ -156,13 +174,26 @@ export function buildContextBlock(
       : ''
     sections.push(`## ${ex.label}\n${head}${value}`.trimEnd())
   }
-  if (sections.length === 0) return ''
+  // The auto-clear authorization is otherwise invisible to the agent — it silently gates the
+  // clear_own_context tool at call time. Surface it here so the agent actually knows it may
+  // self-clear (and can act on the cognition guide's "clear often" nudge) instead of only finding
+  // out by attempting a clear. Read fresh each turn, so a just-toggled checkbox is reflected next turn.
+  const authorized = clearContextAuthorized(conversationId, pluginState)
+  if (sections.length === 0 && !authorized) return ''
+  const autoClearNote = authorized
+    ? '\n\nAuto-clear is authorized for this conversation. When the working state above already ' +
+      'captures your current line of reasoning well enough to continue WITHOUT the chat history, ' +
+      'you may clear it yourself by calling clear_own_context (with userRequested: false) — this ' +
+      'keeps token use down. It is your judgment call, not automatic: keep the history whenever the ' +
+      'exact recent messages hold something the persistent state does not yet reflect.'
+    : ''
   return (
     '<atelier-context>\n' +
     'Your persistent working state for this conversation, carried across turns — treat it as ' +
     'your own notes from earlier and continue it. Update any section by calling its set_* tool ' +
     'with the full new content.\n\n' +
     sections.join('\n\n') +
+    autoClearNote +
     '\n</atelier-context>'
   )
 }

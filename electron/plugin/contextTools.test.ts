@@ -11,6 +11,8 @@ import {
   buildContextBlock,
   buildContextMcpServers,
   buildSystemInstruction,
+  CLEAR_CONTEXT_AUTHORIZED_KEY,
+  clearContextAuthorized,
   contextStorageKey,
   estimateTranscriptTokens,
   guideStorageKey,
@@ -116,6 +118,31 @@ describe('buildContextBlock', () => {
   it('skips a read-only export with no value, even when a guide default exists', () => {
     pluginStorageSet('c1', 'ns', guideStorageKey('star'), 'Orient toward the star.')
     expect(buildContextBlock(NS_REG, 'c1', { ns: pinned(['star']) })).toBe('')
+  })
+
+  it('appends the auto-clear note when a plugin has authorized it', () => {
+    pluginStorageSet('c1', 'mm', contextStorageKey('model'), 'A house has 3 rooms')
+    pluginStorageSet('c1', 'mm', CLEAR_CONTEXT_AUTHORIZED_KEY, true)
+    const block = buildContextBlock(REG, 'c1', { mm: pinned(['model']) })
+    expect(block).toContain('A house has 3 rooms')
+    expect(block).toContain('Auto-clear is authorized')
+    expect(block).toContain('clear_own_context')
+  })
+
+  it('omits the auto-clear note when no plugin has authorized it', () => {
+    pluginStorageSet('c1', 'mm', contextStorageKey('model'), 'A house has 3 rooms')
+    expect(buildContextBlock(REG, 'c1', { mm: pinned(['model']) })).not.toContain('Auto-clear')
+  })
+
+  it('emits the block with just the auto-clear note when authorized but nothing is pinned', () => {
+    pluginStorageSet('c1', 'mm', CLEAR_CONTEXT_AUTHORIZED_KEY, true)
+    const block = buildContextBlock(REG, 'c1', { mm: pinned([]) })
+    expect(block).toContain('<atelier-context>')
+    expect(block).toContain('Auto-clear is authorized')
+  })
+
+  it('still empty when unauthorized and nothing is pinned', () => {
+    expect(buildContextBlock(REG, 'c1', { mm: pinned([]) })).toBe('')
   })
 })
 
@@ -420,5 +447,31 @@ describe('pluginValueOrDefault', () => {
     // An explicit empty string is respected — it does NOT snap back to the default.
     pluginStorageSet('cX', 'p', guideStorageKey('model'), '')
     expect(pluginValueOrDefault(reg, 'cX', 'p', guideStorageKey('model'))).toBe('')
+  })
+})
+
+describe('clearContextAuthorized', () => {
+  it('is false when no plugin has set the flag', () => {
+    expect(clearContextAuthorized('c1', { mm: pinned([]) })).toBe(false)
+  })
+
+  it('is true when an enabled plugin set the flag truthy', () => {
+    pluginStorageSet('c1', 'mm', CLEAR_CONTEXT_AUTHORIZED_KEY, true)
+    expect(clearContextAuthorized('c1', { mm: pinned([]) })).toBe(true)
+  })
+
+  it('ignores the flag on a disabled plugin', () => {
+    pluginStorageSet('c1', 'mm', CLEAR_CONTEXT_AUTHORIZED_KEY, true)
+    expect(clearContextAuthorized('c1', { mm: { enabled: false, pinnedExports: [] } })).toBe(false)
+  })
+
+  it('treats a falsy flag (unchecked) as not authorized', () => {
+    pluginStorageSet('c1', 'mm', CLEAR_CONTEXT_AUTHORIZED_KEY, false)
+    expect(clearContextAuthorized('c1', { mm: pinned([]) })).toBe(false)
+  })
+
+  it('is scoped per conversation', () => {
+    pluginStorageSet('c1', 'mm', CLEAR_CONTEXT_AUTHORIZED_KEY, true)
+    expect(clearContextAuthorized('c2', { mm: pinned([]) })).toBe(false)
   })
 })
